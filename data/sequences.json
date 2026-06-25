@@ -1,0 +1,82 @@
+[
+  {
+    "id": "no-answer",
+    "trigger": "no-answer",
+    "label": "No Answer",
+    "description": "Fires when the call rings but nobody picks up.",
+    "enabled": true,
+    "steps": [
+      {
+        "delayMinutes": 0,
+        "channel": "sms",
+        "message": "Hi {{firstName}}, this is {{agentName}} - I tried calling you about your property at {{address}}. I would love to connect when you have a moment. Feel free to call or text me back at {{agentPhone}}."
+      },
+      {
+        "delayMinutes": 1440,
+        "channel": "sms",
+        "message": "Hey {{firstName}}, just following up! I specialize in this neighborhood and have some ideas that could help. When is a good time to chat? - {{agentName}}"
+      }
+    ]
+  },
+  {
+    "id": "voicemail",
+    "trigger": "voicemail",
+    "label": "Left Voicemail",
+    "description": "Fires when an answering machine is detected.",
+    "enabled": true,
+    "steps": [
+      {
+        "delayMinutes": 0,
+        "channel": "sms",
+        "message": "Hi {{firstName}}, I just left you a voicemail! I am {{agentName}} and I had a quick question about your property at {{address}}. Text me back here or call {{agentPhone}} when you get a chance."
+      }
+    ]
+  },
+  {
+    "id": "short-call",
+    "trigger": "short-call",
+    "label": "Short Call (under 30s)",
+    "description": "Fires when someone picks up but hangs up quickly.",
+    "enabled": true,
+    "steps": [
+      {
+        "delayMinutes": 0,
+        "channel": "sms",
+        "message": "Hi {{firstName}}, looks like we got cut off! This is {{agentName}} - I was calling about {{address}}. Happy to connect via text if that is easier. {{agentPhone}}"
+      }
+    ]
+  },
+  {
+    "id": "hot-lead",
+    "trigger": "hot-lead",
+    "label": "Hot Lead",
+    "description": "Fires when you mark a contact as a Hot Lead after a call.",
+    "enabled": true,
+    "steps": [
+      {
+        "delayMinutes": 0,
+        "channel": "sms",
+        "message": "Hi {{firstName}}, great talking with you! As promised, here is my info: {{agentName}}, {{agentPhone}}. I will follow up soon about next steps for {{address}}."
+      },
+      {
+        "delayMinutes": 60,
+        "channel": "sms",
+        "message": "Hey {{firstName}}, {{agentName}} again. I pulled some comps for your area - the numbers look really strong right now. Want me to send them over?"
+      }
+    ]
+  },
+  {
+    "id": "callback",
+    "trigger": "callback",
+    "label": "Callback Scheduled",
+    "description": "Fires when you log a Callback Scheduled disposition.",
+    "enabled": true,
+    "steps": [
+      {
+        "delayMinutes": 0,
+        "channel": "sms",
+        "message": "Hi {{firstName}}, it is {{agentName}}! Just confirming our call - looking forward to connecting. My number is {{agentPhone}} if anything changes."
+      }
+    ]
+  }
+]

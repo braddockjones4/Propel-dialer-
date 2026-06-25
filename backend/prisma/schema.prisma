@@ -1,0 +1,137 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Contact {
+  id          String    @id @default(cuid())
+  firstName   String
+  lastName    String
+  phone       String    @unique
+  address     String?
+  city        String?
+  state       String?
+  zip         String?
+  email       String?
+  source      String    @default("manual") // expired, fsbo, circle, past-client, manual
+  status      String    @default("new")    // new, contacted, callback, hot, appointment, closed, dnc
+  notes       String?
+  leadScore   Int?      // 0-100 AI-computed priority score
+  timezone    String?   // e.g. "America/New_York" derived from area code
+  lastReplyAt DateTime? // last inbound SMS — boosts lead score
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  calls        Call[]
+  messages     Message[]
+  appointments Appointment[]
+}
+
+model Call {
+  id           String   @id @default(cuid())
+  contactId    String
+  contact      Contact  @relation(fields: [contactId], references: [id])
+  duration     Int      @default(0)
+  disposition  String?
+  notes        String?
+  recordingUrl String?
+  twilioSid    String?
+  transcript   String?  // AI Whisper transcription
+  aiScore      Int?     // 0-100 call quality score
+  aiNotes      String?  // AI coaching notes
+  calledAt     DateTime @default(now())
+}
+
+model Message {
+  id          String   @id @default(cuid())
+  contactId   String?
+  contact     Contact? @relation(fields: [contactId], references: [id])
+  direction   String   // inbound | outbound
+  body        String
+  fromNumber  String
+  toNumber    String
+  twilioSid   String?
+  status      String   @default("sent")
+  sentAt      DateTime @default(now())
+}
+
+model VoicemailScript {
+  id        String   @id @default(cuid())
+  body      String
+  updatedAt DateTime @updatedAt
+}
+
+model LocalNumber {
+  id          String   @id @default(cuid())
+  number      String   @unique  // E.164 format: +14105551234
+  areaCode    String            // "410"
+  state       String?           // "MD"
+  label       String?           // optional friendly label
+  active      Boolean  @default(true)
+  purchasedAt DateTime @default(now())
+}
+
+model ScheduledBlast {
+  id          String   @id @default(cuid())
+  message     String
+  filter      String            // JSON: { source?, status? }
+  scheduledAt DateTime
+  status      String   @default("pending")  // pending | sent | cancelled
+  sentCount   Int?
+  failCount   Int?
+  createdAt   DateTime @default(now())
+}
+
+model Appointment {
+  id          String   @id @default(cuid())
+  contactId   String
+  contact     Contact  @relation(fields: [contactId], references: [id])
+  title       String   @default("Listing Appointment")
+  scheduledAt DateTime
+  duration    Int      @default(60)   // minutes
+  location    String?
+  notes       String?
+  status      String   @default("confirmed") // confirmed | cancelled | completed
+  smsSent     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model EmailTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  subject   String
+  body      String   // HTML body
+  trigger   String?  // hot-lead | callback | no-answer | manual
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  contactId   String?
+  toEmail     String
+  subject     String
+  body        String
+  status      String   @default("sent")  // sent | failed | opened
+  openedAt    DateTime?
+  twilioSid   String?  // SendGrid message ID
+  createdAt   DateTime @default(now())
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  passwordHash   String
+  name           String   @default("")
+  role           String   @default("agent")   // agent | admin
+  plan           String   @default("trial")   // trial | starter | pro | elite
+  stripeCustomerId   String?
+  stripeSubId        String?
+  planExpiresAt  DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}

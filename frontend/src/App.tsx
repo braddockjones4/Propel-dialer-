@@ -1,0 +1,245 @@
+import React, { useState } from 'react';
+import { ToastProvider } from './components/Toast';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Login from './components/Login';
+import Billing from './components/Billing';
+import NotificationBell from './components/NotificationBell';
+import Dialer from './components/Dialer';
+import TripleDialer from './components/TripleDialer';
+import Sequences from './components/Sequences';
+import Contacts from './components/Contacts';
+import Blast from './components/Blast';
+import Inbox from './components/Inbox';
+import Analytics from './components/Analytics';
+import Settings from './components/Settings';
+import Pipeline from './components/Pipeline';
+import VoicemailBlast from './components/VoicemailBlast';
+import Appointments from './components/Appointments';
+import Email from './components/Email';
+import Reports from './components/Reports';
+
+type Page = 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
+
+const NAV: { id: Page; label: string; icon: string }[] = [
+  { id: 'dialer',       label: 'Dialer',    icon: '📞' },
+  { id: 'contacts',     label: 'Contacts',  icon: '👥' },
+  { id: 'pipeline',     label: 'Pipeline',  icon: '📋' },
+  { id: 'appointments', label: 'Calendar',  icon: '📅' },
+  { id: 'blast',        label: 'SMS Blast', icon: '💬' },
+  { id: 'vmblast',      label: 'VM Blast',  icon: '📣' },
+  { id: 'email',        label: 'Email',     icon: '✉️' },
+  { id: 'inbox',        label: 'Inbox',     icon: '📥' },
+  { id: 'sequences',    label: 'Follow-Up', icon: '🔁' },
+  { id: 'analytics',    label: 'Analytics', icon: '📊' },
+  { id: 'reports',      label: 'Reports',   icon: '📄' },
+  { id: 'settings',     label: 'Settings',  icon: '⚙️' },
+];
+
+// ── Inner app (has auth context) ─────────────────────────────────────────────
+function AppInner() {
+  const { user, loading, logout } = useAuth();
+  const [page, setPage]             = useState<Page>('dialer');
+  const [tripleMode, setTripleMode] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Check URL param for post-Stripe redirect
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('billing') === 'success' && page !== 'settings') {
+    window.history.replaceState({}, '', '/');
+  }
+
+  if (loading) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa' }}>
+        <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 24, fontWeight: 300, letterSpacing: '0.4em', color: '#C9A84C' }}>
+          PROPEL
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) return <Login />;
+
+  const PLAN_BADGE: Record<string, string> = {
+    trial:   '14-day Trial',
+    starter: 'Starter',
+    pro:     'Pro',
+    elite:   'Elite',
+  };
+
+  return (
+    <>
+      {/* ── Desktop nav ─────────────────────────────────────────────── */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b hidden md:flex items-center px-6"
+           style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
+
+        <span className="font-serif font-light text-xl text-black mr-8"
+              style={{ letterSpacing: '0.4em', cursor: 'pointer' }}
+              onClick={() => setPage('dialer')}>
+          PROPEL
+        </span>
+
+        <div className="w-px h-4 mr-6" style={{ background: 'rgba(201,168,76,0.3)' }} />
+
+        <div className="flex items-center overflow-x-auto hide-scrollbar flex-1">
+          {NAV.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => setPage(id)}
+              className={`relative px-3 py-3.5 text-[10px] font-semibold tracking-widest uppercase whitespace-nowrap transition-all duration-200 ${
+                page === id ? 'text-black' : 'text-gray-400 hover:text-gray-700'
+              }`}
+            >
+              {label}
+              {page === id && (
+                <span className="absolute bottom-0 left-0 right-0 h-[2px]"
+                      style={{ background: '#C9A84C' }} />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Right side: plan badge + user */}
+        <div className="flex items-center gap-3 pl-4 flex-shrink-0">
+          {page === 'dialer' && (
+            <>
+              <span className="text-[9px] tracking-widest uppercase text-gray-400">Triple Line</span>
+              <button
+                onClick={() => setTripleMode(t => !t)}
+                className="relative w-9 h-[18px] rounded-full transition-colors duration-300"
+                style={{ background: tripleMode ? '#C9A84C' : '#E0E0E0' }}
+              >
+                <span className="absolute top-0.5 left-0.5 w-[14px] h-[14px] rounded-full bg-white shadow transition-transform duration-300"
+                      style={{ transform: tripleMode ? 'translateX(18px)' : 'translateX(0)' }} />
+              </button>
+              <div className="w-px h-4" style={{ background: 'rgba(201,168,76,0.3)' }} />
+            </>
+          )}
+
+          <NotificationBell onNavigate={(p) => setPage(p as any)} />
+
+          <button
+            onClick={() => setPage('billing')}
+            style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+              padding: '3px 8px', borderRadius: 10,
+              border: '1px solid rgba(201,168,76,0.4)', color: '#9A7A2E',
+              background: 'rgba(201,168,76,0.07)', cursor: 'pointer',
+            }}
+          >
+            {PLAN_BADGE[user.plan] || user.plan}
+          </button>
+
+          <div style={{ fontSize: 10, color: '#9ca3af', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user.name || user.email}
+          </div>
+
+          <button
+            onClick={logout}
+            style={{ fontSize: 9, color: '#d1d5db', letterSpacing: '0.1em', textTransform: 'uppercase', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            Sign out
+          </button>
+        </div>
+      </nav>
+
+      {/* ── Mobile nav ──────────────────────────────────────────────── */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b flex md:hidden items-center justify-between px-4"
+           style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
+        <span className="font-serif font-light text-lg text-black" style={{ letterSpacing: '0.4em' }}>PROPEL</span>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setPage('billing')}
+            style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '3px 8px', borderRadius: 10, border: '1px solid rgba(201,168,76,0.4)', color: '#9A7A2E', background: 'rgba(201,168,76,0.07)', cursor: 'pointer' }}
+          >
+            {PLAN_BADGE[user.plan] || user.plan}
+          </button>
+          <button onClick={() => setMobileNavOpen(o => !o)} className="p-1 text-gray-500 text-lg">
+            {mobileNavOpen ? '✕' : '☰'}
+          </button>
+        </div>
+      </nav>
+
+      {/* Mobile dropdown */}
+      {mobileNavOpen && (
+        <div className="fixed inset-0 z-40 md:hidden" style={{ top: 49 }}>
+          <div className="absolute inset-0 bg-black/30" onClick={() => setMobileNavOpen(false)} />
+          <div className="absolute top-0 left-0 right-0 bg-white shadow-xl max-h-[85vh] overflow-y-auto">
+            {NAV.map(({ id, label, icon }) => (
+              <button
+                key={id}
+                onClick={() => { setPage(id); setMobileNavOpen(false); }}
+                className="w-full flex items-center gap-3 px-5 py-3.5 text-left border-b text-sm font-medium"
+                style={{
+                  borderBottomColor: '#f5f5f5',
+                  background: page === id ? 'rgba(201,168,76,0.07)' : 'transparent',
+                  color: page === id ? '#9A7A2E' : '#374151',
+                }}
+              >
+                <span>{icon}</span>{label}
+                {page === id && <span className="ml-auto" style={{ color: '#C9A84C' }}>●</span>}
+              </button>
+            ))}
+            <button onClick={logout} className="w-full flex items-center gap-3 px-5 py-3.5 text-left text-sm" style={{ color: '#ef4444' }}>
+              🚪 Sign Out
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mobile bottom tab bar ────────────────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-white border-t"
+           style={{ borderTopColor: 'rgba(201,168,76,0.2)' }}>
+        {[
+          { id: 'dialer'   as Page, icon: '📞', label: 'Dial' },
+          { id: 'contacts' as Page, icon: '👥', label: 'CRM' },
+          { id: 'inbox'    as Page, icon: '📥', label: 'Inbox' },
+          { id: 'pipeline' as Page, icon: '📋', label: 'Pipeline' },
+          { id: 'blast'    as Page, icon: '💬', label: 'Blast' },
+        ].map(({ id, icon, label }) => (
+          <button
+            key={id}
+            onClick={() => setPage(id)}
+            className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5"
+            style={{ color: page === id ? '#C9A84C' : '#9ca3af' }}
+          >
+            <span style={{ fontSize: 18 }}>{icon}</span>
+            <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Page content ─────────────────────────────────────────────── */}
+      <div className="pt-[49px] pb-[60px] md:pb-0">
+        {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
+        {page === 'contacts'     && <Contacts />}
+        {page === 'blast'        && <Blast />}
+        {page === 'vmblast'      && <VoicemailBlast />}
+        {page === 'email'        && <Email />}
+        {page === 'inbox'        && <Inbox />}
+        {page === 'sequences'    && <Sequences />}
+        {page === 'pipeline'     && <Pipeline />}
+        {page === 'appointments' && <Appointments />}
+        {page === 'analytics'    && <Analytics />}
+        {page === 'reports'      && <Reports />}
+        {page === 'settings'     && <Settings />}
+        {page === 'billing'      && <Billing />}
+      </div>
+
+      <style>{`
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <AppInner />
+      </AuthProvider>
+    </ToastProvider>
+  );
+}

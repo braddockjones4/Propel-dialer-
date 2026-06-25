@@ -1,0 +1,140 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #FAFAFA;
+    color: #0A0A0A;
+    -webkit-font-smoothing: antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: #F0F0F0; }
+  ::-webkit-scrollbar-thumb { background: #D0D0D0; border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: #C9A84C; }
+}
+
+@layer components {
+  /* ── Buttons ─────────────────────────────────────────────── */
+  .btn-gold {
+    background-color: #C9A84C;
+    color: #0A0A0A;
+    font-weight: 600;
+    padding: 0.5rem 1.25rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    cursor: pointer;
+    border: none;
+  }
+  .btn-gold:hover { background-color: #B8960C; color: #fff; }
+  .btn-gold:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .btn-gold-outline {
+    border: 1px solid #C9A84C;
+    color: #9A7A2E;
+    font-weight: 500;
+    padding: 0.5rem 1.25rem;
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    cursor: pointer;
+    background: transparent;
+  }
+  .btn-gold-outline:hover { background-color: #C9A84C; color: #0A0A0A; }
+  .btn-gold-outline:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .btn-danger {
+    border: 1px solid rgba(185, 28, 28, 0.3);
+    color: #b91c1c;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: 0.25rem;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+    cursor: pointer;
+    background: transparent;
+  }
+  .btn-danger:hover { background-color: rgba(185, 28, 28, 0.07); }
+  .btn-danger:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  .btn-ghost {
+    background-color: #F0F0F0;
+    color: #333;
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: 0.25rem;
+    font-size: 0.8rem;
+    border: 1px solid #E0E0E0;
+    transition: all 0.15s;
+    cursor: pointer;
+  }
+  .btn-ghost:hover { background-color: #E8E8E8; }
+  .btn-ghost:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* ── Cards ─────────────────────────────────────────────── */
+  .card {
+    background-color: #FFFFFF;
+    border: 1px solid #E8E8E8;
+    border-radius: 0.5rem;
+    padding: 1rem;
+  }
+  .card-gold {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(201, 168, 76, 0.25);
+    border-radius: 0.5rem;
+    padding: 1rem;
+  }
+
+  /* ── Gold divider ─────────────────────────────────────── */
+  .gold-line {
+    height: 1px;
+    background: linear-gradient(to right, transparent, rgba(201,168,76,0.5), transparent);
+  }
+
+  /* ── Status badge ─────────────────────────────────────── */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ── Label ────────────────────────────────────────────── */
+  .field-label {
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: rgba(154, 122, 46, 0.8);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    display: block;
+    margin-bottom: 0.375rem;
+  }
+
+  /* ── Input ────────────────────────────────────────────── */
+  .field-input {
+    width: 100%;
+    background-color: #F8F8F8;
+    border: 1px solid #E0E0E0;
+    border-radius: 0.25rem;
+    color: #0A0A0A;
+    font-size: 0.875rem;
+    padding: 0.5rem 0.75rem;
+    transition: border-color 0.2s;
+  }
+  .field-input:focus { outline: none; border-color: rgba(201,168,76,0.6); }
+  .field-input::placeholder { color: #B0B0B0; }
+}
