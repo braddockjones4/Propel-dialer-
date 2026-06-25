@@ -1,112 +1,136 @@
 # Propel Dialer — Production Deployment Guide
 
-## Backend → Railway
-
-### 1. Create Railway account
-Go to https://railway.app → New Project → Deploy from GitHub repo
-
-### 2. Connect your repo
-Push the `propel-dialer` folder to a GitHub repo, then connect it in Railway.
-Select the `/backend` folder as the root directory.
-
-### 3. Add environment variables in Railway dashboard
-Copy all values from your local `backend/.env`:
-
-```
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_API_KEY=
-TWILIO_API_SECRET=
-TWILIO_TWIML_APP_SID=
-TWILIO_CALLER_ID=
-DATABASE_URL=file:./dev.db
-PORT=3001
-FRONTEND_URL=https://your-vercel-app.vercel.app
-AGENT_NAME=Braddock Jones
-AGENT_PHONE=+14439091704
-JWT_SECRET=your-random-secret-here
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_PRICE_STARTER=
-STRIPE_PRICE_PRO=
-STRIPE_PRICE_ELITE=
-SENDGRID_API_KEY=
-SENDGRID_FROM_EMAIL=
-OPENAI_API_KEY=
-NODE_ENV=production
-```
-
-### 4. Railway will auto-build using railway.toml
-Build: `npm install && npx prisma generate && npm run build`
-Start: `npx prisma db push && node dist/server.js`
-
-### 5. Get your Railway URL
-It will look like: `https://propel-backend-production.up.railway.app`
-Save this — you'll need it for Twilio and the frontend.
-
-### 6. Update Twilio webhooks
-In Twilio console → your phone number:
-- SMS webhook: `https://your-railway-url/api/twilio/sms-inbound`
-- Voice webhook: `https://your-railway-url/api/twilio/voice`
+**Stack:** Backend → Render | Database → Supabase (PostgreSQL) | Frontend → Vercel
 
 ---
 
-## Frontend → Vercel
+## Step 1 — Supabase (Database)
 
-### 1. Create Vercel account
-Go to https://vercel.com → New Project → Import GitHub repo
-Select the `/frontend` folder as root directory.
-
-### 2. Add environment variables in Vercel dashboard
-```
-VITE_API_URL=https://your-railway-url/api
-VITE_SOCKET_URL=https://your-railway-url
-```
-
-### 3. Deploy
-Vercel auto-deploys on every push. Your app will be at:
-`https://propel-dialer.vercel.app`
-
-### 4. Update Railway FRONTEND_URL
-Set `FRONTEND_URL=https://propel-dialer.vercel.app` in Railway env vars.
+1. Go to https://supabase.com → New project
+2. Choose a region close to your users (e.g. US East)
+3. Once created, go to **Settings → Database → Connection string**
+4. Copy two URLs:
+   - **Transaction pooler** (port 6543) → this becomes `DATABASE_URL`
+   - **Direct connection** (port 5432) → this becomes `DIRECT_URL`
+5. Both URLs look like:
+   ```
+   postgresql://postgres.[ref]:[password]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+   postgresql://postgres.[ref]:[password]@db.[ref].supabase.co:5432/postgres
+   ```
 
 ---
 
-## Quick local dev (no change needed)
+## Step 2 — Render (Backend)
+
+### Connect repo
+1. Go to https://render.com → New → Web Service
+2. Connect your GitHub repo (`Propel-dialer-`)
+3. Set **Root Directory** to `backend`
+4. Render will detect `render.yaml` and pre-fill build/start commands
+
+### Environment variables
+Add all of these in the Render dashboard under **Environment**:
+
+| Variable | Value |
+|---|---|
+| `DATABASE_URL` | Supabase **pooler** URL (port 6543) |
+| `DIRECT_URL` | Supabase **direct** URL (port 5432) |
+| `JWT_SECRET` | Any long random string |
+| `TWILIO_ACCOUNT_SID` | From Twilio console |
+| `TWILIO_AUTH_TOKEN` | From Twilio console |
+| `TWILIO_API_KEY` | From Twilio → API keys |
+| `TWILIO_API_SECRET` | From Twilio → API keys |
+| `TWILIO_TWIML_APP_SID` | From Twilio → TwiML Apps |
+| `TWILIO_CALLER_ID` | `+14439091704` |
+| `FRONTEND_URL` | `https://propel-dialer.vercel.app` (set after Vercel deploy) |
+| `AGENT_NAME` | `Braddock Jones` |
+| `AGENT_PHONE` | `+14439091704` |
+| `OPENAI_API_KEY` | From platform.openai.com |
+| `STRIPE_SECRET_KEY` | From Stripe dashboard |
+| `STRIPE_WEBHOOK_SECRET` | From Stripe → Webhooks |
+| `STRIPE_PRICE_STARTER` | `price_xxx` from Stripe |
+| `STRIPE_PRICE_PRO` | `price_xxx` from Stripe |
+| `STRIPE_PRICE_ELITE` | `price_xxx` from Stripe |
+| `SENDGRID_API_KEY` | From SendGrid |
+| `SENDGRID_FROM_EMAIL` | `braddockjones4@icloud.com` |
+| `NODE_ENV` | `production` |
+
+### Deploy
+Click **Deploy**. Render runs:
+```
+npm install && npx prisma generate && npm run build
+npx prisma db push && node dist/server.js
+```
+`prisma db push` creates all tables in Supabase on first boot.
+
+Your backend URL: `https://propel-dialer-backend.onrender.com`
+
+> **Note:** Free tier services sleep after 15 min of inactivity. Upgrade to Starter ($7/mo) to keep always-on.
+
+---
+
+## Step 3 — Update Twilio Webhooks
+
+In Twilio console → your phone number (`+14439091704`):
+- **Voice webhook:** `https://propel-dialer-backend.onrender.com/api/twilio/voice`
+- **SMS webhook:** `https://propel-dialer-backend.onrender.com/api/twilio/sms-inbound`
+
+In Twilio → TwiML Apps → your app:
+- **Voice Request URL:** `https://propel-dialer-backend.onrender.com/api/twilio/voice`
+
+---
+
+## Step 4 — Vercel (Frontend)
+
+1. Go to https://vercel.com → New Project → Import GitHub repo
+2. Set **Root Directory** to `frontend`
+3. Add environment variables:
+   ```
+   VITE_API_URL=https://propel-dialer-backend.onrender.com/api
+   VITE_SOCKET_URL=https://propel-dialer-backend.onrender.com
+   ```
+4. Deploy → your app will be at `https://propel-dialer.vercel.app`
+5. Go back to Render → update `FRONTEND_URL` to that URL and redeploy
+
+---
+
+## Step 5 — Stripe Setup
+
+1. Go to https://dashboard.stripe.com/products
+2. Create 3 products: Starter ($99/mo), Pro ($199/mo), Elite ($399/mo)
+3. Copy each `price_xxx` ID → add to Render env vars
+4. Go to Stripe → Webhooks → Add endpoint:
+   - URL: `https://propel-dialer-backend.onrender.com/api/billing/webhook`
+   - Events: `checkout.session.completed`, `customer.subscription.deleted`
+5. Copy webhook signing secret → `STRIPE_WEBHOOK_SECRET` in Render
+
+---
+
+## First Login
+
+1. Open your Vercel URL
+2. Click **Create Account** — first account is auto-admin
+3. Start dialing
+
+---
+
+## Local Dev (unchanged)
+
 ```bash
-# Terminal 1 — backend
+# Terminal 1
 cd backend && npm run dev
 
-# Terminal 2 — frontend
+# Terminal 2
 cd frontend && npm run dev
-
 # App at http://localhost:5173
 ```
 
----
-
-## Stripe Setup (to accept payments)
-1. Go to https://dashboard.stripe.com/products
-2. Create 3 products: Starter ($99/mo), Pro ($199/mo), Elite ($399/mo)
-3. Copy each Price ID (price_xxx) to Railway env vars:
-   - STRIPE_PRICE_STARTER=price_xxx
-   - STRIPE_PRICE_PRO=price_xxx
-   - STRIPE_PRICE_ELITE=price_xxx
-4. Go to Stripe → Webhooks → Add endpoint:
-   - URL: `https://your-railway-url/api/billing/webhook`
-   - Events: `checkout.session.completed`, `customer.subscription.deleted`
-5. Copy webhook signing secret → STRIPE_WEBHOOK_SECRET in Railway
+Keep `backend/.env` with `DATABASE_URL="file:./dev.db"` for local SQLite dev, or swap in the Supabase URL to develop against the live database.
 
 ---
 
 ## PWA Install on iPhone
-1. Open `https://propel-dialer.vercel.app` in Safari
+
+1. Open your Vercel URL in Safari
 2. Tap Share → Add to Home Screen
-3. Propel installs as a native-looking app
-
----
-
-## First login
-1. Go to your deployed URL
-2. Click "Create Account" — first account is auto-admin
-3. Log in and start dialing
+3. Propel installs as a native app
