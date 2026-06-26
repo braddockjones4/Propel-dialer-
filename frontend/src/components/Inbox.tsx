@@ -52,6 +52,7 @@ export default function Inbox() {
   const [notifPermission, setNotifPermission] = useState(
     'Notification' in window ? Notification.permission : 'unsupported'
   );
+  const [mobileView, setMobileView] = useState<'list' | 'thread'>('list');
   const bottomRef  = useRef<HTMLDivElement>(null);
   const prevMsgIds = useRef<Set<string>>(new Set());
   const selectedRef = useRef<Thread | null>(null);
@@ -107,6 +108,7 @@ export default function Inbox() {
 
   const openThread = async (thread: Thread) => {
     setSelected(thread);
+    setMobileView('thread');
     setReply('');
     if (thread.contactId) {
       const msgs = await fetch(`${API_BASE}/inbox/${thread.contactId}`).then(r => r.json());
@@ -144,7 +146,7 @@ export default function Inbox() {
     <div className="flex h-[calc(100vh-49px)]">
 
       {/* ── Thread list ──────────────────────────────────── */}
-      <div className="w-80 border-r border-gray-100 bg-white flex flex-col">
+      <div className={`${mobileView === 'thread' ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-gray-100 bg-white flex-col`}>
         <div className="px-5 py-4 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <div>
@@ -202,7 +204,7 @@ export default function Inbox() {
       </div>
 
       {/* ── Message thread ───────────────────────────────── */}
-      <div className="flex-1 flex flex-col bg-gray-50">
+      <div className={`${mobileView === 'list' ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-gray-50`}>
         {!selected ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
@@ -218,7 +220,11 @@ export default function Inbox() {
         ) : (
           <>
             {/* Thread header */}
-            <div className="px-6 py-4 bg-white border-b border-gray-100 flex items-center gap-3">
+            <div className="px-4 md:px-6 py-4 bg-white border-b border-gray-100 flex items-center gap-3">
+              <button
+                onClick={() => setMobileView('list')}
+                className="md:hidden text-gray-400 hover:text-black text-lg pr-1"
+              >←</button>
               <div>
                 <div className="font-medium text-black">{displayName(selected)}</div>
                 <div className="text-xs font-mono mt-0.5" style={{ color: '#C9A84C' }}>{selected.phone}</div>

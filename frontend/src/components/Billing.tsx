@@ -78,7 +78,7 @@ export default function Billing() {
         <p style={{ fontSize: 14, color: '#6b7280' }}>
           {currentPlan !== 'trial'
             ? `You're on the ${currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)} plan.`
-            : 'Start your 14-day free trial. No credit card required.'}
+            : 'Start your 7-day free trial. No credit card required.'}
         </p>
         {currentPlan !== 'trial' && user?.stripeCustomerId && (
           <button
@@ -178,7 +178,7 @@ export default function Billing() {
       )}
 
       <p style={{ textAlign: 'center', fontSize: 11, color: '#d1d5db', marginTop: 32 }}>
-        All plans include a 14-day free trial · Cancel anytime · Powered by Stripe
+        All plans include a 7-day free trial · Cancel anytime · Powered by Stripe
       </p>
     </div>
   );

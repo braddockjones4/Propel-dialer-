@@ -278,8 +278,8 @@ export default function Contacts() {
             return (
               <div
                 key={c.id}
-                className="flex items-center gap-2 px-3 py-3.5 border-b border-gray-50 cursor-pointer transition-colors hover:bg-gray-50"
-                style={selected?.id === c.id ? { background: 'rgba(201,168,76,0.05)' } : {}}
+                className="group flex items-center gap-2 px-3 py-3 border-b border-gray-50 cursor-pointer transition-colors hover:bg-gray-50"
+                style={selected?.id === c.id ? { background: 'rgba(201,168,76,0.05)', borderLeftColor: '#C9A84C', borderLeftWidth: 2 } : {}}
               >
                 {/* Checkbox */}
                 <input
@@ -291,7 +291,7 @@ export default function Contacts() {
                   style={{ accentColor: '#C9A84C' }}
                 />
                 <div className="flex-1 min-w-0" onClick={() => openContact(c)}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-black font-medium text-sm">{c.firstName} {c.lastName}</span>
                     <span className="status-badge border" style={{ borderColor: ss.border, color: ss.color }}>
                       {c.status}
@@ -304,14 +304,37 @@ export default function Contacts() {
                   </div>
                   <div className="text-xs mt-0.5 font-mono" style={{ color: '#C9A84C' }}>{c.phone}</div>
                   {c.address && (
-                    <div className="text-gray-400 text-xs mt-0.5 truncate">{c.address}, {c.city}</div>
+                    <div className="text-gray-400 text-[10px] mt-0.5 truncate">📍 {c.address}{c.city ? `, ${c.city}` : ''}</div>
                   )}
                 </div>
-                <div className="text-right shrink-0">
+                <div className="shrink-0 flex flex-col items-end gap-1.5">
                   <div className="text-[9px] tracking-widest uppercase text-gray-300">{SOURCE_LABELS[c.source] || c.source}</div>
                   {c.calls && c.calls.length > 0 && (
-                    <div className="text-gray-300 text-xs mt-0.5">{c.calls.length} call{c.calls.length !== 1 ? 's' : ''}</div>
+                    <div className="text-gray-300 text-[10px]">{c.calls.length} call{c.calls.length !== 1 ? 's' : ''}</div>
                   )}
+                  {/* Quick actions — appear on hover */}
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <a
+                      href={`tel:${c.phone}`}
+                      onClick={e => e.stopPropagation()}
+                      title="Call"
+                      style={{
+                        fontSize: 10, padding: '2px 5px', borderRadius: 4,
+                        border: '1px solid rgba(201,168,76,0.35)', color: '#9A7A2E',
+                        background: 'rgba(201,168,76,0.08)', textDecoration: 'none', display: 'inline-block',
+                      }}
+                    >📞</a>
+                    <a
+                      href={`sms:${c.phone}`}
+                      onClick={e => e.stopPropagation()}
+                      title="Text"
+                      style={{
+                        fontSize: 10, padding: '2px 5px', borderRadius: 4,
+                        border: '1px solid rgba(59,130,246,0.3)', color: '#3b82f6',
+                        background: 'rgba(59,130,246,0.06)', textDecoration: 'none', display: 'inline-block',
+                      }}
+                    >💬</a>
+                  </div>
                 </div>
               </div>
             );
@@ -323,9 +346,14 @@ export default function Contacts() {
       <div className="flex-1 overflow-y-auto p-10 bg-gray-50">
         {!selected ? (
           <div className="h-full flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-4xl font-serif font-light text-gray-200 mb-2">Select a Contact</div>
-              <div className="text-gray-300 text-sm tracking-wide">Choose from the list to view details</div>
+            <div className="text-center" style={{ maxWidth: 280 }}>
+              <div style={{ fontSize: 48, marginBottom: 16 }}>👤</div>
+              <div style={{ fontSize: 18, fontWeight: 300, color: '#d1d5db', letterSpacing: '0.05em', marginBottom: 8 }}>
+                Select a Contact
+              </div>
+              <div style={{ fontSize: 12, color: '#d1d5db', lineHeight: 1.6 }}>
+                Click any contact on the left to view their details, call history, and notes.
+              </div>
             </div>
           </div>
         ) : (

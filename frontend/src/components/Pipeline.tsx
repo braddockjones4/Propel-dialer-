@@ -106,23 +106,23 @@ export default function Pipeline() {
     <div className="flex flex-col h-[calc(100vh-49px)]">
 
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-4 bg-white border-b"
+      <div className="flex items-center justify-between px-4 md:px-8 py-3 bg-white border-b"
            style={{ borderColor: 'rgba(201,168,76,0.15)' }}>
         <div>
           <h1 className="font-serif font-light text-xl text-black tracking-wide">Pipeline</h1>
-          <div className="text-[9px] tracking-widest uppercase text-gray-400 mt-0.5">
-            {contacts.length} contacts · {byColumn('hot').length} hot · {byColumn('appointment').length} appointments · {byColumn('closed').length} closed
+          <div className="text-[9px] tracking-widest uppercase text-gray-400 mt-0.5 hidden sm:block">
+            {contacts.length} contacts · {byColumn('hot').length} hot · {byColumn('appointment').length} appts · {byColumn('closed').length} closed
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
           <input
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search contacts…"
-            className="field-input text-xs w-48"
+            placeholder="Search…"
+            className="field-input text-xs w-28 md:w-48"
           />
-          <button onClick={loadContacts} className="btn-ghost px-3 py-1.5 text-xs">Refresh</button>
+          <button onClick={loadContacts} className="btn-ghost px-3 py-1.5 text-xs">↺</button>
         </div>
       </div>
 

@@ -58,12 +58,12 @@ router.get('/', async (_req: Request, res: Response) => {
       orderBy: { _count: { disposition: 'desc' } },
     }),
 
-    // Calls per day for last 14 days — raw via $queryRaw for SQLite date functions
-    prisma.$queryRaw<Array<{ day: string; count: number }>>`
-      SELECT date(calledAt) as day, COUNT(*) as count
-      FROM Call
-      WHERE calledAt >= datetime('now', '-14 days')
-      GROUP BY date(calledAt)
+    // Calls per day for last 14 days — PostgreSQL date functions
+    prisma.$queryRaw<Array<{ day: string; count: bigint }>>`
+      SELECT DATE("calledAt") as day, COUNT(*) as count
+      FROM "Call"
+      WHERE "calledAt" >= NOW() - INTERVAL '14 days'
+      GROUP BY DATE("calledAt")
       ORDER BY day ASC
     `,
 
@@ -101,7 +101,10 @@ router.get('/', async (_req: Request, res: Response) => {
     const d = new Date();
     d.setDate(d.getDate() - i);
     const key = d.toISOString().split('T')[0];
-    const found = (callsByDay as any[]).find((r: any) => r.day === key);
+    const found = (callsByDay as any[]).find((r: any) => {
+      const rowDay = r.day instanceof Date ? r.day.toISOString().split('T')[0] : String(r.day);
+      return rowDay === key;
+    });
     days.push({ day: key, count: found ? Number(found.count) : 0 });
   }
 

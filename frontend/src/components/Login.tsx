@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-export default function Login() {
+interface Props {
+  onBack?: () => void;
+}
+
+export default function Login({ onBack }: Props) {
   const { login, register } = useAuth();
   const [mode,     setMode]     = useState<'login' | 'register'>('login');
   const [email,    setEmail]    = useState('');
@@ -143,6 +147,14 @@ export default function Login() {
               {mode === 'login' ? 'Create one →' : 'Sign in →'}
             </button>
           </p>
+
+          {onBack && (
+            <div style={{ textAlign: 'center', marginTop: 16 }}>
+              <button onClick={onBack} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: '#d1d5db', letterSpacing: '0.05em' }}>
+                ← Back to home
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

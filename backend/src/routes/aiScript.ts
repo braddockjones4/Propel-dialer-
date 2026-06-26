@@ -1,9 +1,9 @@
 /**
  * AI-Personalized Call Script
  * Generates a custom opener + objection responses for each contact
- * using GPT-4o-mini. Takes 1-2 seconds.
+ * using Claude (Anthropic). Falls back to static scripts if no key.
  *
- * Requires: OPENAI_API_KEY in .env
+ * Requires: ANTHROPIC_API_KEY in .env
  */
 
 import { Router, Request, Response } from 'express';
@@ -35,10 +35,10 @@ async function generateScript(contactId: string): Promise<AiScript> {
 
   if (!contact) throw new Error('Contact not found');
 
-  const { OPENAI_API_KEY } = process.env;
+  const { ANTHROPIC_API_KEY } = process.env;
 
-  // Fallback scripts if no OpenAI key
-  if (!OPENAI_API_KEY) {
+  // Fallback scripts if no Anthropic key
+  if (!ANTHROPIC_API_KEY) {
     return getStaticScript(contact.source, contact.firstName, contact.address ?? undefined);
   }
 
@@ -74,26 +74,28 @@ Return ONLY valid JSON:
 }`;
 
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
-        Authorization:  `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
+        'x-api-key':         ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'Content-Type':      'application/json',
       },
       body: JSON.stringify({
-        model:       'gpt-4o-mini',
-        messages:    [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        max_tokens:  600,
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        messages:   [{ role: 'user', content: prompt }],
       }),
     });
 
     const data = await res.json() as any;
-    const text = data.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(text.trim());
+    const text = data.content?.[0]?.text || '{}';
+    // Strip any markdown code fences Claude may add
+    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(clean);
     return parsed as AiScript;
   } catch (err: any) {
-    console.warn('[AIScript] OpenAI error, using static script:', err.message);
+    console.warn('[AIScript] Anthropic error, using static script:', err.message);
     return getStaticScript(contact.source, contact.firstName, contact.address ?? undefined);
   }
 }

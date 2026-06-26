@@ -1,0 +1,48 @@
+services:
+  - type: web
+    name: propel-dialer-backend
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npx prisma db push && node dist/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_API_KEY
+        sync: false
+      - key: TWILIO_API_SECRET
+        sync: false
+      - key: TWILIO_TWIML_APP_SID
+        sync: false
+      - key: TWILIO_CALLER_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: AGENT_NAME
+        sync: false
+      - key: AGENT_PHONE
+        sync: false
+      - key: NGROK_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false

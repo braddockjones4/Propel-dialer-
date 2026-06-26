@@ -5,7 +5,6 @@ import NextActionPanel from './NextActionPanel';
 import type { Contact, DispositionType } from '../types';
 import { API_BASE } from '../config';
 
-
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
   const s = (seconds % 60).toString().padStart(2, '0');
@@ -18,6 +17,14 @@ const SOURCE_LABELS: Record<string, string> = {
   circle:        'Circle Prospect',
   'past-client': 'Past Client',
   manual:        'Manual',
+};
+
+const SOURCE_COLORS: Record<string, string> = {
+  expired:       '#ef4444',
+  fsbo:          '#3b82f6',
+  circle:        '#8b5cf6',
+  'past-client': '#10b981',
+  manual:        '#9ca3af',
 };
 
 const SCRIPTS: Record<string, string[]> = {
@@ -54,6 +61,12 @@ function mapContact(c: Record<string, string>): Contact {
   };
 }
 
+// Disposition emoji map for the session log
+const DISP_EMOJI: Record<string, string> = {
+  'not-home': '📵', 'left-voicemail': '📬', 'callback-scheduled': '📅',
+  'not-interested': '👎', 'wrong-number': '🔢', 'dnc': '🚫', 'hot-lead': '🔥',
+};
+
 export default function Dialer() {
   const { deviceStatus, callStatus, callDuration, activeCall, startCall, endCall, muteCall, isMuted, errorMessage } = useTwilioDevice();
 
@@ -67,17 +80,43 @@ export default function Dialer() {
   const [notes, setNotes]                     = useState('');
   const [lastDisposition, setLastDisposition] = useState<DispositionType | null>(null);
   const [callHistory, setCallHistory]         = useState<Array<{ name: string; phone: string; disposition: DispositionType; duration: number }>>([]);
-  const [scriptIndex, setScriptIndex]         = useState(0);
   const [vmDropped, setVmDropped]             = useState(false);
   const [autoAdvance, setAutoAdvance]         = useState(false);
   const [countdown, setCountdown]             = useState<number | null>(null);
   const [aiScript, setAiScript]               = useState<any>(null);
   const [aiScriptLoading, setAiScriptLoading] = useState(false);
   const [smartHoursWarning, setSmartHoursWarning] = useState('');
+  const [searchQuery, setSearchQuery]         = useState('');
+  const [searchOpen, setSearchOpen]           = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Close search dropdown on outside click
   useEffect(() => {
-    // Sort by lead score desc (hottest first)
+    const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+        setSearchQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const searchResults = searchQuery.trim().length > 0
+    ? contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery)).slice(0, 8)
+    : [];
+
+  const jumpToContact = (index: number) => {
+    setCurrentContactIndex(index);
+    setLastDisposition(null);
+    setNotes('');
+    setVmDropped(false);
+    setSearchQuery('');
+    setSearchOpen(false);
+  };
+
+  useEffect(() => {
     fetch(`${API_BASE}/contacts?limit=300`)
       .then(r => r.json())
       .then(data => {
@@ -88,7 +127,6 @@ export default function Dialer() {
       .catch(() => setLoading(false));
   }, []);
 
-  // Load AI script whenever contact changes
   useEffect(() => {
     const contact = contacts[currentContactIndex];
     if (!contact) return;
@@ -100,15 +138,12 @@ export default function Dialer() {
       .catch(() => setAiScriptLoading(false));
   }, [currentContactIndex, contacts]);
 
-  // Smart hours: check if it's an ok time to call (8am-9pm contact's local time)
   useEffect(() => {
     const contact = contacts[currentContactIndex];
     if (!contact?.phone) { setSmartHoursWarning(''); return; }
-    const areaCode = contact.phone.replace(/\D/g,'').slice(contact.phone.replace(/\D/g,'').length > 10 ? 1 : 0, 4);
-    // Simplified: eastern time zone for area codes 2xx-4xx, central for 5xx-6xx, mountain/pacific for 7xx-9xx
     const hour = new Date().getHours();
     if (hour < 8 || hour >= 21) {
-      setSmartHoursWarning(`⚠ It's ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})} — calling outside 8am–9pm may violate TCPA`);
+      setSmartHoursWarning(`It's ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} — calling outside 8am–9pm may violate TCPA`);
     } else {
       setSmartHoursWarning('');
     }
@@ -116,6 +151,8 @@ export default function Dialer() {
 
   const currentContact = contacts[currentContactIndex] ?? null;
   const isInCall = callStatus === 'in-call' || callStatus === 'connecting' || callStatus === 'ringing';
+  const isPostCall = callStatus === 'completed' || callStatus === 'idle';
+  const showDisposition = isPostCall && !lastDisposition && sessionCalls > 0;
 
   const handleDial = useCallback(async () => {
     const phone = currentContact?.phone || manualPhone;
@@ -124,7 +161,6 @@ export default function Dialer() {
     setSessionCalls(c => c + 1);
     setNotes('');
     setLastDisposition(null);
-    setScriptIndex(0);
     setVmDropped(false);
   }, [currentContact, manualPhone, startCall]);
 
@@ -167,7 +203,6 @@ export default function Dialer() {
     };
 
     if (autoAdvance && currentContactIndex < contacts.length - 1) {
-      // Start 3-second countdown then auto-dial
       setCountdown(3);
       let count = 3;
       if (countdownRef.current) clearInterval(countdownRef.current);
@@ -178,7 +213,6 @@ export default function Dialer() {
           clearInterval(countdownRef.current!);
           setCountdown(null);
           advanceToNext();
-          // Auto-dial next contact after a brief pause for state to settle
           setTimeout(() => {
             const nextContact = contacts[currentContactIndex + 1];
             if (nextContact?.phone) startCall(nextContact.phone);
@@ -197,216 +231,487 @@ export default function Dialer() {
 
   useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current); }, []);
 
-  const scripts     = currentContact ? (SCRIPTS[currentContact.source] || SCRIPTS.manual) : [];
   const sourceLabel = currentContact ? (SOURCE_LABELS[currentContact.source] || SOURCE_LABELS.manual) : null;
+  const sourceColor = currentContact ? (SOURCE_COLORS[currentContact.source] || SOURCE_COLORS.manual) : '#9ca3af';
+
+  // Progress percent through queue
+  const queuePercent = contacts.length > 0 ? Math.round((currentContactIndex / contacts.length) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div style={{ minHeight: '100vh', background: '#f8f8f8', display: 'flex', flexDirection: 'column' }}>
 
       {/* ── Stats bar ─────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-8 py-3 bg-white border-b border-gray-100">
-        <div className="flex items-center gap-10">
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '12px 20px', background: '#fff',
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
+          {/* Session stats */}
           {[
-            { label: 'Calls Today', value: sessionCalls,                                    gold: false },
-            { label: 'Hot Leads',   value: hotLeads,                                        gold: true  },
-            { label: 'Queue',       value: `${currentContactIndex + 1}/${contacts.length}`, gold: false },
+            { label: 'Calls Today', value: sessionCalls, gold: false },
+            { label: 'Hot Leads',   value: hotLeads,     gold: true  },
           ].map(stat => (
-            <div key={stat.label}>
-              <div className="text-2xl font-light tracking-tight"
-                   style={{ color: stat.gold ? '#9A7A2E' : '#000' }}>
+            <div key={stat.label} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 26, fontWeight: 300, letterSpacing: '-0.5px', color: stat.gold ? '#9A7A2E' : '#111', lineHeight: 1 }}>
                 {stat.value}
               </div>
-              <div className="text-[10px] text-gray-400 tracking-widest uppercase mt-0.5">{stat.label}</div>
+              <div style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 2 }}>
+                {stat.label}
+              </div>
             </div>
           ))}
-          {/* Daily goal bar */}
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] text-gray-400 tracking-widest uppercase">Goal</span>
+
+          {/* Queue progress */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Queue</span>
+              <span style={{ fontSize: 10, fontWeight: 600, color: '#555' }}>
+                {currentContactIndex + 1} / {contacts.length}
+              </span>
+            </div>
+            <div style={{ width: 80, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${queuePercent}%`, background: '#C9A84C', borderRadius: 99, transition: 'width 0.4s' }} />
+            </div>
+          </div>
+
+          {/* Daily goal — desktop only */}
+          <div className="hidden sm:flex" style={{ flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Daily Goal</span>
               <input
                 type="number" value={dailyGoal}
                 onChange={e => setDailyGoal(Number(e.target.value))}
-                className="w-10 text-[11px] text-center border-b border-gray-200 focus:outline-none bg-transparent"
+                style={{ width: 36, fontSize: 10, textAlign: 'center', border: 'none', borderBottom: '1px solid #e5e7eb', background: 'transparent', outline: 'none', color: '#555' }}
               />
             </div>
-            <div className="w-28 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div className="h-full rounded-full transition-all"
-                   style={{ width: `${Math.min(100, (sessionCalls / dailyGoal) * 100)}%`, background: '#C9A84C' }} />
+            <div style={{ width: 80, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${Math.min(100, (sessionCalls / dailyGoal) * 100)}%`, background: sessionCalls >= dailyGoal ? '#10b981' : '#C9A84C', borderRadius: 99, transition: 'width 0.4s' }} />
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {/* Auto-advance toggle */}
-          <button
-            onClick={() => setAutoAdvance(a => !a)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[11px] font-medium tracking-wider transition-all"
-            style={autoAdvance
-              ? { background: '#C9A84C', color: '#fff' }
-              : { background: '#f3f4f6', color: '#6b7280' }}
-          >
-            ⚡ AUTO {autoAdvance ? 'ON' : 'OFF'}
-          </button>
-          <div className="flex items-center gap-2">
-            <div className={`w-1.5 h-1.5 rounded-full ${
-              deviceStatus === 'ready'   ? 'bg-green-500 animate-pulse' :
-              deviceStatus === 'loading' ? 'bg-gray-400' :
-              deviceStatus === 'error'   ? 'bg-red-500' : 'bg-gray-300'
-            }`} />
-            <span className="text-[10px] text-gray-400 capitalize tracking-widest">{deviceStatus}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Auto</span>
+            <button
+              onClick={() => setAutoAdvance(a => !a)}
+              style={{
+                position: 'relative', width: 36, height: 18, borderRadius: 99, border: 'none', cursor: 'pointer',
+                background: autoAdvance ? '#C9A84C' : '#e5e7eb', transition: 'background 0.25s',
+              }}
+            >
+              <span style={{
+                position: 'absolute', top: 2, left: autoAdvance ? 18 : 2,
+                width: 14, height: 14, borderRadius: '50%', background: '#fff',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s',
+              }} />
+            </button>
+          </div>
+
+          {/* Device status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <div style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: deviceStatus === 'ready' ? '#10b981' : deviceStatus === 'error' ? '#ef4444' : '#d1d5db',
+              boxShadow: deviceStatus === 'ready' ? '0 0 0 2px rgba(16,185,129,0.2)' : 'none',
+            }} />
+            <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+              {deviceStatus === 'ready' ? 'Ready' : deviceStatus === 'loading' ? 'Connecting…' : deviceStatus === 'error' ? 'Error' : deviceStatus}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* ── Smart hours / TCPA warning ──────────────────── */}
+      {/* ── Banners ────────────────────────────────────────── */}
       {smartHoursWarning && (
-        <div className="bg-amber-50 border-b border-amber-100 text-amber-700 text-xs px-8 py-2 tracking-wide font-medium">
-          {smartHoursWarning}
+        <div style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', color: '#92400e', fontSize: 11, padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          ⚠️ <span>{smartHoursWarning}</span>
         </div>
       )}
-
-      {/* ── Auto-advance countdown banner ───────────────── */}
       {countdown !== null && (
-        <div className="flex items-center justify-between bg-black text-white px-8 py-2 text-sm">
-          <span>Auto-dialing next contact in <strong>{countdown}s</strong>…</span>
-          <button onClick={cancelAutoAdvance} className="text-xs underline" style={{ color: '#C9A84C' }}>
+        <div style={{ background: '#111', color: '#fff', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 13 }}>Auto-dialing next contact in <strong style={{ color: '#C9A84C' }}>{countdown}s</strong>…</span>
+          <button onClick={cancelAutoAdvance} style={{ fontSize: 11, color: '#C9A84C', background: 'none', border: '1px solid rgba(201,168,76,0.4)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer' }}>
             Cancel
           </button>
         </div>
       )}
-
       {errorMessage && (
-        <div className="bg-red-50 border-b border-red-100 text-red-600 text-xs px-8 py-2 tracking-wide">
-          {errorMessage}
+        <div style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca', color: '#dc2626', fontSize: 11, padding: '8px 20px' }}>
+          ⚠️ {errorMessage}
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0">
+      {/* ── Main layout ────────────────────────────────────── */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
 
-        {/* ── Left: Prospect card ───────────────────────── */}
-        <div className="w-72 border-r border-gray-100 bg-white p-5 flex flex-col gap-5">
+        {/* ── LEFT: Contact card ───────────────────────────── */}
+        <div style={{
+          width: 280, flexShrink: 0,
+          borderRight: '1px solid rgba(0,0,0,0.06)',
+          background: '#fff',
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+          className="w-full md:w-[280px]"
+        >
+          {/* ── Search / Jump to Contact ── */}
+          <div ref={searchRef} style={{ padding: '10px 12px', borderBottom: '1px solid rgba(0,0,0,0.06)', position: 'relative' }}>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: '#bbb', pointerEvents: 'none' }}>🔍</span>
+              <input
+                type="text"
+                placeholder="Jump to contact…"
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); }}
+                onFocus={() => setSearchOpen(true)}
+                disabled={isInCall}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '7px 10px 7px 28px',
+                  border: '1px solid #e5e7eb', borderRadius: 7,
+                  fontSize: 12, color: '#374151', outline: 'none', background: '#fafafa',
+                  opacity: isInCall ? 0.4 : 1,
+                  cursor: isInCall ? 'not-allowed' : 'text',
+                }}
+              />
+            </div>
+            {searchOpen && searchResults.length > 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 12, right: 12, zIndex: 50,
+                background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.1)', overflow: 'hidden',
+              }}>
+                {searchResults.map(contact => {
+                  const idx = contacts.indexOf(contact);
+                  return (
+                    <button
+                      key={contact.id}
+                      onClick={() => jumpToContact(idx)}
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '9px 12px',
+                        background: idx === currentContactIndex ? 'rgba(201,168,76,0.07)' : '#fff',
+                        border: 'none', borderBottom: '1px solid #f5f5f5',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(201,168,76,0.05)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = idx === currentContactIndex ? 'rgba(201,168,76,0.07)' : '#fff')}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contact.name}</div>
+                        <div style={{ fontSize: 10, color: '#9ca3af', fontFamily: 'monospace' }}>{contact.phone}</div>
+                      </div>
+                      <div style={{ fontSize: 9, color: '#ccc', flexShrink: 0 }}>#{idx + 1}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {searchOpen && searchQuery.trim().length > 0 && searchResults.length === 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 12, right: 12, zIndex: 50,
+                background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.1)', padding: '12px',
+                fontSize: 11, color: '#9ca3af', textAlign: 'center',
+              }}>
+                No contacts match "{searchQuery}"
+              </div>
+            )}
+          </div>
+
           {loading ? (
-            <p className="text-gray-400 text-sm">Loading contacts…</p>
+            <div style={{ padding: 24 }}>
+              {[1, 2, 3].map(i => (
+                <div key={i} style={{ height: 16, background: '#f3f4f6', borderRadius: 4, marginBottom: 10, width: i === 1 ? '60%' : i === 2 ? '40%' : '80%' }} className="animate-pulse" />
+              ))}
+            </div>
           ) : currentContact ? (
-            <>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  {sourceLabel && (
-                    <div className="text-[10px] tracking-widest uppercase"
-                         style={{ color: 'rgba(154,122,46,0.7)' }}>
-                      {sourceLabel}
-                    </div>
-                  )}
-                  {/* Lead score badge */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+
+              {/* Contact header */}
+              <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
+                {/* Source badge + lead score */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <span style={{
+                    fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                    padding: '2px 8px', borderRadius: 99,
+                    background: `${sourceColor}15`,
+                    color: sourceColor,
+                    border: `1px solid ${sourceColor}30`,
+                  }}>
+                    {sourceLabel}
+                  </span>
                   {currentContact.leadScore != null && (
-                    <div className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                         style={{
-                           background: currentContact.leadScore >= 70 ? 'rgba(201,168,76,0.15)' : 'rgba(0,0,0,0.05)',
-                           color:      currentContact.leadScore >= 70 ? '#9A7A2E' : '#6b7280',
-                           border:     currentContact.leadScore >= 70 ? '1px solid rgba(201,168,76,0.3)' : '1px solid rgba(0,0,0,0.08)',
-                         }}>
-                      🔥 {currentContact.leadScore}
-                    </div>
+                    <span style={{
+                      fontSize: 10, fontWeight: 600,
+                      padding: '2px 8px', borderRadius: 99,
+                      background: currentContact.leadScore >= 70 ? 'rgba(201,168,76,0.12)' : 'rgba(0,0,0,0.04)',
+                      color: currentContact.leadScore >= 70 ? '#9A7A2E' : '#9ca3af',
+                      border: `1px solid ${currentContact.leadScore >= 70 ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.08)'}`,
+                    }}>
+                      {currentContact.leadScore >= 70 ? '🔥 ' : ''}{currentContact.leadScore}
+                    </span>
                   )}
                 </div>
-                <h2 className="text-xl font-light text-black tracking-wide">{currentContact.name}</h2>
-                <p className="font-mono text-sm mt-1" style={{ color: '#C9A84C' }}>{currentContact.phone}</p>
+
+                <h2 style={{ fontSize: 22, fontWeight: 300, color: '#111', letterSpacing: '0.02em', margin: 0, lineHeight: 1.2 }}>
+                  {currentContact.name}
+                </h2>
+                <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#C9A84C', marginTop: 6, letterSpacing: '0.05em' }}>
+                  {currentContact.phone}
+                </div>
                 {currentContact.address && (
-                  <p className="text-gray-400 text-xs mt-1.5 leading-relaxed">{currentContact.address}</p>
-                )}
-              </div>
-
-              <div className="gold-line" />
-
-              {/* Call controls */}
-              <div className="flex flex-col gap-2">
-                {!isInCall && callStatus !== 'completed' ? (
-                  <button onClick={handleDial} disabled={deviceStatus !== 'ready'} className="btn-gold w-full py-3">
-                    Dial
-                  </button>
-                ) : isInCall ? (
-                  <>
-                    <div className="text-center py-2">
-                      <div className="text-3xl font-light tracking-widest text-black font-mono">
-                        {callStatus === 'connecting' ? 'Connecting' :
-                         callStatus === 'ringing'    ? 'Ringing' :
-                         formatDuration(callDuration)}
-                      </div>
-                      <div className="text-[10px] tracking-widest uppercase mt-1" style={{ color: '#C9A84C' }}>
-                        {callStatus === 'in-call' ? 'Live' : callStatus}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => muteCall(!isMuted)} className={`flex-1 btn-ghost py-2 text-xs ${isMuted ? 'border-red-300 text-red-500' : ''}`}>
-                        {isMuted ? 'Unmute' : 'Mute'}
-                      </button>
-                      <button onClick={endCall} className="flex-1 btn-danger py-2 text-xs">Hang Up</button>
-                    </div>
-                    {/* Voicemail drop */}
-                    <button
-                      disabled={vmDropped}
-                      onClick={async () => {
-                        const callSid = (activeCall as any)?.parameters?.CallSid;
-                        if (!callSid) return;
-                        await fetch(`${API_BASE}/twilio/voicemail-drop`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ callSid }),
-                        });
-                        setVmDropped(true);
-                        setTimeout(() => endCall(), 1000);
-                      }}
-                      className="w-full text-[10px] tracking-widest uppercase py-2 rounded border transition-colors disabled:opacity-30"
-                      style={{ borderColor: 'rgba(201,168,76,0.4)', color: '#9A7A2E' }}
-                    >
-                      {vmDropped ? 'Voicemail Dropped ✓' : 'Drop Voicemail'}
-                    </button>
-                  </>
-                ) : (
-                  <div className="text-center py-2 text-[10px] tracking-widest text-gray-400 uppercase">
-                    {lastDisposition ? <span style={{ color: '#C9A84C' }}>Logged ✓</span> : 'Log outcome →'}
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4, lineHeight: 1.5 }}>
+                    📍 {currentContact.address}
                   </div>
                 )}
               </div>
 
+              {/* ── IDLE: Call button ── */}
+              {!isInCall && callStatus !== 'completed' && (
+                <div style={{ padding: '20px 20px 0' }}>
+                  <button
+                    onClick={handleDial}
+                    disabled={deviceStatus !== 'ready'}
+                    style={{
+                      width: '100%',
+                      padding: '14px 0',
+                      borderRadius: 10,
+                      border: 'none',
+                      background: deviceStatus !== 'ready' ? '#e5e7eb' : 'linear-gradient(135deg, #C9A84C, #e8c96e)',
+                      color: deviceStatus !== 'ready' ? '#9ca3af' : '#fff',
+                      fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                      cursor: deviceStatus !== 'ready' ? 'not-allowed' : 'pointer',
+                      boxShadow: deviceStatus !== 'ready' ? 'none' : '0 4px 14px rgba(201,168,76,0.35)',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    📞 Call {currentContact.firstName || currentContact.name.split(' ')[0]}
+                  </button>
+                  {deviceStatus !== 'ready' && (
+                    <p style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 8, letterSpacing: '0.05em' }}>
+                      {deviceStatus === 'loading' ? 'Setting up phone…' : 'Device not ready'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* ── IN-CALL state ── */}
+              {isInCall && (
+                <div style={{ padding: '16px 20px 0' }}>
+                  {/* Live indicator */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    padding: '10px 0', marginBottom: 12,
+                    background: callStatus === 'in-call' ? 'rgba(239,68,68,0.06)' : 'rgba(201,168,76,0.06)',
+                    borderRadius: 8, border: `1px solid ${callStatus === 'in-call' ? 'rgba(239,68,68,0.2)' : 'rgba(201,168,76,0.2)'}`,
+                  }}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: callStatus === 'in-call' ? '#ef4444' : '#C9A84C',
+                      boxShadow: callStatus === 'in-call' ? '0 0 0 3px rgba(239,68,68,0.2)' : '0 0 0 3px rgba(201,168,76,0.2)',
+                      animation: 'pulse 1.5s infinite',
+                    }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: callStatus === 'in-call' ? '#ef4444' : '#9A7A2E' }}>
+                      {callStatus === 'connecting' ? 'Connecting…' : callStatus === 'ringing' ? 'Ringing…' : 'Live'}
+                    </span>
+                    {callStatus === 'in-call' && (
+                      <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 300, color: '#111', letterSpacing: '0.1em' }}>
+                        {formatDuration(callDuration)}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Mute + Hang Up */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                    <button
+                      onClick={() => muteCall(!isMuted)}
+                      style={{
+                        flex: 1, padding: '10px 0', borderRadius: 8,
+                        border: `1px solid ${isMuted ? 'rgba(239,68,68,0.4)' : 'rgba(0,0,0,0.12)'}`,
+                        background: isMuted ? 'rgba(239,68,68,0.08)' : '#f9f9f9',
+                        color: isMuted ? '#ef4444' : '#555',
+                        fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {isMuted ? '🔇 Muted' : '🎤 Mute'}
+                    </button>
+                    <button
+                      onClick={endCall}
+                      style={{
+                        flex: 1, padding: '10px 0', borderRadius: 8,
+                        border: 'none',
+                        background: '#ef4444',
+                        color: '#fff',
+                        fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px rgba(239,68,68,0.35)',
+                      }}
+                    >
+                      📵 Hang Up
+                    </button>
+                  </div>
+
+                  {/* VM Drop */}
+                  <button
+                    disabled={vmDropped}
+                    onClick={async () => {
+                      const callSid = (activeCall as any)?.parameters?.CallSid;
+                      if (!callSid) return;
+                      await fetch(`${API_BASE}/twilio/voicemail-drop`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ callSid }),
+                      });
+                      setVmDropped(true);
+                      setTimeout(() => endCall(), 1000);
+                    }}
+                    style={{
+                      width: '100%', padding: '8px 0', borderRadius: 7,
+                      border: `1px solid ${vmDropped ? 'rgba(201,168,76,0.3)' : 'rgba(201,168,76,0.4)'}`,
+                      background: vmDropped ? 'rgba(201,168,76,0.08)' : 'transparent',
+                      color: vmDropped ? '#C9A84C' : '#9A7A2E',
+                      fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+                      cursor: vmDropped ? 'not-allowed' : 'pointer',
+                      opacity: vmDropped ? 0.7 : 1,
+                    }}
+                  >
+                    {vmDropped ? '✓ Voicemail Sent' : '📤 Drop Voicemail'}
+                  </button>
+                </div>
+              )}
+
+              {/* ── POST-CALL: Logged confirmation ── */}
+              {lastDisposition && (
+                <div style={{ padding: '16px 20px 0', textAlign: 'center' }}>
+                  <div style={{
+                    padding: '10px', borderRadius: 8,
+                    background: 'rgba(16,185,129,0.08)',
+                    border: '1px solid rgba(16,185,129,0.2)',
+                    color: '#059669', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em',
+                  }}>
+                    ✓ Logged — moving to next
+                  </div>
+                </div>
+              )}
+
               {/* Notes */}
-              <div>
-                <label className="field-label">Call Notes</label>
+              <div style={{ padding: '16px 20px 0' }}>
+                <label style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', display: 'block', marginBottom: 6 }}>
+                  Call Notes
+                </label>
                 <textarea
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
-                  placeholder="Notes during the call…"
-                  rows={4}
-                  className="field-input resize-none"
+                  placeholder="What did they say? Any follow-up needed?"
+                  rows={3}
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    padding: '8px 10px', borderRadius: 7,
+                    border: '1px solid #e5e7eb', background: '#fafafa',
+                    fontSize: 12, color: '#374151', resize: 'none', outline: 'none',
+                    lineHeight: 1.5,
+                  }}
                 />
               </div>
 
-              <button
-                onClick={() => setCurrentContactIndex(i => Math.min(i + 1, contacts.length - 1))}
-                disabled={isInCall}
-                className="text-[10px] text-gray-300 hover:text-black tracking-widest uppercase transition-colors disabled:opacity-30"
-              >
-                Skip →
-              </button>
-            </>
+              {/* Disposition — mobile only */}
+              <div className="md:hidden" style={{ padding: '12px 20px 0' }}>
+                <DispositionPanel
+                  onDisposition={handleDisposition}
+                  disabled={isInCall || Boolean(lastDisposition)}
+                />
+                {lastDisposition && currentContact && (
+                  <div style={{ marginTop: 12 }}>
+                    <NextActionPanel contactId={currentContact.id} onBook={() => {}} />
+                  </div>
+                )}
+              </div>
+
+              {/* Skip button */}
+              <div style={{ padding: '16px 20px 20px', marginTop: 'auto' }}>
+                <button
+                  onClick={() => {
+                    if (currentContactIndex < contacts.length - 1) {
+                      setCurrentContactIndex(i => i + 1);
+                      setLastDisposition(null);
+                      setNotes('');
+                      setVmDropped(false);
+                    }
+                  }}
+                  disabled={isInCall || currentContactIndex >= contacts.length - 1}
+                  style={{
+                    width: '100%', padding: '8px 0',
+                    borderRadius: 7, border: '1px solid #e5e7eb',
+                    background: 'transparent', color: '#9ca3af',
+                    fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+                    cursor: isInCall || currentContactIndex >= contacts.length - 1 ? 'not-allowed' : 'pointer',
+                    opacity: isInCall || currentContactIndex >= contacts.length - 1 ? 0.4 : 1,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={e => { if (!isInCall) (e.currentTarget as HTMLButtonElement).style.borderColor = '#C9A84C'; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#e5e7eb'; }}
+                >
+                  Skip Contact →
+                </button>
+              </div>
+            </div>
+
           ) : (
-            <div className="flex flex-col gap-3">
-              <p className="text-gray-400 text-sm">No contacts. Enter a number manually.</p>
-              <input type="tel" value={manualPhone} onChange={e => setManualPhone(e.target.value)} placeholder="+1 (555) 000-0000" className="field-input" />
-              <button onClick={handleDial} disabled={deviceStatus !== 'ready' || !manualPhone} className="btn-gold">Dial</button>
+            /* No contacts — manual dial */
+            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ padding: 16, borderRadius: 8, background: '#f9fafb', border: '1px solid #e5e7eb', textAlign: 'center' }}>
+                <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
+                <p style={{ fontSize: 12, color: '#6b7280', margin: 0, lineHeight: 1.5 }}>No contacts in queue.<br />Enter a number to dial manually.</p>
+              </div>
+              <label style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa' }}>Phone Number</label>
+              <input
+                type="tel" value={manualPhone}
+                onChange={e => setManualPhone(e.target.value)}
+                placeholder="+1 (555) 000-0000"
+                style={{ padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: 7, fontSize: 13, outline: 'none' }}
+              />
+              <button
+                onClick={handleDial}
+                disabled={deviceStatus !== 'ready' || !manualPhone}
+                style={{
+                  padding: '12px 0', borderRadius: 8, border: 'none',
+                  background: !manualPhone || deviceStatus !== 'ready' ? '#e5e7eb' : 'linear-gradient(135deg, #C9A84C, #e8c96e)',
+                  color: !manualPhone || deviceStatus !== 'ready' ? '#9ca3af' : '#fff',
+                  fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  cursor: !manualPhone || deviceStatus !== 'ready' ? 'not-allowed' : 'pointer',
+                }}
+              >
+                📞 Dial
+              </button>
             </div>
           )}
         </div>
 
-        {/* ── Center: AI Script ──────────────────────────── */}
-        <div className="flex-1 flex flex-col gap-4 p-6 overflow-y-auto bg-gray-50">
-          <div className="card-gold flex-1">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="field-label flex items-center gap-2">
-                <span>AI Script</span>
-                {aiScript?.cached && <span className="text-[9px] text-gray-300 tracking-widest">CACHED</span>}
-                {aiScriptLoading && <span className="text-[9px]" style={{ color: '#C9A84C' }}>GENERATING…</span>}
-              </h3>
+        {/* ── CENTER: AI Script ─────────────────────────────── */}
+        <div className="hidden md:flex" style={{ flex: 1, flexDirection: 'column', gap: 16, padding: 20, overflow: 'auto', background: '#f8f8f8' }}>
+
+          {/* AI Script card */}
+          <div style={{
+            background: '#fff', borderRadius: 12, border: '1px solid rgba(201,168,76,0.18)',
+            padding: 20, flex: 1, overflow: 'auto',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#9A7A2E' }}>
+                  ✨ AI Script
+                </span>
+                {aiScript?.cached && (
+                  <span style={{ fontSize: 9, color: '#ccc', letterSpacing: '0.08em', textTransform: 'uppercase' }}>cached</span>
+                )}
+                {aiScriptLoading && (
+                  <span style={{ fontSize: 9, color: '#C9A84C', letterSpacing: '0.08em', textTransform: 'uppercase' }}>generating…</span>
+                )}
+              </div>
               <button
                 onClick={() => {
                   if (!currentContact) return;
@@ -416,69 +721,80 @@ export default function Dialer() {
                     .then(r => r.json()).then(d => { setAiScript(d); setAiScriptLoading(false); })
                     .catch(() => setAiScriptLoading(false));
                 }}
-                className="text-[9px] tracking-widest uppercase hover:underline"
-                style={{ color: '#C9A84C' }}
-              >↺ Refresh</button>
+                style={{ fontSize: 10, color: '#C9A84C', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.06em' }}
+              >
+                ↺ Refresh
+              </button>
             </div>
 
             {aiScript ? (
-              <div className="space-y-3">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {/* Opener */}
-                <div className="p-4 rounded border" style={{ borderColor: 'rgba(201,168,76,0.3)', background: 'rgba(201,168,76,0.04)' }}>
-                  <span className="text-[9px] font-bold tracking-widest uppercase block mb-1.5" style={{ color: '#C9A84C' }}>
+                <div style={{ padding: '14px 16px', borderRadius: 8, background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)' }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#C9A84C', marginBottom: 8 }}>
                     Opener
-                  </span>
-                  <span className="text-sm leading-relaxed text-gray-800">{aiScript.opener}</span>
+                  </div>
+                  <p style={{ fontSize: 13, lineHeight: 1.65, color: '#1f2937', margin: 0 }}>{aiScript.opener}</p>
                 </div>
 
                 {/* Objections */}
                 {aiScript.objections?.map((obj: any, i: number) => (
-                  <div key={i} className="p-3 rounded cursor-pointer transition-all hover:bg-white border border-transparent hover:border-gray-100">
-                    <span className="text-[9px] font-bold tracking-widest uppercase block mb-1" style={{ color: '#999' }}>
+                  <div key={i} style={{ padding: '12px 14px', borderRadius: 8, border: '1px solid #f0f0f0', background: '#fff', cursor: 'pointer', transition: 'border-color 0.15s' }}
+                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(201,168,76,0.3)'}
+                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.borderColor = '#f0f0f0'}
+                  >
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 6 }}>
                       If they say: "{obj.trigger}"
-                    </span>
-                    <span className="text-xs leading-relaxed text-gray-600">{obj.response}</span>
+                    </div>
+                    <p style={{ fontSize: 12, lineHeight: 1.6, color: '#4b5563', margin: 0 }}>{obj.response}</p>
                   </div>
                 ))}
 
                 {/* Close */}
-                <div className="p-3 rounded border border-gray-100 bg-white">
-                  <span className="text-[9px] font-bold tracking-widest uppercase block mb-1" style={{ color: '#C9A84C' }}>
+                <div style={{ padding: '12px 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fafafa' }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#C9A84C', marginBottom: 6 }}>
                     Close Attempt
-                  </span>
-                  <span className="text-xs leading-relaxed text-gray-700">{aiScript.closeAttempt}</span>
+                  </div>
+                  <p style={{ fontSize: 12, lineHeight: 1.6, color: '#374151', margin: 0 }}>{aiScript.closeAttempt}</p>
                 </div>
 
-                {/* Coaching tip */}
+                {/* Tip */}
                 {aiScript.tip && (
-                  <div className="p-3 rounded bg-gray-50 border border-gray-100">
-                    <span className="text-[9px] font-bold tracking-widest uppercase block mb-1 text-gray-400">
-                      Coach Tip
-                    </span>
-                    <span className="text-xs text-gray-500 leading-relaxed">{aiScript.tip}</span>
+                  <div style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #f0f0f0', background: '#f9fafb' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#d1d5db', marginBottom: 5 }}>
+                      💡 Coach Tip
+                    </div>
+                    <p style={{ fontSize: 11, lineHeight: 1.55, color: '#6b7280', margin: 0 }}>{aiScript.tip}</p>
                   </div>
                 )}
               </div>
             ) : aiScriptLoading ? (
-              <div className="space-y-3">
-                {[1,2,3].map(i => (
-                  <div key={i} className="h-16 rounded animate-pulse" style={{ background: 'rgba(201,168,76,0.06)' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[80, 120, 60].map((h, i) => (
+                  <div key={i} className="animate-pulse" style={{ height: h, borderRadius: 8, background: 'rgba(201,168,76,0.06)' }} />
                 ))}
               </div>
             ) : (
-              <p className="text-gray-300 text-sm">Select a contact to generate script.</p>
+              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>✨</div>
+                <p style={{ fontSize: 12, color: '#9ca3af', lineHeight: 1.5 }}>Select a contact to generate a personalized AI script.</p>
+              </div>
             )}
           </div>
 
+          {/* Session Log */}
           {callHistory.length > 0 && (
-            <div className="card">
-              <h3 className="field-label mb-3">Session Log</h3>
-              <div className="space-y-2">
-                {callHistory.slice(0, 6).map((c, i) => (
-                  <div key={i} className="flex items-center justify-between text-xs">
-                    <span className="text-gray-800 font-medium w-36 truncate">{c.name}</span>
-                    <span className="text-gray-400 font-mono">{formatDuration(c.duration)}</span>
-                    <span className="text-gray-500 capitalize tracking-wide">{c.disposition.replace(/-/g, ' ')}</span>
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(0,0,0,0.06)', padding: '16px 20px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 12 }}>
+                Session Log
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {callHistory.slice(0, 8).map((c, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+                    <span style={{ fontSize: 14 }}>{DISP_EMOJI[c.disposition] || '📞'}</span>
+                    <span style={{ flex: 1, fontWeight: 500, color: '#1f2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9ca3af' }}>{formatDuration(c.duration)}</span>
+                    <span style={{ fontSize: 10, color: '#6b7280', textTransform: 'capitalize', letterSpacing: '0.02em' }}>{c.disposition.replace(/-/g, ' ')}</span>
                   </div>
                 ))}
               </div>
@@ -486,19 +802,54 @@ export default function Dialer() {
           )}
         </div>
 
-        {/* ── Right: Disposition + AI Next Action ────────── */}
-        <div className="w-56 border-l border-gray-100 p-4 bg-white flex flex-col gap-4">
+        {/* ── RIGHT: Disposition ───────────────────────────── */}
+        <div
+          className="hidden md:flex"
+          style={{
+            width: 200, flexShrink: 0,
+            borderLeft: '1px solid rgba(0,0,0,0.06)',
+            background: '#fff', padding: '20px 16px',
+            flexDirection: 'column', gap: 16,
+            overflow: 'auto',
+          }}
+        >
+          {/* Step hint */}
+          <div style={{
+            padding: '10px 12px', borderRadius: 8,
+            background: isInCall ? 'rgba(239,68,68,0.05)' : showDisposition ? 'rgba(201,168,76,0.08)' : 'rgba(0,0,0,0.03)',
+            border: `1px solid ${isInCall ? 'rgba(239,68,68,0.2)' : showDisposition ? 'rgba(201,168,76,0.25)' : 'rgba(0,0,0,0.06)'}`,
+          }}>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: isInCall ? '#ef4444' : showDisposition ? '#9A7A2E' : '#9ca3af', marginBottom: 3 }}>
+              {isInCall ? 'On a call' : showDisposition ? 'Call ended' : 'Waiting'}
+            </div>
+            <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
+              {isInCall
+                ? 'Use Hang Up when done'
+                : showDisposition
+                ? 'Log the outcome below ↓'
+                : sessionCalls === 0
+                ? 'Press Call to start'
+                : 'Press Call for next contact'}
+            </div>
+          </div>
+
           <DispositionPanel
             onDisposition={handleDisposition}
-            disabled={isInCall || (callStatus === 'idle' && lastDisposition !== null)}
+            disabled={isInCall || Boolean(lastDisposition) || sessionCalls === 0}
           />
 
-          {/* AI Next Action — shows after call ends */}
           {lastDisposition && currentContact && (
-            <NextActionPanel contactId={currentContact.id} onBook={() => {/* future: open appointment modal */}} />
+            <NextActionPanel contactId={currentContact.id} onBook={() => {}} />
           )}
         </div>
       </div>
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
     </div>
   );
 }

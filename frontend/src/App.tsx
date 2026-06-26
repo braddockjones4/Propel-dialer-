@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
+import Landing from './components/Landing';
 import Billing from './components/Billing';
 import NotificationBell from './components/NotificationBell';
 import Dialer from './components/Dialer';
@@ -41,6 +42,7 @@ function AppInner() {
   const [page, setPage]             = useState<Page>('dialer');
   const [tripleMode, setTripleMode] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [showLogin, setShowLogin]   = useState(false);
 
   // Check URL param for post-Stripe redirect
   const urlParams = new URLSearchParams(window.location.search);
@@ -50,18 +52,32 @@ function AppInner() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa' }}>
-        <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 24, fontWeight: 300, letterSpacing: '0.4em', color: '#C9A84C' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0A0A0A', gap: 20 }}>
+        <div style={{ width: 64, height: 64, borderRadius: 16, background: '#111', border: '1px solid rgba(201,168,76,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 40px rgba(0,0,0,0.5)' }}>
+          <svg width="28" height="38" viewBox="0 0 52 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="bolt-load" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#E8C96A"/>
+                <stop offset="100%" stopColor="#8A6020"/>
+              </linearGradient>
+            </defs>
+            <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-load)"/>
+          </svg>
+        </div>
+        <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 22, fontWeight: 300, letterSpacing: '0.5em', color: '#C9A84C' }}>
           PROPEL
         </div>
       </div>
     );
   }
 
-  if (!user) return <Login />;
+  if (!user) {
+    if (showLogin) return <Login onBack={() => setShowLogin(false)} />;
+    return <Landing onSignIn={() => setShowLogin(true)} />;
+  }
 
   const PLAN_BADGE: Record<string, string> = {
-    trial:   '14-day Trial',
+    trial:   '7-day Trial',
     starter: 'Starter',
     pro:     'Pro',
     elite:   'Elite',
@@ -73,28 +89,51 @@ function AppInner() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b hidden md:flex items-center px-6"
            style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
 
-        <span className="font-serif font-light text-xl text-black mr-8"
-              style={{ letterSpacing: '0.4em', cursor: 'pointer' }}
-              onClick={() => setPage('dialer')}>
-          PROPEL
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 28, cursor: 'pointer' }} onClick={() => setPage('dialer')}>
+          <svg width="16" height="22" viewBox="0 0 52 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="bolt-nav-app" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#E8C96A"/>
+                <stop offset="100%" stopColor="#9A7A2E"/>
+              </linearGradient>
+            </defs>
+            <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-nav-app)"/>
+          </svg>
+          <span className="font-serif font-light text-xl text-black" style={{ letterSpacing: '0.4em' }}>PROPEL</span>
+        </div>
 
         <div className="w-px h-4 mr-6" style={{ background: 'rgba(201,168,76,0.3)' }} />
 
         <div className="flex items-center overflow-x-auto hide-scrollbar flex-1">
-          {NAV.map(({ id, label }) => (
+          {NAV.map(({ id, label, icon }) => (
             <button
               key={id}
               onClick={() => setPage(id)}
-              className={`relative px-3 py-3.5 text-[10px] font-semibold tracking-widest uppercase whitespace-nowrap transition-all duration-200 ${
-                page === id ? 'text-black' : 'text-gray-400 hover:text-gray-700'
-              }`}
+              className="relative whitespace-nowrap transition-all duration-200"
+              style={{
+                padding: '6px 10px',
+                borderRadius: 7,
+                margin: '0 1px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 2,
+                background: page === id ? 'rgba(201,168,76,0.1)' : 'transparent',
+                border: page === id ? '1px solid rgba(201,168,76,0.25)' : '1px solid transparent',
+                cursor: 'pointer',
+              }}
             >
-              {label}
-              {page === id && (
-                <span className="absolute bottom-0 left-0 right-0 h-[2px]"
-                      style={{ background: '#C9A84C' }} />
-              )}
+              <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>
+              <span style={{
+                fontSize: 8,
+                fontWeight: 700,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: page === id ? '#9A7A2E' : '#9ca3af',
+                lineHeight: 1,
+              }}>
+                {label}
+              </span>
             </button>
           ))}
         </div>
@@ -146,7 +185,18 @@ function AppInner() {
       {/* ── Mobile nav ──────────────────────────────────────────────── */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b flex md:hidden items-center justify-between px-4"
            style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
-        <span className="font-serif font-light text-lg text-black" style={{ letterSpacing: '0.4em' }}>PROPEL</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <svg width="13" height="18" viewBox="0 0 52 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="bolt-mob" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#E8C96A"/>
+                <stop offset="100%" stopColor="#9A7A2E"/>
+              </linearGradient>
+            </defs>
+            <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-mob)"/>
+          </svg>
+          <span className="font-serif font-light text-lg text-black" style={{ letterSpacing: '0.4em' }}>PROPEL</span>
+        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setPage('billing')}
@@ -189,7 +239,7 @@ function AppInner() {
 
       {/* ── Mobile bottom tab bar ────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-white border-t"
-           style={{ borderTopColor: 'rgba(201,168,76,0.2)' }}>
+           style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)', paddingTop: 4 }}>
         {[
           { id: 'dialer'   as Page, icon: '📞', label: 'Dial' },
           { id: 'contacts' as Page, icon: '👥', label: 'CRM' },
@@ -200,11 +250,24 @@ function AppInner() {
           <button
             key={id}
             onClick={() => setPage(id)}
-            className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5"
-            style={{ color: page === id ? '#C9A84C' : '#9ca3af' }}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5"
+            style={{ padding: '4px 0 8px', position: 'relative' }}
           >
-            <span style={{ fontSize: 18 }}>{icon}</span>
-            <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{label}</span>
+            {page === id && (
+              <span style={{
+                position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
+                width: 24, height: 2, borderRadius: 99, background: '#C9A84C',
+              }} />
+            )}
+            <span style={{
+              fontSize: 20,
+              filter: page === id ? 'none' : 'grayscale(0.5) opacity(0.55)',
+              transition: 'filter 0.2s',
+            }}>{icon}</span>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+              color: page === id ? '#9A7A2E' : '#9ca3af',
+            }}>{label}</span>
           </button>
         ))}
       </div>

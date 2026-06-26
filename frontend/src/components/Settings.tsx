@@ -322,7 +322,7 @@ export default function Settings() {
                   {user?.plan || 'Trial'} Plan
                 </div>
                 <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                  {user?.plan === 'trial' ? '14-day free trial' : user?.plan === 'starter' ? '$99/month' : user?.plan === 'pro' ? '$199/month' : '$399/month'}
+                  {user?.plan === 'trial' ? '7-day free trial' : user?.plan === 'starter' ? '$99/month' : user?.plan === 'pro' ? '$199/month' : '$399/month'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 10 }}>

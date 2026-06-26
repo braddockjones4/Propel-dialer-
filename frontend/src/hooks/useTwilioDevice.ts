@@ -58,6 +58,8 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
         });
 
         device.on('error', (err) => {
+          // 31005 = "Error sent from gateway in HANGUP" — fires on normal call end, safe to ignore
+          if (err?.code === 31005) return;
           console.error('Twilio Device error:', err);
           if (!cancelled) {
             setDeviceStatus('error');
@@ -138,6 +140,8 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
     });
 
     call.on('error', (err) => {
+      // 31005 fires on normal hangup from the remote side — not a real error
+      if (err?.code === 31005) return;
       console.error('Call error:', err);
       setCallStatus('failed');
       setErrorMessage(err.message || 'Call error.');

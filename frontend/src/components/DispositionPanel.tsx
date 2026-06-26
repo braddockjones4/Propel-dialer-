@@ -1,14 +1,84 @@
 import React from 'react';
 import type { Disposition, DispositionType } from '../types';
 
-const DISPOSITIONS: Disposition[] = [
-  { type: 'not-home',          label: 'Not Home',       color: '', emoji: '', description: 'No answer / hung up' },
-  { type: 'left-voicemail',    label: 'Voicemail',      color: '', emoji: '', description: 'Left a voicemail' },
-  { type: 'callback-scheduled',label: 'Callback',       color: '', emoji: '', description: 'Set a callback time' },
-  { type: 'not-interested',    label: 'Not Interested', color: '', emoji: '', description: 'Prospect declined' },
-  { type: 'wrong-number',      label: 'Wrong Number',   color: '', emoji: '', description: 'Invalid contact' },
-  { type: 'dnc',               label: 'Do Not Call',    color: '', emoji: '', description: 'Add to DNC list' },
-  { type: 'hot-lead',          label: 'Hot Lead',       color: 'gold', emoji: '', description: 'Interested — pipeline' },
+const DISPOSITIONS: (Disposition & { emoji: string; bg: string; border: string; textColor: string; hint: string })[] = [
+  {
+    type: 'not-home',
+    label: 'No Answer',
+    emoji: '📵',
+    color: '',
+    description: 'No answer / hung up',
+    hint: 'Ring, no pickup',
+    bg: 'rgba(107,114,128,0.06)',
+    border: 'rgba(107,114,128,0.2)',
+    textColor: '#6b7280',
+  },
+  {
+    type: 'left-voicemail',
+    label: 'Left Voicemail',
+    emoji: '📬',
+    color: '',
+    description: 'Left a voicemail',
+    hint: 'Message left',
+    bg: 'rgba(59,130,246,0.06)',
+    border: 'rgba(59,130,246,0.25)',
+    textColor: '#3b82f6',
+  },
+  {
+    type: 'callback-scheduled',
+    label: 'Callback',
+    emoji: '📅',
+    color: '',
+    description: 'Set a callback time',
+    hint: 'Call back later',
+    bg: 'rgba(139,92,246,0.06)',
+    border: 'rgba(139,92,246,0.25)',
+    textColor: '#7c3aed',
+  },
+  {
+    type: 'not-interested',
+    label: 'Not Interested',
+    emoji: '👎',
+    color: '',
+    description: 'Prospect declined',
+    hint: 'Politely declined',
+    bg: 'rgba(107,114,128,0.06)',
+    border: 'rgba(107,114,128,0.18)',
+    textColor: '#9ca3af',
+  },
+  {
+    type: 'wrong-number',
+    label: 'Wrong Number',
+    emoji: '🔢',
+    color: '',
+    description: 'Invalid contact',
+    hint: 'Bad phone number',
+    bg: 'rgba(107,114,128,0.06)',
+    border: 'rgba(107,114,128,0.18)',
+    textColor: '#9ca3af',
+  },
+  {
+    type: 'dnc',
+    label: 'Do Not Call',
+    emoji: '🚫',
+    color: '',
+    description: 'Add to DNC list',
+    hint: 'Remove permanently',
+    bg: 'rgba(239,68,68,0.06)',
+    border: 'rgba(239,68,68,0.25)',
+    textColor: '#ef4444',
+  },
+  {
+    type: 'hot-lead',
+    label: 'Hot Lead',
+    emoji: '🔥',
+    color: 'gold',
+    description: 'Interested — pipeline',
+    hint: 'Ready to list / buy',
+    bg: 'rgba(201,168,76,0.12)',
+    border: 'rgba(201,168,76,0.5)',
+    textColor: '#9A7A2E',
+  },
 ];
 
 interface DispositionPanelProps {
@@ -18,29 +88,61 @@ interface DispositionPanelProps {
 
 export default function DispositionPanel({ onDisposition, disabled = false }: DispositionPanelProps) {
   return (
-    <div className="card h-full flex flex-col" style={{ border: '1px solid rgba(201,168,76,0.2)' }}>
-      <h3 className="field-label mb-4">Log Outcome</h3>
-      <div className="flex flex-col gap-2 flex-1">
-        {DISPOSITIONS.map(d => (
-          <button
-            key={d.type}
-            onClick={() => onDisposition(d.type)}
-            disabled={disabled}
-            title={d.description}
-            className={`w-full text-left text-[10px] font-semibold tracking-widest uppercase px-3 py-2.5 rounded
-              transition-all duration-150 disabled:opacity-25 disabled:cursor-not-allowed
-              ${d.type === 'hot-lead'
-                ? 'text-black border border-yellow-600/60 hover:border-yellow-600'
-                : d.type === 'dnc'
-                ? 'border border-red-200 text-red-500 hover:bg-red-50'
-                : 'border border-gray-200 text-gray-600 hover:border-yellow-600/50 hover:text-black'
-              }`}
-            style={d.type === 'hot-lead' ? { background: 'rgba(201,168,76,0.12)' } : {}}
-          >
-            {d.label}
-          </button>
-        ))}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 5 }}>
+      <div style={{
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        color: '#9ca3af',
+        marginBottom: 4,
+      }}>
+        How did it go?
       </div>
+
+      {DISPOSITIONS.map(d => (
+        <button
+          key={d.type}
+          onClick={() => onDisposition(d.type)}
+          disabled={disabled}
+          title={d.description}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '7px 10px',
+            borderRadius: 7,
+            border: `1px solid ${disabled ? 'rgba(0,0,0,0.07)' : d.border}`,
+            background: disabled ? 'rgba(0,0,0,0.02)' : d.bg,
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            opacity: disabled ? 0.3 : 1,
+            transition: 'all 0.15s',
+            textAlign: 'left',
+          }}
+        >
+          <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{d.emoji}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.05em',
+              textTransform: 'uppercase',
+              color: disabled ? '#ccc' : d.textColor,
+              lineHeight: 1.2,
+            }}>
+              {d.label}
+            </div>
+            <div style={{
+              fontSize: 9,
+              color: disabled ? '#ddd' : 'rgba(0,0,0,0.32)',
+              marginTop: 1,
+            }}>
+              {d.hint}
+            </div>
+          </div>
+        </button>
+      ))}
     </div>
   );
 }
