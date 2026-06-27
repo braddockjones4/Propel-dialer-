@@ -120,7 +120,8 @@ export default function Dialer() {
     authFetch(`${API_BASE}/contacts?limit=300`)
       .then(r => r.json())
       .then(data => {
-        const sorted = [...data].sort((a: any, b: any) => (b.leadScore ?? 0) - (a.leadScore ?? 0));
+        const arr = Array.isArray(data) ? data : [];
+        const sorted = [...arr].sort((a: any, b: any) => (b.leadScore ?? 0) - (a.leadScore ?? 0));
         setContacts(sorted.map(mapContact));
         setLoading(false);
       })

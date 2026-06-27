@@ -21,7 +21,7 @@ export default function Sequences() {
   const [saving, setSaving]       = useState<string | null>(null);
   const [saved, setSaved]         = useState<string | null>(null);
 
-  useEffect(() => { authFetch(`${API_BASE}/sequences`).then(r => r.json()).then(setSequences).catch(console.error); }, []);
+  useEffect(() => { authFetch(`${API_BASE}/sequences`).then(r => r.json()).then(d => setSequences(Array.isArray(d) ? d : [])).catch(console.error); }, []);
 
   async function save(seq: Sequence) {
     setSaving(seq.id);

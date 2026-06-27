@@ -64,7 +64,7 @@ export default function Contacts() {
     setLoading(true);
     authFetch(`${API_BASE}/contacts?limit=500`)
       .then(r => r.json())
-      .then(data => { setContacts(data); setLoading(false); })
+      .then(data => { setContacts(Array.isArray(data) ? data : []); setLoading(false); })
       .catch(() => setLoading(false));
   };
 

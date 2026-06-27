@@ -52,9 +52,9 @@ export default function Pipeline() {
     setLoading(true);
     // Load all statuses including appointment and closed
     const [regular, appt, closed] = await Promise.all([
-      authFetch(`${API_BASE}/contacts?limit=500`).then(r => r.json()).catch(() => []),
-      authFetch(`${API_BASE}/contacts?status=appointment&limit=200`).then(r => r.json()).catch(() => []),
-      authFetch(`${API_BASE}/contacts?status=closed&limit=200`).then(r => r.json()).catch(() => []),
+      authFetch(`${API_BASE}/contacts?limit=500`).then(r => r.json()).then(d => Array.isArray(d) ? d : []).catch(() => []),
+      authFetch(`${API_BASE}/contacts?status=appointment&limit=200`).then(r => r.json()).then(d => Array.isArray(d) ? d : []).catch(() => []),
+      authFetch(`${API_BASE}/contacts?status=closed&limit=200`).then(r => r.json()).then(d => Array.isArray(d) ? d : []).catch(() => []),
     ]);
     // Merge and dedupe by id
     const all = [...regular, ...appt, ...closed];
