@@ -149,7 +149,7 @@ export default function Login({ onBack }: Props) {
                 <input
                   type="password" value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  required={mode !== 'forgot'}
+                  required
                   style={inputStyle}
                 />
               </div>
