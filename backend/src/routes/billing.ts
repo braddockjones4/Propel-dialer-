@@ -18,7 +18,7 @@ const PLANS = [
     name:        'Starter',
     price:       99,
     priceId:     process.env.STRIPE_PRICE_STARTER || '',
-    features:    ['Single-line dialing', 'SMS Blast', 'Inbox', '500 contacts', 'Basic analytics'],
+    features:    ['Single-line dialing', 'SMS Blast', 'Inbox', '1,000 contacts', 'Basic analytics'],
     callsPerDay: 100,
   },
   {
@@ -35,7 +35,7 @@ const PLANS = [
     name:        'Elite',
     price:       399,
     priceId:     process.env.STRIPE_PRICE_ELITE || '',
-    features:    ['Everything in Pro', 'AI Next-Action engine', 'AI transcription & scoring', 'Unlimited contacts', 'Priority support', 'White-label option'],
+    features:    ['Everything in Pro', 'AI Next-Action engine', 'AI transcription & scoring', 'Unlimited contacts', 'Priority support'],
     callsPerDay: -1, // unlimited
   },
 ];
