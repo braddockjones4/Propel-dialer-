@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import TeamPanel from './TeamPanel';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface LocalNumber {
@@ -52,9 +52,9 @@ export default function Settings() {
   const [savingNgrok, setSavingNgrok] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_BASE}/local-presence/numbers`).then(r => r.json()).then(setNumbers).catch(() => {});
-    fetch(`${API_BASE}/settings/status`).then(r => r.json()).then(setStatus).catch(() => {});
-    fetch(`${API_BASE}/settings/ngrok`).then(r => r.json()).then(d => setNgrok(d.ngrokUrl || '')).catch(() => {});
+    authFetch(`${API_BASE}/local-presence/numbers`).then(r => r.json()).then(setNumbers).catch(() => {});
+    authFetch(`${API_BASE}/settings/status`).then(r => r.json()).then(setStatus).catch(() => {});
+    authFetch(`${API_BASE}/settings/ngrok`).then(r => r.json()).then(d => setNgrok(d.ngrokUrl || '')).catch(() => {});
   }, []);
 
   // ── Account save ────────────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ export default function Settings() {
     if (name !== user?.name) body.name = name;
     if (password) body.password = password;
     if (!Object.keys(body).length) { setSavingAcct(false); toast.info('Nothing changed'); return; }
-    const r = await fetch(`${API_BASE}/auth/me`, {
+    const r = await authFetch(`${API_BASE}/auth/me`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
@@ -78,7 +78,7 @@ export default function Settings() {
   // ── Buy number ──────────────────────────────────────────────────────────────
   const buyNumber = async () => {
     setBuying(true); setBuyError('');
-    const r = await fetch(`${API_BASE}/local-presence/buy`, {
+    const r = await authFetch(`${API_BASE}/local-presence/buy`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ areaCode: buyAC, state: buyState, label: buyLabel }),
@@ -92,7 +92,7 @@ export default function Settings() {
   const addManual = async () => {
     if (!addNumber.trim()) return;
     setBuying(true);
-    const r = await fetch(`${API_BASE}/local-presence/add`, {
+    const r = await authFetch(`${API_BASE}/local-presence/add`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ number: addNumber, label: buyLabel }),
@@ -104,7 +104,7 @@ export default function Settings() {
   };
 
   const toggleNumber = async (id: string, active: boolean) => {
-    await fetch(`${API_BASE}/local-presence/${id}`, {
+    await authFetch(`${API_BASE}/local-presence/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active: !active }),
     });
@@ -112,7 +112,7 @@ export default function Settings() {
   };
 
   const deleteNumber = async (id: string) => {
-    await fetch(`${API_BASE}/local-presence/${id}`, { method: 'DELETE' });
+    await authFetch(`${API_BASE}/local-presence/${id}`, { method: 'DELETE' });
     setNumbers(n => n.filter(x => x.id !== id));
     toast.success('Number removed');
   };
@@ -120,7 +120,7 @@ export default function Settings() {
   // ── Save ngrok URL ──────────────────────────────────────────────────────────
   const saveNgrok = async () => {
     setSavingNgrok(true);
-    await fetch(`${API_BASE}/settings/ngrok`, {
+    await authFetch(`${API_BASE}/settings/ngrok`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ngrokUrl: ngrok }),
     });
@@ -131,7 +131,7 @@ export default function Settings() {
   // ── Billing portal ──────────────────────────────────────────────────────────
   const openPortal = async () => {
     if (!token) return;
-    const r = await fetch(`${API_BASE}/billing/portal`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    const r = await authFetch(`${API_BASE}/billing/portal`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     const d = await r.json();
     if (d.url) window.location.href = d.url;
     else toast.error(d.error || 'No active subscription');

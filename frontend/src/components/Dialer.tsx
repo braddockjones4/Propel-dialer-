@@ -3,7 +3,7 @@ import { useTwilioDevice } from '../hooks/useTwilioDevice';
 import DispositionPanel from './DispositionPanel';
 import NextActionPanel from './NextActionPanel';
 import type { Contact, DispositionType } from '../types';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -117,7 +117,7 @@ export default function Dialer() {
   };
 
   useEffect(() => {
-    fetch(`${API_BASE}/contacts?limit=300`)
+    authFetch(`${API_BASE}/contacts?limit=300`)
       .then(r => r.json())
       .then(data => {
         const sorted = [...data].sort((a: any, b: any) => (b.leadScore ?? 0) - (a.leadScore ?? 0));
@@ -132,7 +132,7 @@ export default function Dialer() {
     if (!contact) return;
     setAiScript(null);
     setAiScriptLoading(true);
-    fetch(`${API_BASE}/ai-script/${contact.id}`)
+    authFetch(`${API_BASE}/ai-script/${contact.id}`)
       .then(r => r.json())
       .then(data => { setAiScript(data); setAiScriptLoading(false); })
       .catch(() => setAiScriptLoading(false));
@@ -171,13 +171,13 @@ export default function Dialer() {
       setCallHistory(h => [{ name: currentContact.name, phone: currentContact.phone, disposition: type, duration: callDuration }, ...h]);
       try {
         const twilioSid = (activeCall as any)?.parameters?.CallSid || undefined;
-        await fetch(`${API_BASE}/contacts/${currentContact.id}/calls`, {
+        await authFetch(`${API_BASE}/contacts/${currentContact.id}/calls`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ duration: callDuration, disposition: type, notes, twilioSid }),
         });
         if (type === 'hot-lead' || type === 'callback-scheduled') {
-          await fetch(`${API_BASE}/twilio/disposition`, {
+          await authFetch(`${API_BASE}/twilio/disposition`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -562,7 +562,7 @@ export default function Dialer() {
                     onClick={async () => {
                       const callSid = (activeCall as any)?.parameters?.CallSid;
                       if (!callSid) return;
-                      await fetch(`${API_BASE}/twilio/voicemail-drop`, {
+                      await authFetch(`${API_BASE}/twilio/voicemail-drop`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ callSid }),
@@ -717,7 +717,7 @@ export default function Dialer() {
                   if (!currentContact) return;
                   setAiScript(null);
                   setAiScriptLoading(true);
-                  fetch(`${API_BASE}/ai-script/${currentContact.id}?refresh=true`)
+                  authFetch(`${API_BASE}/ai-script/${currentContact.id}?refresh=true`)
                     .then(r => r.json()).then(d => { setAiScript(d); setAiScriptLoading(false); })
                     .catch(() => setAiScriptLoading(false));
                 }}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface TeamMember {
@@ -39,8 +39,8 @@ export default function TeamPanel() {
   const load = async () => {
     setLoading(true);
     const [mRes, sRes] = await Promise.all([
-      fetch(`${API_BASE}/team/members`, { headers }),
-      fetch(`${API_BASE}/team/stats`,   { headers }),
+      authFetch(`${API_BASE}/team/members`, { headers }),
+      authFetch(`${API_BASE}/team/stats`,   { headers }),
     ]);
     if (mRes.ok) setMembers(await mRes.json());
     if (sRes.ok) setStats(await sRes.json());
@@ -52,7 +52,7 @@ export default function TeamPanel() {
   const invite = async () => {
     if (!invEmail || !invPass) { toast.error('Email and password required'); return; }
     setInviting(true);
-    const r = await fetch(`${API_BASE}/team/invite`, {
+    const r = await authFetch(`${API_BASE}/team/invite`, {
       method: 'POST', headers,
       body: JSON.stringify({ email: invEmail, name: invName, role: invRole, tempPassword: invPass }),
     });
@@ -68,14 +68,14 @@ export default function TeamPanel() {
   };
 
   const updateRole = async (id: string, role: string) => {
-    await fetch(`${API_BASE}/team/members/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ role }) });
+    await authFetch(`${API_BASE}/team/members/${id}`, { method: 'PATCH', headers, body: JSON.stringify({ role }) });
     setMembers(m => m.map(x => x.id === id ? { ...x, role } : x));
     toast.success('Role updated');
   };
 
   const remove = async (id: string, email: string) => {
     if (!window.confirm(`Remove ${email} from the team?`)) return;
-    await fetch(`${API_BASE}/team/members/${id}`, { method: 'DELETE', headers });
+    await authFetch(`${API_BASE}/team/members/${id}`, { method: 'DELETE', headers });
     setMembers(m => m.filter(x => x.id !== id));
     toast.success('Member removed');
   };

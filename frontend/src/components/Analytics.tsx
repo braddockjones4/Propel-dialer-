@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface AnalyticsData {
@@ -123,7 +123,7 @@ export default function Analytics() {
 
   const load = () => {
     setLoading(true);
-    fetch(`${API_BASE}/analytics`)
+    authFetch(`${API_BASE}/analytics`)
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => { setError('Failed to load analytics'); setLoading(false); });

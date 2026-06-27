@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface BlastStatus {
@@ -42,7 +42,7 @@ export default function VoicemailBlast() {
     const params = new URLSearchParams({ limit: '1000' });
     if (sourceFilter) params.set('source', sourceFilter);
     if (statusFilter) params.set('status', statusFilter);
-    fetch(`${API_BASE}/contacts?${params}`)
+    authFetch(`${API_BASE}/contacts?${params}`)
       .then(r => r.json())
       .then(data => setCount(Array.isArray(data) ? data.length : 0))
       .catch(() => setCount(null));
@@ -53,7 +53,7 @@ export default function VoicemailBlast() {
     if (!blastId) return;
     pollRef.current = setInterval(async () => {
       try {
-        const r = await fetch(`${API_BASE}/voicemail-blast/${blastId}`);
+        const r = await authFetch(`${API_BASE}/voicemail-blast/${blastId}`);
         const data = await r.json();
         setBlast(data);
         if (data.status === 'done' || data.status === 'stopped') {
@@ -69,7 +69,7 @@ export default function VoicemailBlast() {
     setError('');
     setSending(true);
     try {
-      const r = await fetch(`${API_BASE}/voicemail-blast/start`, {
+      const r = await authFetch(`${API_BASE}/voicemail-blast/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -93,7 +93,7 @@ export default function VoicemailBlast() {
 
   const handleStop = async () => {
     if (!blastId) return;
-    await fetch(`${API_BASE}/voicemail-blast/${blastId}/stop`, { method: 'POST' });
+    await authFetch(`${API_BASE}/voicemail-blast/${blastId}/stop`, { method: 'POST' });
   };
 
   const handleReset = () => {

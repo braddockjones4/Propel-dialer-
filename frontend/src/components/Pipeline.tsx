@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface Contact {
@@ -52,9 +52,9 @@ export default function Pipeline() {
     setLoading(true);
     // Load all statuses including appointment and closed
     const [regular, appt, closed] = await Promise.all([
-      fetch(`${API_BASE}/contacts?limit=500`).then(r => r.json()).catch(() => []),
-      fetch(`${API_BASE}/contacts?status=appointment&limit=200`).then(r => r.json()).catch(() => []),
-      fetch(`${API_BASE}/contacts?status=closed&limit=200`).then(r => r.json()).catch(() => []),
+      authFetch(`${API_BASE}/contacts?limit=500`).then(r => r.json()).catch(() => []),
+      authFetch(`${API_BASE}/contacts?status=appointment&limit=200`).then(r => r.json()).catch(() => []),
+      authFetch(`${API_BASE}/contacts?status=closed&limit=200`).then(r => r.json()).catch(() => []),
     ]);
     // Merge and dedupe by id
     const all = [...regular, ...appt, ...closed];
@@ -68,7 +68,7 @@ export default function Pipeline() {
 
   const moveContact = async (contactId: string, newStatus: string) => {
     setContacts(prev => prev.map(c => c.id === contactId ? { ...c, status: newStatus } : c));
-    await fetch(`${API_BASE}/contacts/${contactId}`, {
+    await authFetch(`${API_BASE}/contacts/${contactId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus }),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface DailyReport {
@@ -35,7 +35,7 @@ export default function Reports() {
 
   const loadReport = () => {
     setLoading(true);
-    fetch(`${API_BASE}/reports/daily?date=${date}`)
+    authFetch(`${API_BASE}/reports/daily?date=${date}`)
       .then(r => r.json())
       .then(data => { setReport(data); setLoading(false); })
       .catch(() => setLoading(false));

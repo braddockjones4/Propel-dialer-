@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 const VARIABLES = ['{{firstName}}', '{{fullName}}', '{{address}}', '{{agentName}}', '{{agentPhone}}'];
 
@@ -61,7 +61,7 @@ export default function Blast() {
   const [scheduledBlasts, setScheduledBlasts] = useState<ScheduledBlast[]>([]);
 
   const loadScheduled = () => {
-    fetch(`${API_BASE}/blast/scheduled`)
+    authFetch(`${API_BASE}/blast/scheduled`)
       .then(r => r.json())
       .then(setScheduledBlasts)
       .catch(() => {});
@@ -74,7 +74,7 @@ export default function Blast() {
   const handlePreview = async () => {
     if (!message.trim()) return;
     setLoading(true);
-    const res = await fetch(`${API_BASE}/blast/preview`, {
+    const res = await authFetch(`${API_BASE}/blast/preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, filter: { source: source || undefined, status: status || undefined } }),
@@ -88,7 +88,7 @@ export default function Blast() {
 
   const handleAbSend = async () => {
     setStage('sending');
-    const res = await fetch(`${API_BASE}/blast/ab-send`, {
+    const res = await authFetch(`${API_BASE}/blast/ab-send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -105,7 +105,7 @@ export default function Blast() {
 
   const handleSendNow = async () => {
     setStage('sending');
-    const res = await fetch(`${API_BASE}/blast/send`, {
+    const res = await authFetch(`${API_BASE}/blast/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -124,7 +124,7 @@ export default function Blast() {
     const scheduledDate = new Date(scheduledAt);
     if (scheduledDate <= new Date()) { alert('Scheduled time must be in the future'); return; }
 
-    const res = await fetch(`${API_BASE}/blast/scheduled`, {
+    const res = await authFetch(`${API_BASE}/blast/scheduled`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -143,7 +143,7 @@ export default function Blast() {
   };
 
   const cancelScheduled = async (id: string) => {
-    await fetch(`${API_BASE}/blast/scheduled/${id}`, { method: 'DELETE' });
+    await authFetch(`${API_BASE}/blast/scheduled/${id}`, { method: 'DELETE' });
     loadScheduled();
   };
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface NextAction {
@@ -40,7 +40,7 @@ export default function NextActionPanel({ contactId, onBook }: Props) {
 
   useEffect(() => {
     setLoading(true); setAction(null); setExecuted(false); setExecMsg('');
-    fetch(`${API_BASE}/next-action/${contactId}`)
+    authFetch(`${API_BASE}/next-action/${contactId}`)
       .then(r => r.json())
       .then(data => { setAction(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -54,7 +54,7 @@ export default function NextActionPanel({ contactId, onBook }: Props) {
       return;
     }
 
-    const r = await fetch(`${API_BASE}/next-action/${contactId}/execute`, {
+    const r = await authFetch(`${API_BASE}/next-action/${contactId}/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: action.action, message: action.message }),

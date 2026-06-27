@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface Message {
@@ -62,7 +62,7 @@ export default function Inbox() {
 
   const loadThreads = useCallback(async (isPolling = false) => {
     if (!isPolling) setLoading(true);
-    const data: Thread[] = await fetch(`${API_BASE}/inbox`).then(r => r.json()).catch(() => []);
+    const data: Thread[] = await authFetch(`${API_BASE}/inbox`).then(r => r.json()).catch(() => []);
 
     // Detect new inbound messages since last poll
     if (isPolling) {
@@ -89,7 +89,7 @@ export default function Inbox() {
     // Refresh messages if a thread is open
     const sel = selectedRef.current;
     if (sel?.contactId) {
-      const msgs: Message[] = await fetch(`${API_BASE}/inbox/${sel.contactId}`)
+      const msgs: Message[] = await authFetch(`${API_BASE}/inbox/${sel.contactId}`)
         .then(r => r.json()).catch(() => []);
       setMessages(msgs);
     }
@@ -111,7 +111,7 @@ export default function Inbox() {
     setMobileView('thread');
     setReply('');
     if (thread.contactId) {
-      const msgs = await fetch(`${API_BASE}/inbox/${thread.contactId}`).then(r => r.json());
+      const msgs = await authFetch(`${API_BASE}/inbox/${thread.contactId}`).then(r => r.json());
       setMessages(msgs);
     } else {
       setMessages([thread.lastMessage]);
@@ -122,7 +122,7 @@ export default function Inbox() {
   const sendReply = async () => {
     if (!reply.trim() || !selected?.contactId) return;
     setSending(true);
-    const msg = await fetch(`${API_BASE}/inbox/${selected.contactId}/reply`, {
+    const msg = await authFetch(`${API_BASE}/inbox/${selected.contactId}/reply`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body: reply }),

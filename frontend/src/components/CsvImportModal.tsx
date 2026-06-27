@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface ParsedRow { [key: string]: string }
@@ -128,7 +128,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/contacts/import`, {
+      const res = await authFetch(`${API_BASE}/contacts/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contacts }),

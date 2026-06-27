@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import CsvImportModal from './CsvImportModal';
 import { useToast } from './Toast';
 import { ContactListSkeleton } from './Skeleton';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface Contact {
@@ -62,7 +62,7 @@ export default function Contacts() {
 
   const loadContacts = () => {
     setLoading(true);
-    fetch(`${API_BASE}/contacts?limit=500`)
+    authFetch(`${API_BASE}/contacts?limit=500`)
       .then(r => r.json())
       .then(data => { setContacts(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -74,7 +74,7 @@ export default function Contacts() {
     if (!newContact.firstName || !newContact.phone) { toast.error('First name and phone are required'); return; }
     setAddSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/contacts`, {
+      const res = await authFetch(`${API_BASE}/contacts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...newContact }),
@@ -102,7 +102,7 @@ export default function Contacts() {
     }
 
     const isStatus = bulkAction.startsWith('status:');
-    await fetch(`${API_BASE}/contacts/bulk`, {
+    await authFetch(`${API_BASE}/contacts/bulk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -132,7 +132,7 @@ export default function Contacts() {
   // Re-score all leads
   const rescoreAll = async () => {
     setScoreMsg('Scoring…');
-    await fetch(`${API_BASE}/contacts/score-all`, { method: 'POST' });
+    await authFetch(`${API_BASE}/contacts/score-all`, { method: 'POST' });
     setScoreMsg('');
     toast.success('Lead scores updated');
     loadContacts();
@@ -153,7 +153,7 @@ export default function Contacts() {
   const saveNotes = async () => {
     if (!selected) return;
     setSaving(true);
-    await fetch(`${API_BASE}/contacts/${selected.id}`, {
+    await authFetch(`${API_BASE}/contacts/${selected.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notes: editNotes }),
@@ -166,7 +166,7 @@ export default function Contacts() {
 
   const setStatus = async (status: string) => {
     if (!selected) return;
-    await fetch(`${API_BASE}/contacts/${selected.id}`, {
+    await authFetch(`${API_BASE}/contacts/${selected.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),

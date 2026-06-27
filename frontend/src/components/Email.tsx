@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface Template { id: string; name: string; subject: string; body: string; trigger?: string; }
@@ -54,18 +54,18 @@ export default function Email() {
   const [editTpl,     setEditTpl]   = useState<Partial<Template> | null>(null);
   const [saving,      setSaving]    = useState(false);
 
-  const loadTemplates = () => fetch(`${API_BASE}/email/templates`).then(r => r.json()).then(setTemplates).catch(() => {});
-  const loadLogs      = () => fetch(`${API_BASE}/email/logs`).then(r => r.json()).then(setLogs).catch(() => {});
+  const loadTemplates = () => authFetch(`${API_BASE}/email/templates`).then(r => r.json()).then(setTemplates).catch(() => {});
+  const loadLogs      = () => authFetch(`${API_BASE}/email/logs`).then(r => r.json()).then(setLogs).catch(() => {});
 
   useEffect(() => {
     loadTemplates();
     loadLogs();
-    fetch(`${API_BASE}/contacts?limit=300`).then(r => r.json()).then(setContacts).catch(() => {});
+    authFetch(`${API_BASE}/contacts?limit=300`).then(r => r.json()).then(setContacts).catch(() => {});
   }, []);
 
   const seedTemplates = async () => {
     for (const tpl of DEFAULT_TEMPLATES) {
-      await fetch(`${API_BASE}/email/templates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tpl) });
+      await authFetch(`${API_BASE}/email/templates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tpl) });
     }
     loadTemplates();
   };
@@ -73,7 +73,7 @@ export default function Email() {
   const handleSend = async () => {
     if (!subject || !body) { setSendMsg('Subject and body required'); return; }
     setSending(true); setSendMsg('');
-    const r = await fetch(`${API_BASE}/email/send`, {
+    const r = await authFetch(`${API_BASE}/email/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ toEmail, contactId: contactId || undefined, subject, body }),
@@ -88,15 +88,15 @@ export default function Email() {
     if (!editTpl?.name || !editTpl?.subject || !editTpl?.body) return;
     setSaving(true);
     if (editTpl.id) {
-      await fetch(`${API_BASE}/email/templates/${editTpl.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
+      await authFetch(`${API_BASE}/email/templates/${editTpl.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
     } else {
-      await fetch(`${API_BASE}/email/templates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
+      await authFetch(`${API_BASE}/email/templates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
     }
     setSaving(false); setEditTpl(null); loadTemplates();
   };
 
   const deleteTpl = async (id: string) => {
-    await fetch(`${API_BASE}/email/templates/${id}`, { method: 'DELETE' });
+    await authFetch(`${API_BASE}/email/templates/${id}`, { method: 'DELETE' });
     loadTemplates();
   };
 

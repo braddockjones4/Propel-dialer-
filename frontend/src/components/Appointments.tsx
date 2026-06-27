@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface Appointment {
@@ -55,15 +55,15 @@ export default function Appointments() {
   const [bookMsg,     setBookMsg]     = useState('');
 
   const load = () => {
-    fetch(`${API_BASE}/appointments?month=${month + 1}&year=${year}`)
+    authFetch(`${API_BASE}/appointments?month=${month + 1}&year=${year}`)
       .then(r => r.json()).then(setAppts).catch(() => {});
-    fetch(`${API_BASE}/appointments/upcoming`)
+    authFetch(`${API_BASE}/appointments/upcoming`)
       .then(r => r.json()).then(setUpcoming).catch(() => {});
   };
 
   useEffect(() => { load(); }, [month, year]);
   useEffect(() => {
-    fetch(`${API_BASE}/contacts?limit=200`)
+    authFetch(`${API_BASE}/contacts?limit=200`)
       .then(r => r.json()).then(setContacts).catch(() => {});
   }, []);
 
@@ -85,7 +85,7 @@ export default function Appointments() {
     if (!bContactId || !bDate || !bTime) { setBookMsg('Fill in all required fields.'); return; }
     setBooking(true); setBookMsg('');
     const scheduledAt = new Date(`${bDate}T${bTime}`).toISOString();
-    const r = await fetch(`${API_BASE}/appointments`, {
+    const r = await authFetch(`${API_BASE}/appointments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contactId: bContactId, title: bTitle, scheduledAt, duration: bDuration, location: bLocation, notes: bNotes, sendSms: bSendSms }),
@@ -99,7 +99,7 @@ export default function Appointments() {
   };
 
   const cancelAppt = async (id: string) => {
-    await fetch(`${API_BASE}/appointments/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'cancelled' }) });
+    await authFetch(`${API_BASE}/appointments/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'cancelled' }) });
     load();
   };
 

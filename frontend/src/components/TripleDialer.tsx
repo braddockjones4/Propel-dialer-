@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useTwilioDevice } from '../hooks/useTwilioDevice';
 import DispositionPanel from './DispositionPanel';
 import type { DispositionType } from '../types';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface Contact {
@@ -61,7 +61,7 @@ export default function TripleDialer() {
 
   // Load contacts
   useEffect(() => {
-    fetch(`${API_BASE}/contacts?limit=300`)
+    authFetch(`${API_BASE}/contacts?limit=300`)
       .then(r => r.json())
       .then(setContacts)
       .catch(console.error);
@@ -75,7 +75,7 @@ export default function TripleDialer() {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
-        const data: Session = await fetch(`${API_BASE}/triple-dial/session/${sessionId}`).then(r => r.json());
+        const data: Session = await authFetch(`${API_BASE}/triple-dial/session/${sessionId}`).then(r => r.json());
         setSession(data);
         if (data.connectedSid) {
           clearInterval(pollRef.current!);
@@ -113,7 +113,7 @@ export default function TripleDialer() {
     }));
 
     try {
-      const data = await fetch(`${API_BASE}/triple-dial/start`, {
+      const data = await authFetch(`${API_BASE}/triple-dial/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contacts: payload }),
@@ -134,7 +134,7 @@ export default function TripleDialer() {
 
     if (connectedContact) {
       try {
-        await fetch(`${API_BASE}/contacts/${connectedContact.id}/calls`, {
+        await authFetch(`${API_BASE}/contacts/${connectedContact.id}/calls`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ duration: callDuration, disposition: type, notes }),
@@ -155,7 +155,7 @@ export default function TripleDialer() {
   // Cancel session
   const handleCancel = async () => {
     if (session) {
-      await fetch(`${API_BASE}/triple-dial/cancel`, {
+      await authFetch(`${API_BASE}/triple-dial/cancel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId: session.sessionId }),

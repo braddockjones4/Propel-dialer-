@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface SequenceStep { delayMinutes: number; channel: 'sms'; message: string; }
@@ -21,12 +21,12 @@ export default function Sequences() {
   const [saving, setSaving]       = useState<string | null>(null);
   const [saved, setSaved]         = useState<string | null>(null);
 
-  useEffect(() => { fetch(`${API_BASE}/sequences`).then(r => r.json()).then(setSequences).catch(console.error); }, []);
+  useEffect(() => { authFetch(`${API_BASE}/sequences`).then(r => r.json()).then(setSequences).catch(console.error); }, []);
 
   async function save(seq: Sequence) {
     setSaving(seq.id);
     try {
-      const res = await fetch(`${API_BASE}/sequences/${seq.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(seq) });
+      const res = await authFetch(`${API_BASE}/sequences/${seq.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(seq) });
       const updated = await res.json();
       setSequences(prev => prev.map(s => s.id === updated.id ? updated : s));
       setSaved(seq.id);
@@ -48,7 +48,7 @@ export default function Sequences() {
   }
   async function resetAll() {
     if (!confirm('Reset all sequences to defaults?')) return;
-    setSequences(await (await fetch(`${API_BASE}/sequences/reset`, { method: 'POST' })).json());
+    setSequences(await (await authFetch(`${API_BASE}/sequences/reset`, { method: 'POST' })).json());
   }
 
   return (

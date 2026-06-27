@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 
 interface Plan {
@@ -24,7 +24,7 @@ export default function Billing() {
   const [checking, setChecking] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/billing/plans`)
+    authFetch(`${API_BASE}/billing/plans`)
       .then(r => r.json())
       .then(data => { setPlans(data); setLoading(false); })
       .catch(() => setLoading(false));
@@ -34,7 +34,7 @@ export default function Billing() {
     if (!token) { toast.error('Please sign in first'); return; }
     setChecking(planId);
     try {
-      const r = await fetch(`${API_BASE}/billing/checkout`, {
+      const r = await authFetch(`${API_BASE}/billing/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ planId }),
@@ -54,7 +54,7 @@ export default function Billing() {
   const openPortal = async () => {
     if (!token) return;
     try {
-      const r = await fetch(`${API_BASE}/billing/portal`, {
+      const r = await authFetch(`${API_BASE}/billing/portal`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
