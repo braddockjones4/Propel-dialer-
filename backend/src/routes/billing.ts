@@ -72,6 +72,15 @@ router.post('/checkout', requireAuth, async (req: any, res: Response) => {
     }
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    // Optional promo code
+    let discounts: any[] | undefined;
+    const promoCode = req.body.promoCode as string | undefined;
+    if (promoCode) {
+      const promoCodes = await stripe.promotionCodes.list({ code: promoCode, active: true, limit: 1 });
+      if (promoCodes.data.length) discounts = [{ promotion_code: promoCodes.data[0].id }];
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer:   customerId,
       mode:       'subscription',
@@ -79,6 +88,7 @@ router.post('/checkout', requireAuth, async (req: any, res: Response) => {
       success_url: `${frontendUrl}?billing=success&plan=${planId}`,
       cancel_url:  `${frontendUrl}?billing=cancelled`,
       metadata: { userId: req.user.id, planId },
+      ...(discounts ? { discounts } : { allow_promotion_codes: true }),
     });
 
     res.json({ url: session.url });

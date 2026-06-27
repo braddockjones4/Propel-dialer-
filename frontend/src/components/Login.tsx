@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+
+const API = import.meta.env.VITE_API_URL || 'https://propel-dialer-backend.onrender.com';
 
 interface Props {
   onBack?: () => void;
@@ -7,16 +9,50 @@ interface Props {
 
 export default function Login({ onBack }: Props) {
   const { login, register } = useAuth();
-  const [mode,     setMode]     = useState<'login' | 'register'>('login');
+  const [mode,     setMode]     = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [name,     setName]     = useState('');
   const [error,    setError]    = useState('');
+  const [success,  setSuccess]  = useState('');
   const [loading,  setLoading]  = useState(false);
+  const [resetToken, setResetToken] = useState('');
+
+  // Check for reset token in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('reset');
+    if (token) { setResetToken(token); setMode('reset'); }
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(''); setLoading(true);
+    setError(''); setSuccess(''); setLoading(true);
+
+    if (mode === 'forgot') {
+      try {
+        await fetch(`${API}/api/auth/forgot-password`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        setSuccess('Check your email for a password reset link.');
+      } catch { setError('Something went wrong. Try again.'); }
+      setLoading(false); return;
+    }
+
+    if (mode === 'reset') {
+      try {
+        const r = await fetch(`${API}/api/auth/reset-password`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: resetToken, password }),
+        }).then(r => r.json());
+        if (r.error) { setError(r.error); setLoading(false); return; }
+        setSuccess('Password reset! Signing you in…');
+        setTimeout(() => { window.location.href = window.location.pathname; }, 1500);
+      } catch { setError('Something went wrong. Try again.'); }
+      setLoading(false); return;
+    }
+
     const err = mode === 'login'
       ? await login(email, password)
       : await register(email, password, name);
@@ -51,24 +87,30 @@ export default function Login({ onBack }: Props) {
             </div>
           </div>
 
-          {/* Mode toggle */}
-          <div style={{ display: 'flex', borderRadius: 8, border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: 24 }}>
-            {(['login', 'register'] as const).map(m => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setError(''); }}
-                style={{
-                  flex: 1, padding: '8px 0',
-                  fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
-                  background: mode === m ? '#1a1a1a' : 'transparent',
-                  color:      mode === m ? '#fff'    : '#9ca3af',
-                  border: 'none', cursor: 'pointer', transition: 'all 0.2s',
-                }}
-              >
-                {m === 'login' ? 'Sign In' : 'Create Account'}
-              </button>
-            ))}
-          </div>
+          {/* Mode toggle — hide on forgot/reset */}
+          {(mode === 'login' || mode === 'register') && (
+            <div style={{ display: 'flex', borderRadius: 8, border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: 24 }}>
+              {(['login', 'register'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => { setMode(m); setError(''); setSuccess(''); }}
+                  style={{
+                    flex: 1, padding: '8px 0',
+                    fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase',
+                    background: mode === m ? '#1a1a1a' : 'transparent',
+                    color:      mode === m ? '#fff'    : '#9ca3af',
+                    border: 'none', cursor: 'pointer', transition: 'all 0.2s',
+                  }}
+                >
+                  {m === 'login' ? 'Sign In' : 'Create Account'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Forgot / Reset headings */}
+          {mode === 'forgot' && <p style={{ fontWeight: 600, marginBottom: 16, color: '#1a1a1a' }}>Reset your password</p>}
+          {mode === 'reset'  && <p style={{ fontWeight: 600, marginBottom: 16, color: '#1a1a1a' }}>Choose a new password</p>}
 
           <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {mode === 'register' && (
@@ -93,15 +135,31 @@ export default function Login({ onBack }: Props) {
               />
             </div>
 
-            <div>
-              <label style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', display: 'block', marginBottom: 4 }}>Password</label>
-              <input
-                type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                style={inputStyle}
-              />
-            </div>
+            {mode !== 'forgot' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <label style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280' }}>Password</label>
+                  {mode === 'login' && (
+                    <button type="button" onClick={() => { setMode('forgot'); setError(''); setSuccess(''); }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: '#C9A84C' }}>
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="password" value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required={mode !== 'forgot'}
+                  style={inputStyle}
+                />
+              </div>
+            )}
+
+            {success && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#16a34a' }}>
+                {success}
+              </div>
+            )}
 
             {error && (
               <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#dc2626' }}>
@@ -138,15 +196,25 @@ export default function Login({ onBack }: Props) {
             <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
           </div>
 
-          <p style={{ textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
-            {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-            <button
-              onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#C9A84C', fontWeight: 600, fontSize: 11 }}
-            >
-              {mode === 'login' ? 'Create one →' : 'Sign in →'}
-            </button>
-          </p>
+          {(mode === 'login' || mode === 'register') && (
+            <p style={{ textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
+              {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+              <button
+                onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setSuccess(''); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#C9A84C', fontWeight: 600, fontSize: 11 }}
+              >
+                {mode === 'login' ? 'Create one →' : 'Sign in →'}
+              </button>
+            </p>
+          )}
+          {(mode === 'forgot' || mode === 'reset') && (
+            <p style={{ textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
+              <button onClick={() => { setMode('login'); setError(''); setSuccess(''); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#C9A84C', fontWeight: 600, fontSize: 11 }}>
+                ← Back to sign in
+              </button>
+            </p>
+          )}
 
           {onBack && (
             <div style={{ textAlign: 'center', marginTop: 16 }}>

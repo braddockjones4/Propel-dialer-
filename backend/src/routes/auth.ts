@@ -137,4 +137,83 @@ function safeUser(u: any) {
   return rest;
 }
 
+// ── POST /api/auth/forgot-password ───────────────────────────────────────────
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email) { res.status(400).json({ error: 'Email required' }); return; }
+
+    const user = await db.user.findUnique({ where: { email: email.toLowerCase() } });
+    // Always return success to prevent email enumeration
+    if (!user) { res.json({ message: 'If that email exists, a reset link has been sent.' }); return; }
+
+    // Generate a signed reset token (expires in 1 hour)
+    const resetToken = jwt.sign({ userId: user.id, type: 'reset' }, JWT_SECRET, { expiresIn: '1h' });
+    const frontendUrl = process.env.FRONTEND_URL || 'https://propeldialer.com';
+    const resetUrl = `${frontendUrl}?reset=${resetToken}`;
+
+    const { SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, AGENT_NAME } = process.env;
+    if (SENDGRID_API_KEY && SENDGRID_FROM_EMAIL) {
+      const https = await import('https');
+      const body = JSON.stringify({
+        personalizations: [{ to: [{ email: user.email }] }],
+        from: { email: SENDGRID_FROM_EMAIL, name: 'Propel Dialer' },
+        subject: 'Reset your Propel password',
+        content: [{
+          type: 'text/html',
+          value: `
+            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+              <h2 style="color:#C9A84C;letter-spacing:.1em">PROPEL</h2>
+              <p>Hi ${user.name || 'there'},</p>
+              <p>Click the button below to reset your password. This link expires in 1 hour.</p>
+              <a href="${resetUrl}" style="display:inline-block;padding:12px 28px;background:#C9A84C;color:#fff;text-decoration:none;border-radius:4px;font-weight:700;margin:16px 0">Reset Password</a>
+              <p style="color:#999;font-size:12px">If you didn't request this, ignore this email.</p>
+            </div>
+          `
+        }]
+      });
+      await new Promise<void>((resolve) => {
+        const req2 = (https as any).request({
+          hostname: 'api.sendgrid.com', path: '/v3/mail/send', method: 'POST',
+          headers: { 'Authorization': 'Bearer '+SENDGRID_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+        }, (r: any) => { r.resume(); r.on('end', resolve); });
+        req2.on('error', resolve);
+        req2.write(body); req2.end();
+      });
+    } else {
+      console.log(`[Auth] Password reset link for ${email}: ${resetUrl}`);
+    }
+
+    res.json({ message: 'If that email exists, a reset link has been sent.' });
+  } catch (e: any) {
+    console.error('[Auth] forgot-password:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /api/auth/reset-password ────────────────────────────────────────────
+router.post('/reset-password', async (req: Request, res: Response) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) { res.status(400).json({ error: 'Token and password required' }); return; }
+    if (password.length < 6) { res.status(400).json({ error: 'Password must be at least 6 characters' }); return; }
+
+    let payload: any;
+    try {
+      payload = jwt.verify(token, JWT_SECRET) as any;
+    } catch {
+      res.status(400).json({ error: 'Reset link is invalid or has expired' }); return;
+    }
+    if (payload.type !== 'reset') { res.status(400).json({ error: 'Invalid reset token' }); return; }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await db.user.update({ where: { id: payload.userId }, data: { passwordHash } });
+    const authToken = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.json({ message: 'Password reset successfully', token: authToken, user: safeUser(user) });
+  } catch (e: any) {
+    console.error('[Auth] reset-password:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 export default router;

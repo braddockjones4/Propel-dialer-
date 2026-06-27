@@ -30,6 +30,7 @@ import emailRoutes from './routes/email';
 import nextActionRoutes from './routes/nextAction';
 import reportsRoutes from './routes/reports';
 import authRoutes, { requireAuth, requirePlan } from './routes/auth';
+import promoRoutes from './routes/promo';
 import billingRoutes from './routes/billing';
 import teamRoutes from './routes/team';
 import settingsRoutes from './routes/settings';
@@ -79,6 +80,7 @@ app.use('/api/transcription',  requireAuth, requirePlan('elite'), transcriptionR
 // Auth & billing (public or self-gated)
 app.use('/api/auth',           authRoutes);
 app.use('/api/billing',        billingRoutes);
+app.use('/api/promo',          promoRoutes);
 app.use('/api/team',           requireAuth, teamRoutes);
 
 // Health check

@@ -18,6 +18,7 @@ import VoicemailBlast from './components/VoicemailBlast';
 import Appointments from './components/Appointments';
 import Email from './components/Email';
 import Reports from './components/Reports';
+import OnboardingChecklist from './components/OnboardingChecklist';
 
 type Page = 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
 
@@ -274,6 +275,10 @@ function AppInner() {
 
       {/* ── Page content ─────────────────────────────────────────────── */}
       <div className="pt-[49px] pb-[60px] md:pb-0">
+        {/* Onboarding checklist — shown to trial users on dialer/contacts pages */}
+        {(user.plan === 'trial') && (page === 'dialer' || page === 'contacts') && (
+          <OnboardingChecklist onNavigate={(p) => setPage(p as Page)} />
+        )}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
         {page === 'contacts'     && <Contacts />}
         {page === 'blast'        && <Blast />}
