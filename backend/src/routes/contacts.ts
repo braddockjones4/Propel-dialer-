@@ -4,6 +4,31 @@ import { computeLeadScore, scoreAllContacts } from '../leadScore';
 
 const router = Router();
 
+// Plan → contact limit (-1 = unlimited)
+const CONTACT_LIMITS: Record<string, number> = {
+  trial:   1000,
+  starter: 1000,
+  pro:     2500,
+  elite:   -1,
+};
+
+async function checkContactLimit(req: any, res: Response): Promise<boolean> {
+  const plan  = req.user?.plan || 'trial';
+  const role  = req.user?.role;
+  const limit = role === 'admin' ? -1 : (CONTACT_LIMITS[plan] ?? 1000);
+  if (limit === -1) return true;
+  const count = await prisma.contact.count();
+  if (count >= limit) {
+    res.status(403).json({
+      error: `Contact limit reached (${limit} on ${plan} plan). Upgrade to add more.`,
+      limit,
+      count,
+    });
+    return false;
+  }
+  return true;
+}
+
 // GET /api/contacts
 router.get('/', async (req: Request, res: Response) => {
   const { status, source, limit = '100', offset = '0' } = req.query;
@@ -38,6 +63,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // POST /api/contacts
 router.post('/', async (req: Request, res: Response) => {
+  if (!await checkContactLimit(req, res)) return;
   try {
     const { name: _name, ...body } = req.body;
     // Auto-format phone to E.164
@@ -55,6 +81,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // POST /api/contacts/import
 router.post('/import', async (req: Request, res: Response) => {
+  if (!await checkContactLimit(req, res)) return;
   const rows = req.body as Array<Record<string, string>>;
   if (!Array.isArray(rows)) { res.status(400).json({ error: 'Body must be an array' }); return; }
 

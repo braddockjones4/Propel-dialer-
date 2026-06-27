@@ -29,7 +29,7 @@ import appointmentRoutes from './routes/appointments';
 import emailRoutes from './routes/email';
 import nextActionRoutes from './routes/nextAction';
 import reportsRoutes from './routes/reports';
-import authRoutes from './routes/auth';
+import authRoutes, { requireAuth, requirePlan } from './routes/auth';
 import billingRoutes from './routes/billing';
 import teamRoutes from './routes/team';
 import settingsRoutes from './routes/settings';
@@ -49,28 +49,37 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
+// Public Twilio webhooks (no auth — called by Twilio servers)
 app.use('/api/twilio',         twilioRoutes);
-app.use('/api/sequences',      sequenceRoutes);
-app.use('/api/contacts',       contactRoutes);
-app.use('/api/blast',          blastRoutes);
-app.use('/api/inbox',          inboxRoutes);
 app.post('/api/twilio/sms-inbound', handleInboundSms);
-app.use('/api/triple-dial',    tripleDialRoutes);
-app.use('/api/local-presence', localPresenceRoutes);
-app.use('/api/analytics',      analyticsRoutes);
-app.use('/api/blast/scheduled',scheduledBlastRoutes);
-app.use('/api/transcription',  transcriptionRoutes);
-app.use('/api/voicemail-blast',voicemailBlastRoutes);
-app.use('/api/ai-script',      aiScriptRoutes);
-app.use('/api/dnc',            dncRoutes);
-app.use('/api/appointments',   appointmentRoutes);
-app.use('/api/email',          emailRoutes);
-app.use('/api/next-action',    nextActionRoutes);
-app.use('/api/reports',        reportsRoutes);
+
+// Starter+ (requireAuth covers starter, pro, elite, trial, admin)
+app.use('/api/contacts',       requireAuth, contactRoutes);
+app.use('/api/blast',          requireAuth, blastRoutes);
+app.use('/api/inbox',          requireAuth, inboxRoutes);
+app.use('/api/local-presence', requireAuth, localPresenceRoutes);
+app.use('/api/analytics',      requireAuth, analyticsRoutes);
+app.use('/api/settings',       requireAuth, settingsRoutes);
+
+// Pro+ features
+app.use('/api/sequences',      requireAuth, requirePlan('pro', 'elite'), sequenceRoutes);
+app.use('/api/triple-dial',    requireAuth, requirePlan('pro', 'elite'), tripleDialRoutes);
+app.use('/api/blast/scheduled',requireAuth, requirePlan('pro', 'elite'), scheduledBlastRoutes);
+app.use('/api/voicemail-blast',requireAuth, requirePlan('pro', 'elite'), voicemailBlastRoutes);
+app.use('/api/ai-script',      requireAuth, requirePlan('pro', 'elite'), aiScriptRoutes);
+app.use('/api/dnc',            requireAuth, requirePlan('pro', 'elite'), dncRoutes);
+app.use('/api/appointments',   requireAuth, requirePlan('pro', 'elite'), appointmentRoutes);
+app.use('/api/email',          requireAuth, requirePlan('pro', 'elite'), emailRoutes);
+app.use('/api/reports',        requireAuth, requirePlan('pro', 'elite'), reportsRoutes);
+
+// Elite-only features
+app.use('/api/next-action',    requireAuth, requirePlan('elite'), nextActionRoutes);
+app.use('/api/transcription',  requireAuth, requirePlan('elite'), transcriptionRoutes);
+
+// Auth & billing (public or self-gated)
 app.use('/api/auth',           authRoutes);
 app.use('/api/billing',        billingRoutes);
-app.use('/api/team',           teamRoutes);
-app.use('/api/settings',       settingsRoutes);
+app.use('/api/team',           requireAuth, teamRoutes);
 
 // Health check
 app.get('/health', (_req, res) => {
