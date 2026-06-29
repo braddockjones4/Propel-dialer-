@@ -62,8 +62,8 @@ export default function Login({ onBack }: Props) {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#fafafa',
+      minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+      background: '#fafafa', overflowY: 'auto', padding: '24px 16px',
     }}>
       {/* Card */}
       <div style={{
@@ -170,6 +170,7 @@ export default function Login({ onBack }: Props) {
             <button
               type="submit"
               disabled={loading}
+              onTouchEnd={e => { e.preventDefault(); if (!loading) submit(e as any); }}
               style={{
                 marginTop: 6,
                 background: loading ? '#e5e7eb' : '#1a1a1a',
