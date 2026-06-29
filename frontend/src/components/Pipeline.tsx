@@ -179,6 +179,19 @@ export default function Pipeline() {
                         opacity: dragging?.id === c.id ? 0.4 : 1,
                       }}
                     >
+                      {/* Mobile-only: tap to move status */}
+                      <div className="md:hidden mb-2" onClick={e => e.stopPropagation()}>
+                        <select
+                          value={c.status}
+                          onChange={e => moveContact(c.id, e.target.value)}
+                          className="w-full text-[9px] font-semibold tracking-widest uppercase rounded border py-1 px-2 outline-none"
+                          style={{ borderColor: col.color + '40', color: col.color, background: col.bgColor }}
+                        >
+                          {COLUMNS.map(opt => (
+                            <option key={opt.id} value={opt.id}>{opt.label}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="flex items-start justify-between mb-1">
                         <div className="font-medium text-black text-sm leading-tight">
                           {c.firstName} {c.lastName}

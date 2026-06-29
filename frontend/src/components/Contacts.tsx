@@ -59,6 +59,8 @@ export default function Contacts() {
   const [bulkAction, setBulkAction]   = useState('');
   const [bulkWorking, setBulkWorking] = useState(false);
   const [scoreMsg, setScoreMsg]       = useState('');
+  // Mobile: show list or detail panel
+  const [mobileView, setMobileView]   = useState<'list' | 'detail'>('list');
 
   const loadContacts = () => {
     setLoading(true);
@@ -148,7 +150,7 @@ export default function Contacts() {
     return matchStatus && matchSearch;
   });
 
-  const openContact = (c: Contact) => { setSelected(c); setEditNotes(c.notes || ''); };
+  const openContact = (c: Contact) => { setSelected(c); setEditNotes(c.notes || ''); setMobileView('detail'); };
 
   const saveNotes = async () => {
     if (!selected) return;
@@ -184,10 +186,10 @@ export default function Contacts() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-49px)]">
+    <div className="flex h-[calc(100vh-109px)] md:h-[calc(100vh-49px)]">
 
       {/* ── Left: List ───────────────────────────────────── */}
-      <div className="flex flex-col w-80 border-r border-gray-100 bg-white">
+      <div className={`${mobileView === 'detail' ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-80 border-r border-gray-100 bg-white`}>
 
         <div className="p-4 border-b border-gray-100 space-y-3">
           <div className="flex gap-2">
@@ -313,7 +315,7 @@ export default function Contacts() {
                     <div className="text-gray-300 text-[10px]">{c.calls.length} call{c.calls.length !== 1 ? 's' : ''}</div>
                   )}
                   {/* Quick actions — appear on hover */}
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <a
                       href={`tel:${c.phone}`}
                       onClick={e => e.stopPropagation()}
@@ -343,7 +345,18 @@ export default function Contacts() {
       </div>
 
       {/* ── Right: Detail ─────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto p-10 bg-gray-50">
+      <div className={`${mobileView === 'list' ? 'hidden md:flex' : 'flex'} flex-1 flex-col overflow-y-auto bg-gray-50`}>
+        {/* Mobile back button */}
+        {selected && (
+          <button
+            onClick={() => setMobileView('list')}
+            className="md:hidden flex items-center gap-2 px-4 py-3 bg-white border-b text-sm font-medium"
+            style={{ borderColor: 'rgba(201,168,76,0.2)', color: '#9A7A2E' }}
+          >
+            ← Back to Contacts
+          </button>
+        )}
+        <div className="flex-1 overflow-y-auto p-5 md:p-10">
         {!selected ? (
           <div className="h-full flex items-center justify-center">
             <div className="text-center" style={{ maxWidth: 280 }}>
@@ -352,7 +365,7 @@ export default function Contacts() {
                 Select a Contact
               </div>
               <div style={{ fontSize: 12, color: '#d1d5db', lineHeight: 1.6 }}>
-                Click any contact on the left to view their details, call history, and notes.
+                Tap any contact to view their details, call history, and notes.
               </div>
             </div>
           </div>
@@ -451,6 +464,7 @@ export default function Contacts() {
 
           </div>
         )}
+        </div>{/* end inner scroll div */}
       </div>
 
       {showImport && (

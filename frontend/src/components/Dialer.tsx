@@ -242,19 +242,15 @@ export default function Dialer() {
     <div style={{ minHeight: '100vh', background: '#f8f8f8', display: 'flex', flexDirection: 'column' }}>
 
       {/* ── Stats bar ─────────────────────────────────────── */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 20px', background: '#fff',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
+      <div className="flex items-center justify-between flex-wrap gap-2 px-4 md:px-5 py-2.5 bg-white border-b" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
+        <div className="flex items-center gap-4 md:gap-7 flex-wrap">
           {/* Session stats */}
           {[
-            { label: 'Calls Today', value: sessionCalls, gold: false },
-            { label: 'Hot Leads',   value: hotLeads,     gold: true  },
+            { label: 'Calls', value: sessionCalls, gold: false },
+            { label: 'Hot',   value: hotLeads,     gold: true  },
           ].map(stat => (
             <div key={stat.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 26, fontWeight: 300, letterSpacing: '-0.5px', color: stat.gold ? '#9A7A2E' : '#111', lineHeight: 1 }}>
+              <div style={{ fontSize: 22, fontWeight: 300, letterSpacing: '-0.5px', color: stat.gold ? '#9A7A2E' : '#111', lineHeight: 1 }}>
                 {stat.value}
               </div>
               <div style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 2 }}>
@@ -265,13 +261,13 @@ export default function Dialer() {
 
           {/* Queue progress */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Queue</span>
               <span style={{ fontSize: 10, fontWeight: 600, color: '#555' }}>
-                {currentContactIndex + 1} / {contacts.length}
+                {currentContactIndex + 1}/{contacts.length}
               </span>
             </div>
-            <div style={{ width: 80, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
+            <div style={{ width: 60, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${queuePercent}%`, background: '#C9A84C', borderRadius: 99, transition: 'width 0.4s' }} />
             </div>
           </div>
@@ -279,46 +275,46 @@ export default function Dialer() {
           {/* Daily goal — desktop only */}
           <div className="hidden sm:flex" style={{ flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Daily Goal</span>
+              <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Goal</span>
               <input
                 type="number" value={dailyGoal}
                 onChange={e => setDailyGoal(Number(e.target.value))}
-                style={{ width: 36, fontSize: 10, textAlign: 'center', border: 'none', borderBottom: '1px solid #e5e7eb', background: 'transparent', outline: 'none', color: '#555' }}
+                style={{ width: 32, fontSize: 10, textAlign: 'center', border: 'none', borderBottom: '1px solid #e5e7eb', background: 'transparent', outline: 'none', color: '#555' }}
               />
             </div>
-            <div style={{ width: 80, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
+            <div style={{ width: 60, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${Math.min(100, (sessionCalls / dailyGoal) * 100)}%`, background: sessionCalls >= dailyGoal ? '#10b981' : '#C9A84C', borderRadius: 99, transition: 'width 0.4s' }} />
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {/* Auto-advance toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Auto</span>
             <button
               onClick={() => setAutoAdvance(a => !a)}
               style={{
-                position: 'relative', width: 36, height: 18, borderRadius: 99, border: 'none', cursor: 'pointer',
+                position: 'relative', width: 32, height: 16, borderRadius: 99, border: 'none', cursor: 'pointer',
                 background: autoAdvance ? '#C9A84C' : '#e5e7eb', transition: 'background 0.25s',
               }}
             >
               <span style={{
-                position: 'absolute', top: 2, left: autoAdvance ? 18 : 2,
-                width: 14, height: 14, borderRadius: '50%', background: '#fff',
+                position: 'absolute', top: 2, left: autoAdvance ? 16 : 2,
+                width: 12, height: 12, borderRadius: '50%', background: '#fff',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s',
               }} />
             </button>
           </div>
 
-          {/* Device status */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {/* Device status dot */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <div style={{
               width: 7, height: 7, borderRadius: '50%',
               background: deviceStatus === 'ready' ? '#10b981' : deviceStatus === 'error' ? '#ef4444' : '#d1d5db',
               boxShadow: deviceStatus === 'ready' ? '0 0 0 2px rgba(16,185,129,0.2)' : 'none',
             }} />
-            <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            <span className="hidden sm:inline" style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
               {deviceStatus === 'ready' ? 'Ready' : deviceStatus === 'loading' ? 'Connecting…' : deviceStatus === 'error' ? 'Error' : deviceStatus}
             </span>
           </div>
