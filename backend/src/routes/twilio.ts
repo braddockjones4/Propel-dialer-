@@ -46,7 +46,7 @@ router.post('/token', (req: Request, res: Response) => {
 router.post('/voice', async (req: Request, res: Response) => {
   const to = req.body.To as string;
   const { TWILIO_CALLER_ID } = process.env;
-  const ngrokBase = process.env.NGROK_URL || `https://unreal-filter-clash.ngrok-free.dev`;
+  const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
 
   const twiml = new twilio.twiml.VoiceResponse();
 

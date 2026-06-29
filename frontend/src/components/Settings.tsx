@@ -290,20 +290,13 @@ export default function Settings() {
             </div>
           </Section>
 
-          <Section title="Ngrok Webhook URL">
-            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
-              Required for Twilio to call your local backend. Run <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: 3 }}>ngrok http 3001</code> and paste the HTTPS URL below.
-            </p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input value={ngrok} onChange={e => setNgrok(e.target.value)} placeholder="https://xxxx.ngrok-free.app" style={{ ...inputSt, flex: 1 }} />
-              <button onClick={saveNgrok} disabled={savingNgrok} style={btnPrimary}>{savingNgrok ? '…' : 'Save'}</button>
+          <Section title="Webhook Configuration">
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+              Your Twilio webhooks are configured to route through the Propel Dialer backend automatically.
             </div>
-            <div style={{ marginTop: 10, fontSize: 11, color: '#9ca3af' }}>
-              Set these in Twilio console → your number → Voice &amp; SMS webhook URLs:
-              <div style={{ fontFamily: 'monospace', background: '#f9fafb', borderRadius: 6, padding: '8px 10px', marginTop: 6, fontSize: 11, color: '#374151' }}>
-                SMS: {ngrok || 'https://your-ngrok-url'}/api/twilio/sms-inbound<br />
-                Voice: {ngrok || 'https://your-ngrok-url'}/api/twilio/voice
-              </div>
+            <div style={{ fontFamily: 'monospace', background: '#f9fafb', borderRadius: 6, padding: '8px 10px', fontSize: 11, color: '#374151' }}>
+              SMS: https://propel-dialer-backend.onrender.com/api/twilio/sms-inbound<br />
+              Voice: https://propel-dialer-backend.onrender.com/api/twilio/voice
             </div>
           </Section>
         </div>
