@@ -29,8 +29,8 @@ router.post('/validate', requireAuth, async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Invalid or expired promo code' }); return;
     }
 
-    const promo = promoCodes.data[0];
-    const coupon = promo.coupon as any;
+    const promo = promoCodes.data[0] as any;
+    const coupon = promo.coupon;
 
     let discountText = '';
     if (coupon.percent_off) discountText = `${coupon.percent_off}% off`;
