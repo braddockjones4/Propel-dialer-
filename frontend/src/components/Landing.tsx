@@ -149,10 +149,11 @@ export default function Landing({ onSignIn }: Props) {
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
         textAlign: 'center', overflow: 'hidden',
+        background: '#0A0A0A', /* fallback while image loads */
       }}>
         <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
           <img
-            src="https://images.unsplash.com/photo-1762979790868-3bf9153b84cc?auto=format&fit=crop&w=2400&q=90"
+            src="https://images.unsplash.com/photo-1762979790868-3bf9153b84cc?auto=format&fit=crop&w=1200&q=80"
             alt=""
             style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 45%', display: 'block' }}
           />
