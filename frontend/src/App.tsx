@@ -109,7 +109,7 @@ function AppInner() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b hidden md:flex items-center px-6"
            style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 28, cursor: 'pointer' }} onClick={() => setPage('dialer')}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 28, cursor: 'pointer' }} onClick={() => setPage('dashboard')}>
           <svg width="16" height="22" viewBox="0 0 52 72" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="bolt-nav-app" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
