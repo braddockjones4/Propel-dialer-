@@ -1,4 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, Component } from 'react';
+
+class ErrorBoundary extends Component<{children: React.ReactNode}, {error: string | null}> {
+  constructor(props: any) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e: any) { return { error: e?.message || String(e) }; }
+  render() {
+    if (this.state.error) return (
+      <div style={{ padding: 24, fontFamily: 'monospace', fontSize: 13, background: '#fff', color: '#c00', minHeight: '100vh' }}>
+        <strong>Error:</strong> {this.state.error}
+        <br /><br />
+        <button onClick={() => { localStorage.clear(); window.location.reload(); }}
+          style={{ padding: '8px 16px', background: '#000', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
+          Clear &amp; Reload
+        </button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
 import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
@@ -304,10 +322,12 @@ function AppInner() {
 
 export default function App() {
   return (
-    <ToastProvider>
-      <AuthProvider>
-        <AppInner />
-      </AuthProvider>
-    </ToastProvider>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AuthProvider>
+          <AppInner />
+        </AuthProvider>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }
