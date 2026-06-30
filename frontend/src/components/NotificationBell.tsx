@@ -38,8 +38,8 @@ export default function NotificationBell({ onNavigate }: Props) {
       };
       setNotifications(prev => [notif, ...prev].slice(0, 50));
 
-      // Browser notification (if permission granted)
-      if (Notification.permission === 'granted') {
+      // Browser notification (if permission granted — not supported on iOS Safari)
+      if ('Notification' in window && Notification.permission === 'granted') {
         new Notification(`📱 ${data.contactName}`, {
           body: data.body,
           icon: '/icon-192.png',
@@ -48,8 +48,8 @@ export default function NotificationBell({ onNavigate }: Props) {
       }
     });
 
-    // Request browser notification permission
-    if (Notification.permission === 'default') {
+    // Request browser notification permission (skip on iOS Safari where it's unsupported)
+    if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
 
