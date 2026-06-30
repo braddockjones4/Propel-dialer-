@@ -84,65 +84,60 @@ const DISPOSITIONS: (Disposition & { emoji: string; bg: string; border: string; 
 interface DispositionPanelProps {
   onDisposition: (type: DispositionType) => void;
   disabled?: boolean;
+  vertical?: boolean; // force vertical list (desktop sidebar)
 }
 
-export default function DispositionPanel({ onDisposition, disabled = false }: DispositionPanelProps) {
+export default function DispositionPanel({ onDisposition, disabled = false, vertical = false }: DispositionPanelProps) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 5 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       <div style={{
-        fontSize: 9,
-        fontWeight: 700,
-        letterSpacing: '0.12em',
-        textTransform: 'uppercase',
-        color: '#9ca3af',
-        marginBottom: 4,
+        fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+        textTransform: 'uppercase', color: '#9ca3af', marginBottom: 2,
       }}>
         How did it go?
       </div>
 
-      {DISPOSITIONS.map(d => (
-        <button
-          key={d.type}
-          onClick={() => onDisposition(d.type)}
-          disabled={disabled}
-          title={d.description}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '7px 10px',
-            borderRadius: 7,
-            border: `1px solid ${disabled ? 'rgba(0,0,0,0.07)' : d.border}`,
-            background: disabled ? 'rgba(0,0,0,0.02)' : d.bg,
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            opacity: disabled ? 0.3 : 1,
-            transition: 'all 0.15s',
-            textAlign: 'left',
-          }}
-        >
-          <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{d.emoji}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-              color: disabled ? '#ccc' : d.textColor,
-              lineHeight: 1.2,
-            }}>
-              {d.label}
+      {/* 2-col grid on mobile, single col on desktop sidebar */}
+      <div className={vertical ? 'flex flex-col gap-1.5' : 'grid grid-cols-2 md:flex md:flex-col gap-1.5'}>
+        {DISPOSITIONS.map(d => (
+          <button
+            key={d.type}
+            onClick={() => onDisposition(d.type)}
+            disabled={disabled}
+            title={d.description}
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '8px 9px',
+              borderRadius: 7,
+              border: `1px solid ${disabled ? 'rgba(0,0,0,0.07)' : d.border}`,
+              background: disabled ? 'rgba(0,0,0,0.02)' : d.bg,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              opacity: disabled ? 0.3 : 1,
+              transition: 'all 0.15s',
+              textAlign: 'left',
+              minHeight: 44, // good tap target
+            }}
+          >
+            <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0 }}>{d.emoji}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: disabled ? '#ccc' : d.textColor,
+                lineHeight: 1.2,
+              }}>
+                {d.label}
+              </div>
+              <div style={{ fontSize: 9, color: disabled ? '#ddd' : 'rgba(0,0,0,0.3)', marginTop: 1 }}>
+                {d.hint}
+              </div>
             </div>
-            <div style={{
-              fontSize: 9,
-              color: disabled ? '#ddd' : 'rgba(0,0,0,0.32)',
-              marginTop: 1,
-            }}>
-              {d.hint}
-            </div>
-          </div>
-        </button>
-      ))}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

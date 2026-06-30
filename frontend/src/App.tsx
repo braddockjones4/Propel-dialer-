@@ -214,78 +214,92 @@ function AppInner() {
             </defs>
             <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-mob)"/>
           </svg>
-          <span className="font-serif font-light text-lg text-black" style={{ letterSpacing: '0.4em' }}>PROPEL</span>
+          {/* Show current page name instead of just logo */}
+          <span className="text-sm font-semibold text-gray-800" style={{ letterSpacing: '0.03em' }}>
+            {NAV.find(n => n.id === page)?.label || 'Propel'}
+          </span>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setPage('billing')}
-            style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '3px 8px', borderRadius: 10, border: '1px solid rgba(201,168,76,0.4)', color: '#9A7A2E', background: 'rgba(201,168,76,0.07)', cursor: 'pointer' }}
-          >
-            {PLAN_BADGE[user.plan] || user.plan}
-          </button>
-          <button onClick={() => setMobileNavOpen(o => !o)} className="p-1 text-gray-500 text-lg">
+        <div className="flex items-center gap-2">
+          <NotificationBell onNavigate={(p) => setPage(p as any)} />
+          <button onClick={() => setMobileNavOpen(o => !o)}
+            style={{ padding: '6px 8px', borderRadius: 7, border: '1px solid #e5e7eb', background: mobileNavOpen ? '#f9f9f9' : 'transparent', color: '#374151', fontSize: 15, lineHeight: 1, cursor: 'pointer' }}>
             {mobileNavOpen ? '✕' : '☰'}
           </button>
         </div>
       </nav>
 
-      {/* Mobile dropdown */}
+      {/* Mobile slide-down menu */}
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 md:hidden" style={{ top: 49 }}>
           <div className="absolute inset-0 bg-black/30" onClick={() => setMobileNavOpen(false)} />
-          <div className="absolute top-0 left-0 right-0 bg-white shadow-xl max-h-[85vh] overflow-y-auto">
+          <div className="absolute top-0 left-0 right-0 bg-white shadow-xl overflow-y-auto" style={{ maxHeight: '80vh' }}>
+            {/* User + plan row */}
+            <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: '#f3f4f6', background: '#fafafa' }}>
+              <div>
+                <div className="text-xs font-semibold text-gray-700 truncate" style={{ maxWidth: 180 }}>{user.name || user.email}</div>
+                <button onClick={() => { setPage('billing'); setMobileNavOpen(false); }}
+                  style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 8, border: '1px solid rgba(201,168,76,0.4)', color: '#9A7A2E', background: 'rgba(201,168,76,0.07)', cursor: 'pointer', marginTop: 3 }}>
+                  {PLAN_BADGE[user.plan] || user.plan}
+                </button>
+              </div>
+              <button onClick={logout} style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.05em' }}>
+                Sign out
+              </button>
+            </div>
             {NAV.map(({ id, label, icon }) => (
               <button
                 key={id}
                 onClick={() => { setPage(id); setMobileNavOpen(false); }}
-                className="w-full flex items-center gap-3 px-5 py-3.5 text-left border-b text-sm font-medium"
+                className="w-full flex items-center gap-3 px-5 border-b text-sm font-medium"
                 style={{
+                  height: 48,
                   borderBottomColor: '#f5f5f5',
                   background: page === id ? 'rgba(201,168,76,0.07)' : 'transparent',
                   color: page === id ? '#9A7A2E' : '#374151',
                 }}
               >
-                <span>{icon}</span>{label}
-                {page === id && <span className="ml-auto" style={{ color: '#C9A84C' }}>●</span>}
+                <span style={{ fontSize: 16 }}>{icon}</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
+                {page === id && <span style={{ color: '#C9A84C', fontSize: 8 }}>●</span>}
               </button>
             ))}
-            <button onClick={logout} className="w-full flex items-center gap-3 px-5 py-3.5 text-left text-sm" style={{ color: '#ef4444' }}>
-              🚪 Sign Out
-            </button>
           </div>
         </div>
       )}
 
       {/* ── Mobile bottom tab bar ────────────────────────────────────── */}
       <div className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-white border-t"
-           style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)', paddingTop: 4 }}>
+           style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {[
           { id: 'dialer'   as Page, icon: '📞', label: 'Dial' },
-          { id: 'contacts' as Page, icon: '👥', label: 'CRM' },
-          { id: 'inbox'    as Page, icon: '📥', label: 'Inbox' },
-          { id: 'pipeline' as Page, icon: '📋', label: 'Pipeline' },
-          { id: 'blast'    as Page, icon: '💬', label: 'Blast' },
+          { id: 'contacts' as Page, icon: '👥', label: 'Contacts' },
+          { id: 'inbox'    as Page, icon: '💬', label: 'Inbox' },
+          { id: 'pipeline' as Page, icon: '🏆', label: 'Pipeline' },
+          { id: 'blast'    as Page, icon: '📣', label: 'Blast' },
         ].map(({ id, icon, label }) => (
           <button
             key={id}
             onClick={() => setPage(id)}
-            className="flex-1 flex flex-col items-center justify-center gap-0.5"
-            style={{ padding: '4px 0 8px', position: 'relative' }}
+            className="flex-1 flex flex-col items-center justify-center"
+            style={{ height: 56, position: 'relative', background: 'transparent', border: 'none', cursor: 'pointer' }}
           >
             {page === id && (
               <span style={{
-                position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)',
-                width: 24, height: 2, borderRadius: 99, background: '#C9A84C',
+                position: 'absolute', top: 0, left: '20%', right: '20%',
+                height: 2, borderRadius: '0 0 3px 3px', background: 'linear-gradient(90deg, #C9A84C, #e8c96e)',
               }} />
             )}
             <span style={{
-              fontSize: 20,
-              filter: page === id ? 'none' : 'grayscale(0.5) opacity(0.55)',
-              transition: 'filter 0.2s',
+              fontSize: 22,
+              filter: page === id ? 'none' : 'grayscale(1) opacity(0.45)',
+              transition: 'filter 0.15s',
+              lineHeight: 1,
             }}>{icon}</span>
             <span style={{
-              fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-              color: page === id ? '#9A7A2E' : '#9ca3af',
+              fontSize: 9, fontWeight: page === id ? 700 : 500,
+              letterSpacing: '0.04em', textTransform: 'uppercase', marginTop: 3,
+              color: page === id ? '#9A7A2E' : '#bbb',
+              transition: 'color 0.15s',
             }}>{label}</span>
           </button>
         ))}

@@ -191,14 +191,14 @@ export default function Contacts() {
       {/* ── Left: List ───────────────────────────────────── */}
       <div className={`${mobileView === 'detail' ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-80 border-r border-gray-100 bg-white`}>
 
-        <div className="p-4 border-b border-gray-100 space-y-3">
+        <div className="px-3 py-2.5 border-b border-gray-100 space-y-2">
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="Search name, phone, address…"
+              placeholder="Search…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="field-input flex-1"
+              className="field-input flex-1 text-sm"
             />
             <button
               onClick={() => setShowAdd(true)}
@@ -219,7 +219,7 @@ export default function Contacts() {
           {/* Bulk action bar */}
           {checkedIds.size > 0 ? (
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-400 tracking-widest">{checkedIds.size} selected</span>
+              <span className="text-[10px] text-gray-400 tracking-widest">{checkedIds.size} sel</span>
               <select
                 value={bulkAction}
                 onChange={e => setBulkAction(e.target.value)}
@@ -238,23 +238,25 @@ export default function Contacts() {
                 disabled={!bulkAction || bulkWorking}
                 className="btn-gold text-[10px] px-3 py-1.5 whitespace-nowrap"
               >
-                {bulkWorking ? '…' : 'Apply'}
+                {bulkWorking ? '…' : 'Go'}
               </button>
             </div>
           ) : (
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-gray-300 tracking-widest">{filtered.length} contacts</span>
               <button onClick={rescoreAll} className="text-[9px] tracking-widest uppercase hover:underline" style={{ color: '#C9A84C' }}>
-                {scoreMsg || '↺ Score Leads'}
+                {scoreMsg || '↺ Score'}
               </button>
             </div>
           )}
-          <div className="flex gap-1.5 flex-wrap">
+
+          {/* Filter pills — horizontal scroll on mobile */}
+          <div className="flex gap-1.5 overflow-x-auto hide-scrollbar pb-0.5">
             {STATUSES.map(s => (
               <button
                 key={s}
                 onClick={() => setFilter(s)}
-                className="px-2.5 py-1 rounded text-[9px] font-semibold tracking-widest uppercase transition-colors border"
+                className="px-2.5 py-1 rounded text-[9px] font-semibold tracking-widest uppercase transition-colors border whitespace-nowrap flex-shrink-0"
                 style={filter === s
                   ? { background: '#C9A84C', borderColor: '#C9A84C', color: '#0A0A0A' }
                   : { borderColor: '#E0E0E0', color: '#999' }}

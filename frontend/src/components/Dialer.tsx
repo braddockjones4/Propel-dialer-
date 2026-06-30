@@ -239,7 +239,7 @@ export default function Dialer() {
   const queuePercent = contacts.length > 0 ? Math.round((currentContactIndex / contacts.length) * 100) : 0;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8f8f8', display: 'flex', flexDirection: 'column' }}>
+    <div className="h-[calc(100vh-109px)] md:h-auto md:min-h-screen" style={{ background: '#f8f8f8', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── Stats bar ─────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-2 px-4 md:px-5 py-2.5 bg-white border-b" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
@@ -350,7 +350,7 @@ export default function Dialer() {
           borderRight: '1px solid rgba(0,0,0,0.06)',
           background: '#fff',
           display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
+          overflow: 'auto',
         }}
           className="w-full md:w-[280px]"
         >
@@ -429,7 +429,7 @@ export default function Dialer() {
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
 
               {/* Contact header */}
-              <div style={{ padding: '20px 20px 16px', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
+              <div className="px-4 py-3 md:px-5 md:py-5" style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
                 {/* Source badge + lead score */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                   <span style={{
@@ -454,7 +454,7 @@ export default function Dialer() {
                   )}
                 </div>
 
-                <h2 style={{ fontSize: 22, fontWeight: 300, color: '#111', letterSpacing: '0.02em', margin: 0, lineHeight: 1.2 }}>
+                <h2 className="text-lg md:text-2xl" style={{ fontWeight: 300, color: '#111', letterSpacing: '0.02em', margin: 0, lineHeight: 1.2 }}>
                   {currentContact.name}
                 </h2>
                 <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#C9A84C', marginTop: 6, letterSpacing: '0.05em' }}>
@@ -469,7 +469,7 @@ export default function Dialer() {
 
               {/* ── IDLE: Call button ── */}
               {!isInCall && callStatus !== 'completed' && (
-                <div style={{ padding: '20px 20px 0' }}>
+                <div className="px-4 pt-3 md:px-5 md:pt-5">
                   <button
                     onClick={handleDial}
                     disabled={deviceStatus !== 'ready'}
@@ -498,7 +498,7 @@ export default function Dialer() {
 
               {/* ── IN-CALL state ── */}
               {isInCall && (
-                <div style={{ padding: '16px 20px 0' }}>
+                <div className="px-4 pt-3 md:px-5 md:pt-4">
                   {/* Live indicator */}
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -597,15 +597,15 @@ export default function Dialer() {
               )}
 
               {/* Notes */}
-              <div style={{ padding: '16px 20px 0' }}>
-                <label style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', display: 'block', marginBottom: 6 }}>
+              <div className="px-4 pt-3 md:px-5 md:pt-4">
+                <label className="hidden md:block" style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', display: 'block', marginBottom: 6 }}>
                   Call Notes
                 </label>
                 <textarea
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
-                  placeholder="What did they say? Any follow-up needed?"
-                  rows={3}
+                  placeholder="Call notes…"
+                  rows={2}
                   style={{
                     width: '100%', boxSizing: 'border-box',
                     padding: '8px 10px', borderRadius: 7,
@@ -617,7 +617,7 @@ export default function Dialer() {
               </div>
 
               {/* Disposition — mobile only */}
-              <div className="md:hidden" style={{ padding: '12px 20px 0' }}>
+              <div className="md:hidden px-4 pt-2 pb-2">
                 <DispositionPanel
                   onDisposition={handleDisposition}
                   disabled={isInCall || Boolean(lastDisposition)}
@@ -630,7 +630,7 @@ export default function Dialer() {
               </div>
 
               {/* Skip button */}
-              <div style={{ padding: '16px 20px 20px', marginTop: 'auto' }}>
+              <div className="px-4 py-2 md:px-5 md:py-4" style={{ marginTop: 'auto' }}>
                 <button
                   onClick={() => {
                     if (currentContactIndex < contacts.length - 1) {
@@ -833,6 +833,7 @@ export default function Dialer() {
           <DispositionPanel
             onDisposition={handleDisposition}
             disabled={isInCall || Boolean(lastDisposition) || sessionCalls === 0}
+            vertical
           />
 
           {lastDisposition && currentContact && (
