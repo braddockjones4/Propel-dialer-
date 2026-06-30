@@ -123,7 +123,11 @@ export default function Dialer() {
         const arr = Array.isArray(data) ? data : [];
         const sorted = [...arr].sort((a: any, b: any) => (b.leadScore ?? 0) - (a.leadScore ?? 0));
         // Pin Braddock Jones to first position for demo
-        const pinned = sorted.find((c: any) => `${c.firstName} ${c.lastName}`.toLowerCase().includes('braddock jones'));
+        const pinned = sorted.find((c: any) =>
+          c.firstName?.toLowerCase().includes('braddock') ||
+          c.lastName?.toLowerCase().includes('braddock') ||
+          `${c.firstName} ${c.lastName}`.toLowerCase().includes('braddock')
+        );
         const rest = sorted.filter((c: any) => c !== pinned);
         const final = pinned ? [pinned, ...rest] : sorted;
         setContacts(final.map(mapContact));
