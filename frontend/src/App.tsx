@@ -37,8 +37,9 @@ import Appointments from './components/Appointments';
 import Email from './components/Email';
 import Reports from './components/Reports';
 import OnboardingChecklist from './components/OnboardingChecklist';
+import Dashboard from './components/Dashboard';
 
-type Page = 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
+type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dialer',       label: 'Dialer',    icon: '📞' },
@@ -58,7 +59,7 @@ const NAV: { id: Page; label: string; icon: string }[] = [
 // ── Inner app (has auth context) ─────────────────────────────────────────────
 function AppInner() {
   const { user, loading, logout } = useAuth();
-  const [page, setPage]             = useState<Page>('dialer');
+  const [page, setPage]             = useState<Page>('dashboard');
   const [tripleMode, setTripleMode] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
@@ -204,7 +205,7 @@ function AppInner() {
       {/* ── Mobile nav ──────────────────────────────────────────────── */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b flex md:hidden items-center justify-between px-4"
            style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <button onClick={() => setPage('dashboard')} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
           <svg width="13" height="18" viewBox="0 0 52 72" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="bolt-mob" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
@@ -214,11 +215,10 @@ function AppInner() {
             </defs>
             <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-mob)"/>
           </svg>
-          {/* Show current page name instead of just logo */}
           <span className="text-sm font-semibold text-gray-800" style={{ letterSpacing: '0.03em' }}>
-            {NAV.find(n => n.id === page)?.label || 'Propel'}
+            {page === 'dashboard' ? 'Propel' : (NAV.find(n => n.id === page)?.label || 'Propel')}
           </span>
-        </div>
+        </button>
         <div className="flex items-center gap-2">
           <NotificationBell onNavigate={(p) => setPage(p as any)} />
           <button onClick={() => setMobileNavOpen(o => !o)}
@@ -271,11 +271,11 @@ function AppInner() {
       <div className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-white border-t"
            style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {[
-          { id: 'dialer'   as Page, icon: '📞', label: 'Dial' },
-          { id: 'contacts' as Page, icon: '👥', label: 'Contacts' },
-          { id: 'inbox'    as Page, icon: '💬', label: 'Inbox' },
-          { id: 'pipeline' as Page, icon: '🏆', label: 'Pipeline' },
-          { id: 'blast'    as Page, icon: '📣', label: 'Blast' },
+          { id: 'dashboard' as Page, icon: '🏠', label: 'Home' },
+          { id: 'dialer'    as Page, icon: '📞', label: 'Dial' },
+          { id: 'contacts'  as Page, icon: '👥', label: 'Contacts' },
+          { id: 'inbox'     as Page, icon: '💬', label: 'Inbox' },
+          { id: 'pipeline'  as Page, icon: '🏆', label: 'Pipeline' },
         ].map(({ id, icon, label }) => (
           <button
             key={id}
@@ -311,6 +311,7 @@ function AppInner() {
         {(user.plan === 'trial') && (page === 'dialer' || page === 'contacts') && (
           <OnboardingChecklist onNavigate={(p) => setPage(p as Page)} />
         )}
+        {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
         {page === 'contacts'     && <Contacts />}
         {page === 'blast'        && <Blast />}

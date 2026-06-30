@@ -46,6 +46,7 @@ export default function Pipeline() {
   const [overCol, setOverCol]       = useState<string | null>(null);
   const [search, setSearch]         = useState('');
   const [detailContact, setDetailContact] = useState<Contact | null>(null);
+  const [mobileStage, setMobileStage] = useState('hot'); // mobile tab-based stage
   const dragRef = useRef<Contact | null>(null);
 
   const loadContacts = async () => {
@@ -131,92 +132,162 @@ export default function Pipeline() {
           <div className="text-gray-300 text-sm tracking-widest uppercase">Loading pipeline…</div>
         </div>
       ) : (
-        <div className="flex-1 flex gap-0 overflow-x-auto min-h-0">
-          {COLUMNS.map(col => {
-            const cards = byColumn(col.id);
-            const isOver = overCol === col.id;
-            return (
-              <div
-                key={col.id}
-                className="flex flex-col min-w-[220px] flex-1 border-r border-gray-100 transition-colors"
-                style={{ background: isOver ? col.bgColor : 'white' }}
-                onDragOver={e => onDragOver(e, col.id)}
-                onDragLeave={() => setOverCol(null)}
-                onDrop={e => onDrop(e, col.id)}
-              >
-                {/* Column header */}
-                <div className="px-4 py-3 border-b"
-                     style={{ borderColor: 'rgba(201,168,76,0.1)', background: col.bgColor }}>
-                  <div className="flex items-center justify-between">
-                    <div className="text-[10px] font-semibold tracking-widest uppercase"
-                         style={{ color: col.color }}>
-                      {col.label}
-                    </div>
-                    <div className="text-[10px] font-mono rounded-full px-2 py-0.5"
-                         style={{ background: col.color + '18', color: col.color }}>
-                      {cards.length}
-                    </div>
-                  </div>
-                </div>
+        <>
+          {/* ── MOBILE: tab-based stage view ───────────────────── */}
+          <div className="flex flex-col flex-1 md:hidden min-h-0">
+            {/* Stage tabs */}
+            <div className="flex overflow-x-auto hide-scrollbar border-b bg-white" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
+              {COLUMNS.map(col => {
+                const count = byColumn(col.id).length;
+                const active = mobileStage === col.id;
+                return (
+                  <button
+                    key={col.id}
+                    onClick={() => setMobileStage(col.id)}
+                    className="flex-shrink-0 flex flex-col items-center px-4 py-2.5 relative"
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}
+                  >
+                    {active && (
+                      <span style={{
+                        position: 'absolute', bottom: 0, left: '15%', right: '15%',
+                        height: 2, borderRadius: '2px 2px 0 0', background: col.color,
+                      }} />
+                    )}
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                      color: active ? col.color : '#bbb', whiteSpace: 'nowrap',
+                    }}>{col.label}</span>
+                    <span style={{
+                      fontSize: 14, fontWeight: 300, color: active ? col.color : '#ccc', marginTop: 1,
+                    }}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-                {/* Cards */}
-                <div className="flex-1 overflow-y-auto p-3 space-y-2">
-                  {cards.length === 0 && (
-                    <div className="text-center py-8 text-gray-300 text-xs tracking-widest uppercase">
-                      Drop here
-                    </div>
-                  )}
-                  {cards.map(c => (
-                    <div
-                      key={c.id}
-                      draggable
-                      onDragStart={() => onDragStart(c)}
-                      onDragEnd={onDragEnd}
-                      onClick={() => setDetailContact(c)}
-                      className="bg-white rounded-lg border p-3 cursor-grab active:cursor-grabbing hover:shadow-sm transition-all select-none"
-                      style={{
-                        borderColor: dragging?.id === c.id ? col.color : '#E8E8E8',
-                        opacity: dragging?.id === c.id ? 0.4 : 1,
-                      }}
-                    >
-                      {/* Mobile-only: tap to move status */}
-                      <div className="md:hidden mb-2" onClick={e => e.stopPropagation()}>
-                        <select
-                          value={c.status}
-                          onChange={e => moveContact(c.id, e.target.value)}
-                          className="w-full text-[9px] font-semibold tracking-widest uppercase rounded border py-1 px-2 outline-none"
-                          style={{ borderColor: col.color + '40', color: col.color, background: col.bgColor }}
-                        >
-                          {COLUMNS.map(opt => (
-                            <option key={opt.id} value={opt.id}>{opt.label}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="flex items-start justify-between mb-1">
-                        <div className="font-medium text-black text-sm leading-tight">
+            {/* Cards for active stage */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2" style={{ background: '#f8f8f8' }}>
+              {(() => {
+                const col = COLUMNS.find(c => c.id === mobileStage)!;
+                const cards = byColumn(mobileStage);
+                if (cards.length === 0) return (
+                  <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div style={{ fontSize: 36, marginBottom: 10 }}>🏆</div>
+                    <div style={{ fontSize: 12, color: '#9ca3af' }}>No contacts in this stage</div>
+                  </div>
+                );
+                return cards.map(c => (
+                  <div
+                    key={c.id}
+                    onClick={() => setDetailContact(c)}
+                    className="bg-white rounded-xl border p-4 cursor-pointer active:scale-[0.98] transition-transform"
+                    style={{ borderColor: col.color + '25', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>
                           {c.firstName} {c.lastName}
                         </div>
-                        <span className="text-[8px] tracking-widest uppercase ml-1 shrink-0 mt-0.5"
-                              style={{ color: col.color }}>
-                          {SOURCE_LABELS[c.source] || c.source}
-                        </span>
+                        <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#C9A84C', marginTop: 2 }}>{c.phone}</div>
                       </div>
-                      <div className="text-[10px] font-mono mt-0.5" style={{ color: '#C9A84C' }}>{c.phone}</div>
-                      {c.address && (
-                        <div className="text-[10px] text-gray-400 mt-1 truncate">{c.address}</div>
-                      )}
-                      <div className="text-[9px] text-gray-300 mt-2 tracking-widest uppercase">
-                        {c.calls && c.calls.length > 0
-                          ? `Last called ${timeSince(c.calls[0].calledAt)}`
-                          : `Added ${timeSince(c.updatedAt)}`}
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                        padding: '3px 8px', borderRadius: 99, background: col.color + '15', color: col.color,
+                        border: `1px solid ${col.color}30`, flexShrink: 0, marginTop: 2,
+                      }}>
+                        {SOURCE_LABELS[c.source] || c.source}
+                      </span>
+                    </div>
+                    {c.address && (
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>📍 {c.address}{c.city ? `, ${c.city}` : ''}</div>
+                    )}
+                    {/* Move stage row */}
+                    <div className="flex gap-1.5 mt-3 flex-wrap" onClick={e => e.stopPropagation()}>
+                      {COLUMNS.filter(opt => opt.id !== mobileStage).map(opt => (
+                        <button
+                          key={opt.id}
+                          onClick={() => { moveContact(c.id, opt.id); setMobileStage(opt.id); }}
+                          style={{
+                            fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+                            padding: '4px 8px', borderRadius: 6,
+                            border: `1px solid ${opt.color}30`, color: opt.color,
+                            background: opt.color + '0D', cursor: 'pointer',
+                          }}
+                        >
+                          → {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 9, color: '#d1d5db', marginTop: 8, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                      {c.calls && c.calls.length > 0
+                        ? `Last called ${timeSince(c.calls[0].calledAt)}`
+                        : `Added ${timeSince(c.updatedAt)}`}
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+
+          {/* ── DESKTOP: full kanban ────────────────────────────── */}
+          <div className="hidden md:flex flex-1 gap-0 overflow-x-auto min-h-0">
+            {COLUMNS.map(col => {
+              const cards = byColumn(col.id);
+              const isOver = overCol === col.id;
+              return (
+                <div
+                  key={col.id}
+                  className="flex flex-col min-w-[220px] flex-1 border-r border-gray-100 transition-colors"
+                  style={{ background: isOver ? col.bgColor : 'white' }}
+                  onDragOver={e => onDragOver(e, col.id)}
+                  onDragLeave={() => setOverCol(null)}
+                  onDrop={e => onDrop(e, col.id)}
+                >
+                  <div className="px-4 py-3 border-b" style={{ borderColor: 'rgba(201,168,76,0.1)', background: col.bgColor }}>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: col.color }}>
+                        {col.label}
+                      </div>
+                      <div className="text-[10px] font-mono rounded-full px-2 py-0.5" style={{ background: col.color + '18', color: col.color }}>
+                        {cards.length}
                       </div>
                     </div>
-                  ))}
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                    {cards.length === 0 && (
+                      <div className="text-center py-8 text-gray-300 text-xs tracking-widest uppercase">Drop here</div>
+                    )}
+                    {cards.map(c => (
+                      <div
+                        key={c.id}
+                        draggable
+                        onDragStart={() => onDragStart(c)}
+                        onDragEnd={onDragEnd}
+                        onClick={() => setDetailContact(c)}
+                        className="bg-white rounded-lg border p-3 cursor-grab active:cursor-grabbing hover:shadow-sm transition-all select-none"
+                        style={{ borderColor: dragging?.id === c.id ? col.color : '#E8E8E8', opacity: dragging?.id === c.id ? 0.4 : 1 }}
+                      >
+                        <div className="flex items-start justify-between mb-1">
+                          <div className="font-medium text-black text-sm leading-tight">{c.firstName} {c.lastName}</div>
+                          <span className="text-[8px] tracking-widest uppercase ml-1 shrink-0 mt-0.5" style={{ color: col.color }}>
+                            {SOURCE_LABELS[c.source] || c.source}
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono mt-0.5" style={{ color: '#C9A84C' }}>{c.phone}</div>
+                        {c.address && <div className="text-[10px] text-gray-400 mt-1 truncate">{c.address}</div>}
+                        <div className="text-[9px] text-gray-300 mt-2 tracking-widest uppercase">
+                          {c.calls && c.calls.length > 0
+                            ? `Last called ${timeSince(c.calls[0].calledAt)}`
+                            : `Added ${timeSince(c.updatedAt)}`}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {/* Contact detail drawer */}
