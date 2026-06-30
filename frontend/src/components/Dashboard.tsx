@@ -49,10 +49,10 @@ export default function Dashboard({ onNavigate }: Props) {
   }, []);
 
   const actions = [
-    { icon: '📞', label: 'Start Dialing', sub: 'Work your contact queue', page: 'dialer', gold: true },
-    { icon: '👥', label: 'Contacts',      sub: 'Browse & manage your CRM', page: 'contacts', gold: false },
-    { icon: '🏆', label: 'Pipeline',      sub: 'Track deals by stage',     page: 'pipeline', gold: false },
-    { icon: '💬', label: 'Inbox',         sub: 'Check inbound messages',   page: 'inbox',    gold: false },
+    { label: 'Start Dialing', sub: 'Work your contact queue', page: 'dialer', gold: true },
+    { label: 'Contacts',      sub: 'Browse & manage your CRM', page: 'contacts', gold: false },
+    { label: 'Pipeline',      sub: 'Track deals by stage',     page: 'pipeline', gold: false },
+    { label: 'Inbox',         sub: 'Check inbound messages',   page: 'inbox',    gold: false },
   ];
 
   const pipelineStages = [
@@ -119,7 +119,6 @@ export default function Dashboard({ onNavigate }: Props) {
                   cursor: 'pointer', transition: 'all 0.15s',
                 }}
               >
-                <span style={{ fontSize: 22, flexShrink: 0 }}>{a.icon}</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: a.gold ? '#fff' : '#111', letterSpacing: '0.01em' }}>
                     {a.label}
@@ -178,7 +177,6 @@ export default function Dashboard({ onNavigate }: Props) {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 18 }}>👥</span>
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>{stats.total} Contacts in CRM</div>
                 <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 1 }}>

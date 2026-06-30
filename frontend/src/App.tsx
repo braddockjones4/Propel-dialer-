@@ -42,19 +42,19 @@ import Dashboard from './components/Dashboard';
 type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
-  { id: 'dashboard',    label: 'Home',      icon: '🏠' },
-  { id: 'dialer',       label: 'Dialer',    icon: '📞' },
-  { id: 'contacts',     label: 'Contacts',  icon: '👥' },
-  { id: 'pipeline',     label: 'Pipeline',  icon: '📋' },
-  { id: 'appointments', label: 'Calendar',  icon: '📅' },
-  { id: 'blast',        label: 'SMS Blast', icon: '💬' },
-  { id: 'vmblast',      label: 'VM Blast',  icon: '📣' },
-  { id: 'email',        label: 'Email',     icon: '✉️' },
-  { id: 'inbox',        label: 'Inbox',     icon: '📥' },
-  { id: 'sequences',    label: 'Follow-Up', icon: '🔁' },
-  { id: 'analytics',    label: 'Analytics', icon: '📊' },
-  { id: 'reports',      label: 'Reports',   icon: '📄' },
-  { id: 'settings',     label: 'Settings',  icon: '⚙️' },
+  { id: 'dashboard',    label: 'Home',      icon: '' },
+  { id: 'dialer',       label: 'Dialer',    icon: '' },
+  { id: 'contacts',     label: 'Contacts',  icon: '' },
+  { id: 'pipeline',     label: 'Pipeline',  icon: '' },
+  { id: 'appointments', label: 'Calendar',  icon: '' },
+  { id: 'blast',        label: 'SMS Blast', icon: '' },
+  { id: 'vmblast',      label: 'VM Blast',  icon: '' },
+  { id: 'email',        label: 'Email',     icon: '' },
+  { id: 'inbox',        label: 'Inbox',     icon: '' },
+  { id: 'sequences',    label: 'Follow-Up', icon: '' },
+  { id: 'analytics',    label: 'Analytics', icon: '' },
+  { id: 'reports',      label: 'Reports',   icon: '' },
+  { id: 'settings',     label: 'Settings',  icon: '' },
 ];
 
 // ── Inner app (has auth context) ─────────────────────────────────────────────
@@ -243,11 +243,11 @@ function AppInner() {
                   {PLAN_BADGE[user.plan] || user.plan}
                 </button>
               </div>
-              <button onClick={logout} style={{ fontSize: 11, color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.05em' }}>
+              <button onClick={logout} style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.05em' }}>
                 Sign out
               </button>
             </div>
-            {NAV.map(({ id, label, icon }) => (
+            {NAV.map(({ id, label }) => (
               <button
                 key={id}
                 onClick={() => { setPage(id); setMobileNavOpen(false); }}
@@ -259,7 +259,6 @@ function AppInner() {
                   color: page === id ? '#9A7A2E' : '#374151',
                 }}
               >
-                <span style={{ fontSize: 16 }}>{icon}</span>
                 <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
                 {page === id && <span style={{ color: '#C9A84C', fontSize: 8 }}>●</span>}
               </button>
@@ -272,12 +271,12 @@ function AppInner() {
       <div className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-white border-t"
            style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {[
-          { id: 'dashboard' as Page, icon: '🏠', label: 'Home' },
-          { id: 'dialer'    as Page, icon: '📞', label: 'Dial' },
-          { id: 'contacts'  as Page, icon: '👥', label: 'Contacts' },
-          { id: 'inbox'     as Page, icon: '💬', label: 'Inbox' },
-          { id: 'pipeline'  as Page, icon: '🏆', label: 'Pipeline' },
-        ].map(({ id, icon, label }) => (
+          { id: 'dashboard' as Page, label: 'Home' },
+          { id: 'dialer'    as Page, label: 'Dial' },
+          { id: 'contacts'  as Page, label: 'Contacts' },
+          { id: 'inbox'     as Page, label: 'Inbox' },
+          { id: 'pipeline'  as Page, label: 'Pipeline' },
+        ].map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setPage(id)}
@@ -286,19 +285,13 @@ function AppInner() {
           >
             {page === id && (
               <span style={{
-                position: 'absolute', top: 0, left: '20%', right: '20%',
+                position: 'absolute', top: 0, left: '15%', right: '15%',
                 height: 2, borderRadius: '0 0 3px 3px', background: 'linear-gradient(90deg, #C9A84C, #e8c96e)',
               }} />
             )}
             <span style={{
-              fontSize: 22,
-              filter: page === id ? 'none' : 'grayscale(1) opacity(0.45)',
-              transition: 'filter 0.15s',
-              lineHeight: 1,
-            }}>{icon}</span>
-            <span style={{
-              fontSize: 9, fontWeight: page === id ? 700 : 500,
-              letterSpacing: '0.04em', textTransform: 'uppercase', marginTop: 3,
+              fontSize: 10, fontWeight: page === id ? 700 : 500,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
               color: page === id ? '#9A7A2E' : '#bbb',
               transition: 'color 0.15s',
             }}>{label}</span>
