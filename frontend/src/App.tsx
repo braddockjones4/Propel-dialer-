@@ -42,6 +42,7 @@ import Dashboard from './components/Dashboard';
 type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
+  { id: 'dashboard',    label: 'Home',      icon: '🏠' },
   { id: 'dialer',       label: 'Dialer',    icon: '📞' },
   { id: 'contacts',     label: 'Contacts',  icon: '👥' },
   { id: 'pipeline',     label: 'Pipeline',  icon: '📋' },
