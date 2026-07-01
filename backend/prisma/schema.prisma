@@ -28,6 +28,8 @@ model Contact {
   calls        Call[]
   messages     Message[]
   appointments Appointment[]
+  agentActions AgentAction[]
+  agentPaused  Boolean       @default(false) // exclude this contact from autonomous agent
 }
 
 model Call {
@@ -134,4 +136,49 @@ model User {
   planExpiresAt  DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+
+// ─── Autonomous AI Agent ──────────────────────────────────────────────────────
+// Singleton config row (id = "singleton") controlling the autonomous agent.
+model AgentSettings {
+  id                 String   @id @default("singleton")
+  enabled            Boolean  @default(true)
+  // off = disabled, review = draft & queue for approval, auto = send within guardrails
+  autonomyMode       String   @default("review") // off | review | auto
+  model              String   @default("claude-haiku-4-5-20251001")
+  agentName          String   @default("Propel Assistant")
+  persona            String   @default("A warm, concise, professional real estate assistant who books appointments and keeps leads engaged. Never pushy, never spammy.")
+  tone               String   @default("friendly-professional")
+  goals              String   @default("Respond fast, qualify the lead, and book a listing appointment. Answer questions helpfully. Hand off to the human agent when unsure.")
+  autoBookAppointments Boolean @default(true)
+  // Guardrails
+  quietHoursStart    Int      @default(21)   // 24h local hour when outbound SMS stops
+  quietHoursEnd      Int      @default(8)    // 24h local hour when outbound SMS may resume
+  dailySmsCapPerContact Int   @default(4)
+  maxAgentRepliesPerThread Int @default(6)   // before forcing human handoff
+  escalateKeywords   String   @default("lawyer,attorney,sue,complaint,harass,report you,scam,cease")
+  updatedAt          DateTime @updatedAt
+}
+
+// Every action the agent proposes or takes — the approval queue AND the activity log.
+model AgentAction {
+  id           String    @id @default(cuid())
+  contactId    String?
+  contact      Contact?  @relation(fields: [contactId], references: [id])
+  type         String    // sms | followup | appointment | status | note | dnc | escalate
+  status       String    @default("pending") // pending | approved | sent | executed | scheduled | rejected | failed | skipped
+  channel      String    @default("sms")     // sms | email | system
+  payload      String    @default("{}")      // JSON: { message?, title?, scheduledAt?, status?, note?, ... }
+  reasoning    String?                       // why the agent chose this
+  source       String    @default("inbox-agent") // inbox-agent | followup-agent | manual
+  scheduledFor DateTime?                     // for scheduled/deferred actions
+  error        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  executedAt   DateTime?
+
+  @@index([status])
+  @@index([contactId])
+  @@index([scheduledFor])
 }

@@ -50,6 +50,7 @@ export default function Inbox() {
   const [messages, setMessages]         = useState<Message[]>([]);
   const [reply, setReply]               = useState('');
   const [sending, setSending]           = useState(false);
+  const [drafting, setDrafting]         = useState(false);
   const [loading, setLoading]           = useState(true);
   const [notifPermission, setNotifPermission] = useState(
     'Notification' in window ? Notification.permission : 'unsupported'
@@ -140,6 +141,17 @@ export default function Inbox() {
     setSending(false);
     await loadThreads(true);
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  };
+
+  const draftWithAi = async () => {
+    if (!selected?.contactId) return;
+    setDrafting(true);
+    try {
+      const res = await authFetch(`${API_BASE}/agent/draft/${selected.contactId}`, { method: 'POST', body: '{}' })
+        .then(r => r.json());
+      if (res?.message) setReply(res.message);
+    } catch { /* ignore */ }
+    setDrafting(false);
   };
 
   const enableNotifications = async () => {
@@ -372,22 +384,36 @@ export default function Inbox() {
                   This contact isn't in your database — can't reply yet.
                 </div>
               ) : (
-                <div className="flex gap-3">
-                  <textarea
-                    value={reply}
-                    onChange={e => setReply(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
-                    rows={2}
-                    placeholder="Type a reply… (Enter to send, Shift+Enter for newline)"
-                    className="field-input flex-1 resize-none"
-                  />
-                  <button
-                    onClick={sendReply}
-                    disabled={!reply.trim() || sending}
-                    className="btn-gold px-5"
-                  >
-                    Send
-                  </button>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <button
+                      onClick={draftWithAi}
+                      disabled={drafting}
+                      className="text-[10px] tracking-widest uppercase px-2.5 py-1 rounded border transition-colors"
+                      style={{ borderColor: 'rgba(201,168,76,0.45)', color: '#9A7A2E', background: 'rgba(201,168,76,0.07)' }}
+                      title="Let the AI agent draft a reply — you review and send"
+                    >
+                      {drafting ? '🤖 Drafting…' : '🤖 Draft with AI'}
+                    </button>
+                    <span className="text-[9px] text-gray-300 tracking-wide uppercase">AI drafts · you approve</span>
+                  </div>
+                  <div className="flex gap-3">
+                    <textarea
+                      value={reply}
+                      onChange={e => setReply(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); } }}
+                      rows={2}
+                      placeholder="Type a reply… (Enter to send, Shift+Enter for newline)"
+                      className="field-input flex-1 resize-none"
+                    />
+                    <button
+                      onClick={sendReply}
+                      disabled={!reply.trim() || sending}
+                      className="btn-gold px-5"
+                    >
+                      Send
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

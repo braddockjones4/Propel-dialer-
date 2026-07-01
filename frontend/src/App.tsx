@@ -38,11 +38,13 @@ import Email from './components/Email';
 import Reports from './components/Reports';
 import OnboardingChecklist from './components/OnboardingChecklist';
 import Dashboard from './components/Dashboard';
+import AgentConsole from './components/AgentConsole';
 
-type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
+type Page = 'dashboard' | 'agent' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
   { id: 'dashboard',    label: 'Home',      icon: '' },
+  { id: 'agent',        label: 'AI Agent',  icon: '' },
   { id: 'dialer',       label: 'Dialer',    icon: '' },
   { id: 'contacts',     label: 'Contacts',  icon: '' },
   { id: 'pipeline',     label: 'Pipeline',  icon: '' },
@@ -306,6 +308,7 @@ function AppInner() {
           <OnboardingChecklist onNavigate={(p) => setPage(p as Page)} />
         )}
         {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
+        {page === 'agent'        && <AgentConsole />}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
         {page === 'contacts'     && <Contacts />}
         {page === 'blast'        && <Blast />}

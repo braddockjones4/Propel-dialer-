@@ -34,6 +34,8 @@ import promoRoutes from './routes/promo';
 import billingRoutes from './routes/billing';
 import teamRoutes from './routes/team';
 import settingsRoutes from './routes/settings';
+import agentRoutes from './routes/agent';
+import { initAgentScheduler } from './agent/scheduler';
 
 dotenv.config();
 
@@ -43,6 +45,9 @@ const PORT = process.env.PORT || 3001;
 
 // ── Init Socket.io ────────────────────────────────────────────────────────────
 initSocket(http);
+
+// ── Init autonomous agent scheduler (proactive follow-ups + deferred actions) ──
+initAgentScheduler();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors({ origin: '*', credentials: false }));
@@ -61,6 +66,7 @@ app.use('/api/inbox',          requireAuth, inboxRoutes);
 app.use('/api/local-presence', requireAuth, localPresenceRoutes);
 app.use('/api/analytics',      requireAuth, analyticsRoutes);
 app.use('/api/settings',       requireAuth, settingsRoutes);
+app.use('/api/agent',          requireAuth, agentRoutes);
 
 // Pro+ features
 app.use('/api/sequences',      requireAuth, requirePlan('pro', 'elite'), sequenceRoutes);

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
 import prisma from '../db';
 import { io } from '../socket';
+import { runInboxAgent } from '../agent/engine';
 
 const router = Router();
 
@@ -133,6 +134,12 @@ export async function handleInboundSms(req: Request, res: Response) {
   // Update lastReplyAt on contact for lead scoring
   if (contact) {
     await prisma.contact.update({ where: { id: contact.id }, data: { lastReplyAt: new Date() } });
+  }
+
+  // ── Fire the autonomous agent (non-blocking so Twilio gets an instant reply) ─
+  if (contact) {
+    runInboxAgent(contact.id, { source: 'inbox-agent' })
+      .catch((e) => console.warn('[Agent] inbound trigger failed:', e?.message || e));
   }
 
   // ── Emit real-time notification ───────────────────────────────────────────
