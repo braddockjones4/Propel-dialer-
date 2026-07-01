@@ -7,7 +7,8 @@
     "start": "node dist/server.js",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "eval": "ts-node src/evals/run.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

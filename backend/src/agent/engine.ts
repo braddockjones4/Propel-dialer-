@@ -171,6 +171,50 @@ export interface RunResult {
 }
 
 /**
+ * PURE DECISION CORE (no DB, no side-effects): given a contact context + config,
+ * decide the best action(s). Shared by runInboxAgent and the eval harness so the
+ * agent's real "brain" is what gets tested — not a copy that can drift.
+ */
+export async function decideActions(
+  ctx: Awaited<ReturnType<typeof buildContactContext>>,
+  cfg: AgentConfig,
+): Promise<{ specs: ActionSpec[]; usedLlm: boolean }> {
+  // Immediate keyword escalation on the latest inbound.
+  if (ctx.lastInboundText && hasEscalationKeyword(ctx.lastInboundText, cfg.escalateKeywords)) {
+    return {
+      specs: [{ type: 'escalate', reasoning: 'Escalation keyword', payload: { note: `Flagged message: "${ctx.lastInboundText.slice(0, 120)}"` } }],
+      usedLlm: false,
+    };
+  }
+
+  const specs: ActionSpec[] = [];
+  let usedLlm = false;
+
+  if (llmConfigured()) {
+    try {
+      const messages: LlmMessage[] = [
+        { role: 'system', content: systemPrompt(cfg, ctx, 'Respond to the latest inbound message and advance toward booking an appointment.') },
+        { role: 'user', content: `The lead's latest message: "${ctx.lastInboundText || '(no text)'}"\nDecide the single best action using the tools.` },
+      ];
+      const result = await llmChat({ messages, tools: toolSchemas(), model: cfg.model, temperature: 0.5, maxTokens: 400 });
+      usedLlm = true;
+      for (const tc of result.toolCalls) {
+        const spec = mapToolCallToSpec(tc.name, tc.arguments);
+        if (spec) specs.push(spec);
+      }
+      if (specs.length === 0 && result.content.trim()) {
+        specs.push({ type: 'sms', reasoning: 'Model free-text reply.', payload: { message: result.content.trim().slice(0, 480) } });
+      }
+    } catch (e: any) {
+      console.warn('[Agent] LLM failed, using heuristic:', e.message);
+    }
+  }
+
+  if (specs.length === 0) specs.push(heuristicReply(ctx, cfg));
+  return { specs, usedLlm };
+}
+
+/**
  * Run the agent on a contact in response to an inbound message (or manual trigger).
  */
 export async function runInboxAgent(contactId: string, opts: { source?: 'inbox-agent' | 'manual' } = {}): Promise<RunResult> {
@@ -193,38 +237,7 @@ export async function runInboxAgent(contactId: string, opts: { source?: 'inbox-a
     return { ran: true, actions: [{ type: 'escalate', status: row.status, id: row.id }], usedLlm: false };
   }
 
-  // Immediate keyword escalation on the latest inbound.
-  if (ctx.lastInboundText && hasEscalationKeyword(ctx.lastInboundText, cfg.escalateKeywords)) {
-    const esc: ActionSpec = { type: 'escalate', reasoning: 'Escalation keyword', payload: { note: `Flagged message: "${ctx.lastInboundText.slice(0, 120)}"` } };
-    const row = await dispatchSpec(esc, { contact, cfg, source });
-    return { ran: true, actions: [{ type: 'escalate', status: row.status, id: row.id }], usedLlm: false };
-  }
-
-  let specs: ActionSpec[] = [];
-  let usedLlm = false;
-
-  if (llmConfigured()) {
-    try {
-      const messages: LlmMessage[] = [
-        { role: 'system', content: systemPrompt(cfg, ctx, 'Respond to the latest inbound message and advance toward booking an appointment.') },
-        { role: 'user', content: `The lead's latest message: "${ctx.lastInboundText || '(no text)'}"\nDecide the single best action using the tools.` },
-      ];
-      const result = await llmChat({ messages, tools: toolSchemas(), model: cfg.model, temperature: 0.5, maxTokens: 400 });
-      usedLlm = true;
-      for (const tc of result.toolCalls) {
-        const spec = mapToolCallToSpec(tc.name, tc.arguments);
-        if (spec) specs.push(spec);
-      }
-      // If the model replied in plain text without a tool call, treat it as the SMS.
-      if (specs.length === 0 && result.content.trim()) {
-        specs.push({ type: 'sms', reasoning: 'Model free-text reply.', payload: { message: result.content.trim().slice(0, 480) } });
-      }
-    } catch (e: any) {
-      console.warn('[Agent] LLM failed, using heuristic:', e.message);
-    }
-  }
-
-  if (specs.length === 0) specs = [heuristicReply(ctx, cfg)];
+  const { specs, usedLlm } = await decideActions(ctx, cfg);
 
   const actions: RunResult['actions'] = [];
   for (const spec of specs) {
