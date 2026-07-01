@@ -4,7 +4,7 @@ services:
     runtime: node
     rootDir: backend
     buildCommand: npm install && npx prisma generate && npm run build
-    startCommand: npx prisma db push && node dist/server.js
+    startCommand: node dist/server.js   # schema already applied; keep boot DB-independent so the server never hangs on startup
     envVars:
       - key: NODE_ENV
         value: production
