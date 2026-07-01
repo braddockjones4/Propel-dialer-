@@ -10,7 +10,15 @@ const router = Router();
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 router.get('/settings', async (_req: Request, res: Response) => {
-  res.json(await getAgentSettings(true));
+  try {
+    res.json(await getAgentSettings(true));
+  } catch (e: any) {
+    // Fail-safe defaults so the UI always renders (e.g. brief window before tables exist).
+    res.json({ enabled: true, autonomyMode: 'review', model: 'claude-haiku-4-5-20251001',
+      agentName: 'Propel Assistant', persona: '', tone: 'friendly-professional', goals: '',
+      autoBookAppointments: true, quietHoursStart: 21, quietHoursEnd: 8, dailySmsCapPerContact: 4,
+      maxAgentRepliesPerThread: 6, escalateKeywords: '', _degraded: true });
+  }
 });
 
 router.put('/settings', async (req: Request, res: Response) => {
@@ -24,25 +32,29 @@ router.put('/settings', async (req: Request, res: Response) => {
 
 // ── Activity log ────────────────────────────────────────────────────────────
 router.get('/actions', async (req: Request, res: Response) => {
-  const status = (req.query.status as string) || undefined;
-  const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 200);
-  const actions = await prisma.agentAction.findMany({
-    where: status ? { status } : undefined,
-    orderBy: { createdAt: 'desc' },
-    take: limit,
-    include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true, status: true } } },
-  });
-  res.json(actions.map((a) => ({ ...a, payload: safeParse(a.payload) })));
+  try {
+    const status = (req.query.status as string) || undefined;
+    const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 200);
+    const actions = await prisma.agentAction.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true, status: true } } },
+    });
+    res.json(actions.map((a) => ({ ...a, payload: safeParse(a.payload) })));
+  } catch { res.json([]); }
 });
 
 // ── Approval queue ──────────────────────────────────────────────────────────
 router.get('/pending', async (_req: Request, res: Response) => {
-  const actions = await prisma.agentAction.findMany({
-    where: { status: 'pending' },
-    orderBy: { createdAt: 'asc' },
-    include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true, status: true, leadScore: true } } },
-  });
-  res.json(actions.map((a) => ({ ...a, payload: safeParse(a.payload) })));
+  try {
+    const actions = await prisma.agentAction.findMany({
+      where: { status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true, status: true, leadScore: true } } },
+    });
+    res.json(actions.map((a) => ({ ...a, payload: safeParse(a.payload) })));
+  } catch { res.json([]); }
 });
 
 // Approve (optionally with an edited message) → executes now.
@@ -93,6 +105,7 @@ router.post('/sweep', async (_req: Request, res: Response) => {
 
 // ── Dashboard stats ────────────────────────────────────────────────────────────
 router.get('/stats', async (_req: Request, res: Response) => {
+ try {
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
   const [pending, sentToday, appts, escalations, scheduled] = await Promise.all([
     prisma.agentAction.count({ where: { status: 'pending' } }),
@@ -103,6 +116,7 @@ router.get('/stats', async (_req: Request, res: Response) => {
   ]);
   const settings = await getAgentSettings();
   res.json({ pending, sentToday, appointmentsBooked: appts, escalations, scheduled, enabled: settings.enabled, autonomyMode: settings.autonomyMode });
+ } catch { res.json({ pending: 0, sentToday: 0, appointmentsBooked: 0, escalations: 0, scheduled: 0, enabled: true, autonomyMode: 'review' }); }
 });
 
 function safeParse(s: string) { try { return JSON.parse(s); } catch { return {}; } }

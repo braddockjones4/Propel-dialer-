@@ -36,6 +36,7 @@ import teamRoutes from './routes/team';
 import settingsRoutes from './routes/settings';
 import agentRoutes from './routes/agent';
 import { initAgentScheduler } from './agent/scheduler';
+import { ensureAgentSchema } from './agent/ensureSchema';
 
 dotenv.config();
 
@@ -105,6 +106,8 @@ http.listen(PORT, () => {
   console.log(`\n🚀 Propel Dialer backend running on http://localhost:${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Socket: ws://localhost:${PORT}\n`);
+  // Self-heal: make sure agent tables exist (idempotent, non-blocking).
+  ensureAgentSchema().catch((e) => console.warn('[server] ensureAgentSchema error:', e?.message || e));
 });
 
 export default app;
