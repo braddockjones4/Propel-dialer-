@@ -467,40 +467,6 @@ export default function Dialer() {
     }
   }, [contacts, index, settings.callMode, startCall]);
 
-  // ─── End call ───────────────────────────────────────────────────────────────
-  const handleEndCall = useCallback(async () => {
-    // If the contact answered and AMD is still running (not yet connected as human),
-    // voicemail is in progress. Don't kill the contact call — let AMD finish and drop the VM.
-    // Auto-advance immediately so the agent can move on.
-    const vmInProgress = bridgeStatus === 'calling-contact' && contactAnswered;
-
-    endCall(); // always disconnect browser WebRTC immediately
-
-    if (bridgeSessionId) {
-      if (vmInProgress) {
-        // Clear the ref NOW (synchronously) so the vm-dropped socket event that fires later
-        // doesn't update the next contact's bridgeStatus — just the toast.
-        bridgeIdRef.current = null;
-      }
-      setBridgeStatus('ended');
-      if (!vmInProgress) {
-        // Normal hang-up: kill both call legs via bridge-hangup
-        try {
-          await authFetch(`${API_BASE}/dialer/bridge-hangup`, {
-            method: 'POST',
-            body: JSON.stringify({ sessionId: bridgeSessionId }),
-          });
-        } catch {}
-      }
-      // If vmInProgress: leave contact call alive — AMD will play voicemail then hang up
-    }
-
-    if (vmInProgress) {
-      // Log as voicemail and jump to next contact — VM drops silently in background
-      saveAndAdvance('left-voicemail');
-    }
-  }, [bridgeSessionId, bridgeStatus, contactAnswered, endCall, saveAndAdvance]);
-
   // ─── Save + advance ─────────────────────────────────────────────────────────
   const saveAndAdvance = useCallback(async (disp: string) => {
     const contact = contacts[index];
@@ -536,6 +502,40 @@ export default function Dialer() {
       setIndex(i => i + 1);
     }
   }, [contacts, index, notes, callDuration, activeCall, settings.callMode]);
+
+  // ─── End call ───────────────────────────────────────────────────────────────
+  const handleEndCall = useCallback(async () => {
+    // If the contact answered and AMD is still running (not yet connected as human),
+    // voicemail is in progress. Don't kill the contact call — let AMD finish and drop the VM.
+    // Auto-advance immediately so the agent can move on.
+    const vmInProgress = bridgeStatus === 'calling-contact' && contactAnswered;
+
+    endCall(); // always disconnect browser WebRTC immediately
+
+    if (bridgeSessionId) {
+      if (vmInProgress) {
+        // Clear the ref NOW (synchronously) so the vm-dropped socket event that fires later
+        // doesn't update the next contact's bridgeStatus — just the toast.
+        bridgeIdRef.current = null;
+      }
+      setBridgeStatus('ended');
+      if (!vmInProgress) {
+        // Normal hang-up: kill both call legs via bridge-hangup
+        try {
+          await authFetch(`${API_BASE}/dialer/bridge-hangup`, {
+            method: 'POST',
+            body: JSON.stringify({ sessionId: bridgeSessionId }),
+          });
+        } catch {}
+      }
+      // If vmInProgress: leave contact call alive — AMD will play voicemail then hang up
+    }
+
+    if (vmInProgress) {
+      // Log as voicemail and jump to next contact — VM drops silently in background
+      saveAndAdvance('left-voicemail');
+    }
+  }, [bridgeSessionId, bridgeStatus, contactAnswered, endCall, saveAndAdvance]);
 
   // ─── Skip ───────────────────────────────────────────────────────────────────
   const skipContact = () => {
