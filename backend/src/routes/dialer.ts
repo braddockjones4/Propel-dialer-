@@ -531,33 +531,79 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
   const { sessionId } = req.query as { sessionId: string };
   const { AnsweredBy, CallSid } = req.body;
   const b = bridges.get(sessionId);
-  console.log(`[Bridge AMD] session=${sessionId} answeredBy=${AnsweredBy}`);
+
+  console.log(`[Bridge AMD] ▶ session=${sessionId} | AnsweredBy=${AnsweredBy} | CallSid=${CallSid} | sessionFound=${!!b}`);
 
   const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
 
-  if (isMachine && b) {
-    b.status = 'vm-dropped';
-    io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
-
-    // Redirect contact leg to the format-aware TwiML endpoint.
-    // vm-play-twiml checks the stored audio format at play time:
-    //   WAV/MP3 → <Play> the recording; webm/none → <Say> TTS fallback.
-    // This guarantees something ALWAYS plays regardless of audio format.
-    const vmPlayUrl = `${BACKEND()}/api/dialer/vm-play-twiml/${b.userId}`;
-    console.log(`[Bridge AMD] Redirecting contact leg to vm-play-twiml for userId=${b.userId}`);
-    try { await twilioClient().calls(CallSid).update({ url: vmPlayUrl, method: 'POST' } as any); } catch (e: any) {
-      console.error('[Bridge AMD] VM drop failed:', e.message);
-    }
-
-    // Release agent leg
-    try {
-      if (b.agentCallSid) {
-        await twilioClient().calls(b.agentCallSid).update({
-          twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
-        });
-      }
-    } catch {}
+  if (!isMachine) {
+    console.log(`[Bridge AMD] Human detected — no action needed`);
+    res.sendStatus(204);
+    return;
   }
+
+  if (!b) {
+    console.error(`[Bridge AMD] ✗ session ${sessionId} not found in bridges map — cannot drop voicemail`);
+    res.sendStatus(204);
+    return;
+  }
+
+  b.status = 'vm-dropped';
+  io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
+
+  // Build voicemail TwiML INLINE (no URL fetch = no Render cold-start timeout).
+  // Check voicemailData format from DB to decide Play vs TTS.
+  const fallbackText = process.env.VOICEMAIL_SCRIPT ||
+    `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+    `Please give me a call back when you get a chance. Thank you!`;
+
+  let vmTwiml: string;
+  try {
+    const settings = await prisma.dialerSettings.findUnique({
+      where:  { userId: b.userId },
+      select: { voicemailData: true, voicemailUrl: true },
+    });
+
+    if (settings?.voicemailData) {
+      const mimeType   = settings.voicemailData.match(/^data:([^;]+)/)?.[1] || '';
+      const isPlayable = mimeType === 'audio/wav' || mimeType.startsWith('audio/mp');
+      if (isPlayable && settings.voicemailUrl) {
+        console.log(`[Bridge AMD] ✓ Playing WAV recording: ${settings.voicemailUrl}`);
+        vmTwiml = `<Response><Play>${settings.voicemailUrl}</Play><Hangup/></Response>`;
+      } else {
+        console.warn(`[Bridge AMD] ⚠ voicemailData is ${mimeType || 'unknown'} — Twilio can't play this format, using TTS. Re-record the voicemail.`);
+        vmTwiml = `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
+      }
+    } else if (settings?.voicemailUrl) {
+      // Legacy Twilio phone recording (mp3 URL) — still playable
+      console.log(`[Bridge AMD] ✓ Playing legacy recording URL: ${settings.voicemailUrl}`);
+      vmTwiml = `<Response><Play>${settings.voicemailUrl}</Play><Hangup/></Response>`;
+    } else {
+      console.warn(`[Bridge AMD] ⚠ No voicemail recording found for userId=${b.userId} — using TTS`);
+      vmTwiml = `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
+    }
+  } catch (e: any) {
+    console.error(`[Bridge AMD] DB lookup failed: ${e.message} — using TTS fallback`);
+    vmTwiml = `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
+  }
+
+  // Update the contact's live call with the voicemail TwiML
+  console.log(`[Bridge AMD] Calling calls(${CallSid}).update() with inline TwiML...`);
+  try {
+    await twilioClient().calls(CallSid).update({ twiml: vmTwiml });
+    console.log(`[Bridge AMD] ✓ calls.update() succeeded — voicemail TwiML sent`);
+  } catch (e: any) {
+    console.error(`[Bridge AMD] ✗ calls.update() FAILED: ${e.message}`);
+  }
+
+  // Disconnect agent leg
+  try {
+    if (b.agentCallSid) {
+      await twilioClient().calls(b.agentCallSid).update({
+        twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
+      });
+    }
+  } catch {}
 
   res.sendStatus(204);
 });
