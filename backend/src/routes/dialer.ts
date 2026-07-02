@@ -46,6 +46,7 @@ interface BridgeSession {
   confName: string;
   agentCallSid: string | null;
   contactCallSid: string | null;
+  userId: string;   // owner of this session — used to look up per-user settings in webhooks
   status: 'waiting-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'ended';
   createdAt: number;
 }
@@ -56,10 +57,11 @@ setInterval(() => {
 }, 60_000);
 
 // ─── GET /api/dialer/settings ─────────────────────────────────────────────────
-router.get('/settings', async (_req: Request, res: Response) => {
+router.get('/settings', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
   const s = await prisma.dialerSettings.upsert({
-    where: { id: 'singleton' },
-    create: { id: 'singleton' },
+    where: { userId },
+    create: { userId },
     update: {},
   });
   res.json(s);
@@ -67,13 +69,15 @@ router.get('/settings', async (_req: Request, res: Response) => {
 
 // ─── PUT /api/dialer/settings ─────────────────────────────────────────────────
 router.put('/settings', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
   const { callMode, personalPhone, voicemailUrl, voicemailSid } = req.body;
   const s = await prisma.dialerSettings.upsert({
-    where: { id: 'singleton' },
-    create: { id: 'singleton', callMode, personalPhone, voicemailUrl, voicemailSid },
+    where: { userId },
+    create: { userId, callMode, personalPhone, voicemailUrl, voicemailSid },
     update: {
       ...(callMode !== undefined && { callMode }),
-      ...(personalPhone !== undefined && { personalPhone }),
+      // Reset phoneVerified if the phone number changes
+      ...(personalPhone !== undefined && { personalPhone, phoneVerified: false }),
       ...(voicemailUrl !== undefined && { voicemailUrl }),
       ...(voicemailSid !== undefined && { voicemailSid }),
     },
@@ -81,9 +85,77 @@ router.put('/settings', async (req: Request, res: Response) => {
   res.json(s);
 });
 
+// ─── POST /api/dialer/verify-phone ───────────────────────────────────────────
+// Triggers a Twilio call to verify the user's personal phone as a caller ID.
+// Twilio calls the number and reads a code — user presses keys to confirm.
+router.post('/verify-phone', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
+  const { phone } = req.body;
+  if (!phone) { res.status(400).json({ error: 'phone required' }); return; }
+
+  // Normalize to E.164
+  const digits = phone.replace(/\D/g, '');
+  const e164 = digits.startsWith('1') ? `+${digits}` : `+1${digits}`;
+
+  const client = twilioClient();
+
+  // Check if already verified in Twilio
+  try {
+    const existing = await client.outgoingCallerIds.list({ phoneNumber: e164 });
+    if (existing.length > 0) {
+      await prisma.dialerSettings.upsert({
+        where: { userId },
+        create: { userId, personalPhone: e164, phoneVerified: true },
+        update: { personalPhone: e164, phoneVerified: true },
+      });
+      res.json({ status: 'already-verified', verified: true });
+      return;
+    }
+  } catch (_) { /* not in list yet — proceed to verification */ }
+
+  // Start Twilio verification call
+  try {
+    // Twilio will call the number and speak a code; user presses keys to confirm
+    const vr = await (client as any).outgoingCallerIds.create({
+      phoneNumber: e164,
+      friendlyName: 'Propel Dialer',
+    });
+    await prisma.dialerSettings.upsert({
+      where: { userId },
+      create: { userId, personalPhone: e164, phoneVerified: false },
+      update: { personalPhone: e164, phoneVerified: false },
+    });
+    res.json({ status: 'calling', validationCode: vr.validationCode });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/dialer/verify-status ───────────────────────────────────────────
+// Poll to check if personalPhone has been verified in Twilio.
+router.get('/verify-status', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
+  const settings = await prisma.dialerSettings.findUnique({ where: { userId } });
+  if (!settings?.personalPhone) { res.json({ verified: false }); return; }
+  if (settings.phoneVerified) { res.json({ verified: true, phone: settings.personalPhone }); return; }
+
+  try {
+    const client = twilioClient();
+    const callerIds = await client.outgoingCallerIds.list({ phoneNumber: settings.personalPhone });
+    const verified = callerIds.length > 0;
+    if (verified) {
+      await prisma.dialerSettings.update({ where: { userId }, data: { phoneVerified: true } });
+    }
+    res.json({ verified, phone: settings.personalPhone });
+  } catch (e: any) {
+    res.json({ verified: false });
+  }
+});
+
 // ─── POST /api/dialer/record-vm ───────────────────────────────────────────────
 // Calls agent's personal phone to record their voicemail greeting.
 router.post('/record-vm', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
   const { personalPhone } = req.body;
   if (!personalPhone) { res.status(400).json({ error: 'personalPhone required' }); return; }
   const from = process.env.TWILIO_CALLER_ID || process.env.AGENT_PHONE || '';
@@ -92,7 +164,7 @@ router.post('/record-vm', async (req: Request, res: Response) => {
     const call = await twilioClient().calls.create({
       to: personalPhone,
       from,
-      url: `${BACKEND()}/api/dialer/vm-twiml`,
+      url: `${BACKEND()}/api/dialer/vm-twiml?userId=${encodeURIComponent(userId)}`,
     });
     res.json({ callSid: call.sid, status: 'calling' });
   } catch (e: any) {
@@ -101,14 +173,15 @@ router.post('/record-vm', async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/dialer/vm-twiml (public — called by Twilio) ───────────────────
-webhooks.post('/vm-twiml', (_req: Request, res: Response) => {
+webhooks.post('/vm-twiml', (req: Request, res: Response) => {
+  const { userId } = req.query as { userId?: string };
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.say({ voice: 'Polly.Joanna' },
     'After the beep, record your voicemail message. Press pound when done, or wait 60 seconds.');
   twiml.record({
     maxLength: 60,
     finishOnKey: '#',
-    action: `${BACKEND()}/api/dialer/vm-done`,
+    action: `${BACKEND()}/api/dialer/vm-done?userId=${encodeURIComponent(userId || '')}`,
     playBeep: true,
   } as any);
   twiml.say({ voice: 'Polly.Joanna' }, 'No recording detected. Goodbye.');
@@ -118,15 +191,16 @@ webhooks.post('/vm-twiml', (_req: Request, res: Response) => {
 
 // ─── POST /api/dialer/vm-done (public — called by Twilio) ────────────────────
 webhooks.post('/vm-done', async (req: Request, res: Response) => {
+  const { userId } = req.query as { userId?: string };
   const { RecordingUrl, RecordingSid } = req.body;
-  if (RecordingUrl) {
+  if (RecordingUrl && userId) {
     const url = RecordingUrl.endsWith('.mp3') ? RecordingUrl : `${RecordingUrl}.mp3`;
     await prisma.dialerSettings.upsert({
-      where: { id: 'singleton' },
-      create: { id: 'singleton', voicemailUrl: url, voicemailSid: RecordingSid },
+      where: { userId },
+      create: { userId, voicemailUrl: url, voicemailSid: RecordingSid },
       update: { voicemailUrl: url, voicemailSid: RecordingSid },
     });
-    io.emit('vm-recorded', { url });
+    io.emit('vm-recorded', { url, userId });
   }
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.say({ voice: 'Polly.Joanna' }, 'Voicemail saved. You can hang up now.');
@@ -145,9 +219,14 @@ router.post('/call', async (req: Request, res: Response) => {
   if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
 
   if (mode === 'bridge') {
-    const settings = await prisma.dialerSettings.findUnique({ where: { id: 'singleton' } });
+    const userId = (req as any).user?.id as string;
+    const settings = await prisma.dialerSettings.findUnique({ where: { userId } });
     if (!settings?.personalPhone) {
       res.status(400).json({ error: 'Enter your personal phone number in dialer settings first.' });
+      return;
+    }
+    if (!settings.phoneVerified) {
+      res.status(400).json({ error: 'Verify your personal phone number before making calls.' });
       return;
     }
 
@@ -162,6 +241,7 @@ router.post('/call', async (req: Request, res: Response) => {
       confName,
       agentCallSid: null,
       contactCallSid: null,
+      userId,
       status: 'waiting-agent',
       createdAt: Date.now(),
     });
@@ -237,11 +317,11 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
     io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
     // Dial the contact (Leg B) with AMD
-    // Use agent's personal phone as caller ID (must be a Twilio Verified Caller ID).
+    // Use agent's verified personal phone as caller ID.
     // Falls back to local presence number if personal phone isn't set/verified.
-    const settings = await prisma.dialerSettings.findUnique({ where: { id: 'singleton' } });
+    const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } });
     const localFrom = await pickCallerId(b.contactPhone).catch(() => process.env.TWILIO_CALLER_ID || '');
-    const contactFrom = settings?.personalPhone || localFrom;
+    const contactFrom = (settings?.phoneVerified && settings?.personalPhone) ? settings.personalPhone : localFrom;
 
     try {
       const contactCall = await twilioClient().calls.create({
@@ -322,7 +402,7 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
     io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
 
     // Play voicemail on contact leg
-    const settings = await prisma.dialerSettings.findUnique({ where: { id: 'singleton' } }).catch(() => null);
+    const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } }).catch(() => null);
     const vmUrl = settings?.voicemailUrl;
     const fallbackText = `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling. Please call me back when you get a chance. Thank you!`;
     const vmTwiml = vmUrl

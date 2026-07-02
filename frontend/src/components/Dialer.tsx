@@ -30,6 +30,7 @@ interface DialerContact {
 interface DialerSettings {
   callMode: 'webrtc' | 'bridge';
   personalPhone: string;
+  phoneVerified: boolean;
   voicemailUrl?: string;
   voicemailSid?: string;
 }
@@ -108,7 +109,11 @@ export default function Dialer() {
   const [loadingContacts, setLoadingContacts] = useState(false);
 
   // Settings
-  const [settings, setSettings]         = useState<DialerSettings>({ callMode: 'webrtc', personalPhone: '' });
+  const [settings, setSettings]         = useState<DialerSettings>({ callMode: 'webrtc', personalPhone: '', phoneVerified: false });
+
+  // Phone verification
+  const [verifyStatus, setVerifyStatus] = useState<'idle' | 'calling' | 'polling' | 'verified' | 'error'>('idle');
+  const verifyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Voicemail recording
   const [vmRecordStatus, setVmRecordStatus] = useState<'idle' | 'calling' | 'done'>('idle');
@@ -158,7 +163,11 @@ export default function Dialer() {
   const loadSettings = useCallback(async () => {
     try {
       const r = await authFetch(`${API_BASE}/dialer/settings`);
-      if (r.ok) setSettings(await r.json());
+      if (r.ok) {
+        const s = await r.json();
+        setSettings(s);
+        if (s.phoneVerified) setVerifyStatus('verified');
+      }
     } catch {}
   }, []);
 
@@ -213,6 +222,55 @@ export default function Dialer() {
       });
     } catch {}
   }, []);
+
+  // ─── Phone verification ──────────────────────────────────────────────────────
+  const verifyPhone = async () => {
+    const phone = settings.personalPhone;
+    if (!phone) { alert('Enter your personal phone number first.'); return; }
+    setVerifyStatus('calling');
+    try {
+      const r = await authFetch(`${API_BASE}/dialer/verify-phone`, {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
+      });
+      const d = await r.json();
+      if (d.error) { setVerifyStatus('error'); alert(d.error); return; }
+      if (d.status === 'already-verified') {
+        setSettings(s => ({ ...s, phoneVerified: true }));
+        setVerifyStatus('verified');
+        return;
+      }
+      // Twilio is calling — poll for completion
+      setVerifyStatus('polling');
+      if (verifyPollRef.current) clearInterval(verifyPollRef.current);
+      verifyPollRef.current = setInterval(async () => {
+        try {
+          const pr = await authFetch(`${API_BASE}/dialer/verify-status`);
+          const pd = await pr.json();
+          if (pd.verified) {
+            clearInterval(verifyPollRef.current!);
+            verifyPollRef.current = null;
+            setSettings(s => ({ ...s, phoneVerified: true }));
+            setVerifyStatus('verified');
+          }
+        } catch {}
+      }, 4000);
+      // Stop polling after 3 minutes
+      setTimeout(() => {
+        if (verifyPollRef.current) { clearInterval(verifyPollRef.current); verifyPollRef.current = null; }
+        setVerifyStatus(v => v === 'polling' ? 'idle' : v);
+      }, 180_000);
+    } catch (e: any) {
+      setVerifyStatus('error');
+      alert('Verification failed: ' + e.message);
+    }
+  };
+
+  // Reset verify status when phone number changes
+  useEffect(() => {
+    setVerifyStatus(settings.phoneVerified ? 'verified' : 'idle');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.personalPhone]);
 
   // ─── Record voicemail ───────────────────────────────────────────────────────
   const recordVoicemail = async () => {
@@ -418,14 +476,50 @@ export default function Dialer() {
 
             {settings.callMode === 'bridge' && (
               <div style={{ marginTop: 14 }}>
-                <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 5 }}>Your personal phone number</label>
-                <input
-                  type="tel" placeholder="+1 (555) 000-0000"
-                  value={settings.personalPhone}
-                  onChange={e => setSettings(s => ({ ...s, personalPhone: e.target.value }))}
-                  onBlur={() => saveSettings({ personalPhone: settings.personalPhone })}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, fontSize: 14, border: '1px solid rgba(0,0,0,0.14)', outline: 'none', boxSizing: 'border-box' }}
-                />
+                <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 5 }}>
+                  Your personal phone number
+                  {verifyStatus === 'verified' && (
+                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#dcfce7', padding: '2px 7px', borderRadius: 99 }}>✓ Verified</span>
+                  )}
+                </label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="tel" placeholder="+1 (555) 000-0000"
+                    value={settings.personalPhone}
+                    onChange={e => setSettings(s => ({ ...s, personalPhone: e.target.value, phoneVerified: false }))}
+                    onBlur={() => saveSettings({ personalPhone: settings.personalPhone })}
+                    style={{ flex: 1, padding: '10px 12px', borderRadius: 8, fontSize: 14, border: `1px solid ${verifyStatus === 'verified' ? '#86efac' : 'rgba(0,0,0,0.14)'}`, outline: 'none', boxSizing: 'border-box' }}
+                  />
+                  {verifyStatus !== 'verified' && (
+                    <button
+                      onClick={verifyPhone}
+                      disabled={!settings.personalPhone || verifyStatus === 'calling' || verifyStatus === 'polling'}
+                      style={{
+                        padding: '10px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+                        background: verifyStatus === 'polling' ? '#fefce8' : DARK,
+                        color: verifyStatus === 'polling' ? '#92400e' : '#fff',
+                        border: verifyStatus === 'polling' ? '1px solid #fde68a' : 'none',
+                        cursor: (!settings.personalPhone || verifyStatus === 'calling' || verifyStatus === 'polling') ? 'not-allowed' : 'pointer',
+                        opacity: (!settings.personalPhone) ? 0.4 : 1,
+                        flexShrink: 0,
+                      }}>
+                      {verifyStatus === 'calling' ? 'Calling…' : verifyStatus === 'polling' ? 'Answer your phone' : 'Verify'}
+                    </button>
+                  )}
+                </div>
+                {verifyStatus === 'polling' && (
+                  <p style={{ fontSize: 11, color: '#92400e', margin: '8px 0 0', lineHeight: 1.5 }}>
+                    Twilio is calling your phone now — answer and follow the prompts to confirm.
+                  </p>
+                )}
+                {verifyStatus === 'error' && (
+                  <p style={{ fontSize: 11, color: '#dc2626', margin: '8px 0 0' }}>Verification failed — try again.</p>
+                )}
+                {verifyStatus !== 'verified' && verifyStatus !== 'polling' && verifyStatus !== 'calling' && verifyStatus !== 'error' && settings.personalPhone && (
+                  <p style={{ fontSize: 11, color: '#9ca3af', margin: '6px 0 0' }}>
+                    Your number must be verified before calls will show your personal ID.
+                  </p>
+                )}
               </div>
             )}
           </Card>

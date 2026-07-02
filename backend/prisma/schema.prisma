@@ -136,16 +136,20 @@ model User {
   planExpiresAt  DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  dialerSettings DialerSettings?
 }
 
 
 // ─── Sequential Dialer Settings ──────────────────────────────────────────────
 model DialerSettings {
-  id            String   @id @default("singleton")
-  callMode      String   @default("webrtc")  // webrtc | bridge
+  id            String   @id @default(cuid())
+  userId        String?  @unique            // null = legacy singleton row
+  user          User?    @relation(fields: [userId], references: [id])
+  callMode      String   @default("webrtc") // webrtc | bridge
   personalPhone String   @default("")
-  voicemailUrl  String?  // Twilio recording URL played on VM drop
-  voicemailSid  String?  // Twilio RecordingSid
+  phoneVerified Boolean  @default(false)    // personalPhone is a Twilio Verified Caller ID
+  voicemailUrl  String?                     // Twilio recording URL played on VM drop
+  voicemailSid  String?                     // Twilio RecordingSid
   updatedAt     DateTime @updatedAt
 }
 
