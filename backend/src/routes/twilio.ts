@@ -98,7 +98,9 @@ router.post('/voice', async (req: Request, res: Response) => {
         to:   b.contactPhone,
         from: contactFrom,
         machineDetection: 'DetectMessageEnd',
-        url:            `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}`,
+        // Embed userId/confName/agentCallSid in URL so bridge-b-twiml works even
+        // if a rolling deploy routes the callback to a fresh server instance.
+        url: `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}&userId=${encodeURIComponent(b.userId)}&confName=${encodeURIComponent(b.confName)}&agentCallSid=${encodeURIComponent(b.agentCallSid || '')}`,
         statusCallback: `${ngrokBase}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
         statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
         statusCallbackMethod: 'POST',

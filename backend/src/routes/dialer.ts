@@ -466,7 +466,9 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
         to: b.contactPhone,
         from: contactFrom,
         machineDetection: 'DetectMessageEnd', // SYNC: Twilio calls url after beep with AnsweredBy
-        url: `${BACKEND()}/api/dialer/bridge-b-twiml?sessionId=${sessionId}`,
+        // Embed userId/confName/agentCallSid in URL so bridge-b-twiml works even
+        // if a rolling deploy routes the callback to a fresh server instance.
+        url: `${BACKEND()}/api/dialer/bridge-b-twiml?sessionId=${sessionId}&userId=${encodeURIComponent(b.userId)}&confName=${encodeURIComponent(b.confName)}&agentCallSid=${encodeURIComponent(b.agentCallSid || '')}`,
         statusCallback: `${BACKEND()}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
         statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
         statusCallbackMethod: 'POST',
@@ -507,30 +509,48 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
 //   AnsweredBy = undefined            → fallback to conference join
 webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
   const { sessionId } = req.query as { sessionId: string };
+  // URL params are embedded at call-creation time so this webhook works even
+  // when a rolling deploy routes the callback to a fresh server instance.
+  const urlUserId       = req.query.userId       as string | undefined;
+  const urlConfName     = req.query.confName     as string | undefined;
+  const urlAgentCallSid = req.query.agentCallSid as string | undefined;
+
   const b = bridges.get(sessionId);
   const twiml = new twilio.twiml.VoiceResponse();
   const answeredBy = req.body.AnsweredBy as string | undefined;
 
-  console.log(`[bridge-b-twiml] ▶ session=${sessionId} | AnsweredBy=${answeredBy || 'none'} | sessionFound=${!!b}`);
+  // Resolve: prefer live session, fall back to URL-embedded params
+  const effectiveUserId       = b?.userId       || urlUserId       || null;
+  const effectiveConfName     = b?.confName     || urlConfName     || null;
+  const effectiveAgentCallSid = b?.agentCallSid || urlAgentCallSid || null;
 
-  if (!b) { twiml.hangup(); res.type('text/xml').send(twiml.toString()); return; }
+  console.log(`[bridge-b-twiml] ▶ session=${sessionId} | AnsweredBy=${answeredBy || 'none'} | sessionFound=${!!b} | userId=${effectiveUserId || 'unknown'}`);
+
+  if (!effectiveConfName) {
+    console.error(`[bridge-b-twiml] ✗ No session or URL params — cannot proceed`);
+    twiml.hangup();
+    res.type('text/xml').send(twiml.toString());
+    return;
+  }
 
   // ── Machine detected → drop voicemail ──────────────────────────────────────
   const isMachine = answeredBy && ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(answeredBy);
 
   if (isMachine) {
-    b.status = 'vm-dropped';
-    io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
+    if (b) { b.status = 'vm-dropped'; }
+    io.emit('bridge-status', { sessionId, status: 'vm-dropped' });
 
     const fallbackText = process.env.VOICEMAIL_SCRIPT ||
       `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
       `Please give me a call back when you get a chance. Thank you!`;
 
     try {
-      const settings = await prisma.dialerSettings.findUnique({
-        where:  { userId: b.userId },
-        select: { voicemailData: true, voicemailUrl: true },
-      });
+      const settings = effectiveUserId
+        ? await prisma.dialerSettings.findUnique({
+            where:  { userId: effectiveUserId },
+            select: { voicemailData: true, voicemailUrl: true },
+          })
+        : null;
       if (settings?.voicemailData) {
         const mimeType   = settings.voicemailData.match(/^data:([^;]+)/)?.[1] || '';
         const isPlayable = mimeType === 'audio/wav' || mimeType.startsWith('audio/mp');
@@ -555,9 +575,9 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
     twiml.hangup();
 
     // Notify the agent that voicemail was dropped so they can move on
-    if (b.agentCallSid) {
+    if (effectiveAgentCallSid) {
       try {
-        await twilioClient().calls(b.agentCallSid).update({
+        await twilioClient().calls(effectiveAgentCallSid).update({
           twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
         });
       } catch {}
@@ -568,15 +588,17 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
   }
 
   // ── Human (or AMD timed out) → join conference ──────────────────────────────
-  if (b.status === 'calling-contact') {
-    b.status = 'connected';
-    io.emit('bridge-status', { sessionId, status: 'connected', contactName: b.contactName });
+  if (b) {
+    if (b.status === 'calling-contact') {
+      b.status = 'connected';
+      io.emit('bridge-status', { sessionId, status: 'connected', contactName: b.contactName });
+    }
   }
 
   const dial = twiml.dial({
     action: `${BACKEND()}/api/dialer/bridge-b-done?sessionId=${sessionId}`,
   });
-  (dial as any).conference(b.confName, {
+  (dial as any).conference(effectiveConfName, {
     startConferenceOnEnter: 'true',
     endConferenceOnExit: 'true',
     beep: 'false',
