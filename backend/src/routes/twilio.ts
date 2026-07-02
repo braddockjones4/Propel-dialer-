@@ -87,17 +87,17 @@ router.post('/voice', async (req: Request, res: Response) => {
       ? settings.personalPhone
       : localFrom;
 
-    // Create outbound call to contact via REST API with AMD — this is the ONLY reliable
-    // path for AMD. TwiML <Dial> AMD is inconsistent with the Node SDK type system.
+    // SYNC AMD: machineDetection: 'DetectMessageEnd' waits for the full voicemail
+    // greeting + beep, then calls `url` (bridge-b-twiml) with AnsweredBy in the body.
+    // No asyncAmdStatusCallback — the AMD result arrives directly in bridge-b-twiml,
+    // eliminating any separate callback URL dependency or timing race.
     const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
     const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
     try {
       const contactCall = await client.calls.create({
         to:   b.contactPhone,
         from: contactFrom,
-        machineDetection:              'DetectMessageEnd',
-        asyncAmdStatusCallback:        `${ngrokBase}/api/dialer/bridge-amd?sessionId=${sessionId}`,
-        asyncAmdStatusCallbackMethod:  'POST',
+        machineDetection: 'DetectMessageEnd',
         url:            `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}`,
         statusCallback: `${ngrokBase}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
         statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
