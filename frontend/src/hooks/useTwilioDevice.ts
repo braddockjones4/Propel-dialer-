@@ -8,7 +8,7 @@ interface UseTwilioDeviceReturn {
   callStatus: CallStatus;
   activeCall: Call | null;
   callDuration: number;
-  startCall: (phoneNumber: string, callerId?: string) => Promise<void>;
+  startCall: (phoneNumber: string, callerId?: string, sessionId?: string, confName?: string) => Promise<void>;
   endCall: () => void;
   muteCall: (muted: boolean) => void;
   isMuted: boolean;
@@ -151,7 +151,12 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
   }, []);
 
   // ─── Start Call ─────────────────────────────────────────────────────────────
-  const startCall = useCallback(async (phoneNumber: string, callerId?: string) => {
+  const startCall = useCallback(async (
+    phoneNumber: string,
+    callerId?: string,
+    sessionId?: string,
+    confName?: string,
+  ) => {
     if (!deviceRef.current || deviceStatus !== 'ready') {
       setErrorMessage('Dialer not ready. Please wait or refresh.');
       return;
@@ -163,10 +168,18 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
     setErrorMessage(null);
 
     try {
-      const params: Record<string, string> = { To: phoneNumber };
-      // If a verified personal phone is provided, send it so the /voice webhook
-      // can use it as the outbound caller ID instead of the Twilio number.
-      if (callerId) params.CallerId = callerId;
+      let params: Record<string, string>;
+
+      if (sessionId && confName) {
+        // Conference mode: browser joins a named Twilio conference.
+        // The backend already created the outbound call to the contact via REST API
+        // with machineDetection — AMD is guaranteed to fire.
+        params = { SessionId: sessionId, ConfName: confName };
+      } else {
+        // Legacy direct-dial mode (used for inbound calls / fallback)
+        params = { To: phoneNumber };
+        if (callerId) params.CallerId = callerId;
+      }
 
       const call = await deviceRef.current.connect({ params });
       bindCallEvents(call);

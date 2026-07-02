@@ -39,7 +39,7 @@ function twilioClient() {
 }
 
 // ─── In-memory bridge session store ──────────────────────────────────────────
-interface BridgeSession {
+export interface BridgeSession {
   contactId: string;
   contactPhone: string;
   contactName: string;
@@ -51,7 +51,7 @@ interface BridgeSession {
   status: 'waiting-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'ended';
   createdAt: number;
 }
-const bridges = new Map<string, BridgeSession>();
+export const bridges = new Map<string, BridgeSession>();
 setInterval(() => {
   const cutoff = Date.now() - 15 * 60 * 1000;
   for (const [id, b] of bridges) if (b.createdAt < cutoff) bridges.delete(id);
@@ -377,13 +377,37 @@ router.post('/call', async (req: Request, res: Response) => {
       res.status(500).json({ error: e.message });
     }
   } else {
-    // WebRTC — browser handles via Twilio Device; just return contact details
+    // WebRTC conference mode — create a bridge session so the /voice webhook
+    // can use REST API AMD (the only reliable way to auto-drop voicemails).
+    // The browser joins a named conference; the backend dials the contact with AMD.
+    const userId = (req as any).user?.id as string;
+    const settings = await prisma.dialerSettings.findUnique({ where: { userId } }).catch(() => null);
+
+    const sessionId = crypto.randomUUID();
+    const confName  = `propel-webrtc-${sessionId}`;
+    const contactName = `${contact.firstName} ${contact.lastName}`.trim();
+
+    bridges.set(sessionId, {
+      contactId,
+      contactPhone: contact.phone,
+      contactName,
+      confName,
+      agentCallSid: null,   // set by /voice webhook when browser connects
+      contactCallSid: null,  // set by /voice webhook when outbound call is created
+      userId,
+      voicemailUrl: settings?.voicemailUrl ?? null,
+      status: 'waiting-agent',
+      createdAt: Date.now(),
+    });
+
     res.json({
       mode: 'webrtc',
+      sessionId,
+      confName,
       contact: {
         id: contact.id,
         phone: contact.phone,
-        name: `${contact.firstName} ${contact.lastName}`.trim(),
+        name: contactName,
       },
     });
   }

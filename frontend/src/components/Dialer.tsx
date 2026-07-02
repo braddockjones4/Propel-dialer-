@@ -423,15 +423,34 @@ export default function Dialer() {
         setBridgeStatus('idle');
       }
     } else {
-      // WebRTC: pass verified personal phone so contact sees it as caller ID
-      const callerId = settings.phoneVerified && settings.personalPhone ? settings.personalPhone : undefined;
-      await startCall(contact.phone, callerId);
+      // WebRTC conference mode: backend creates a bridge session, browser joins the named
+      // conference. Backend dials contact via REST API with machineDetection — AMD fires
+      // reliably (unlike TwiML <Dial> which was never auto-dropping voicemails).
+      try {
+        const r = await authFetch(`${API_BASE}/dialer/call`, {
+          method: 'POST',
+          body: JSON.stringify({ contactId: contact.id, mode: 'webrtc' }),
+        });
+        const data = await r.json();
+        if (data.error) { alert(data.error); return; }
+        setBridgeSessionId(data.sessionId);
+        setBridgeStatus('calling-contact');
+        // Browser joins the named conference; AMD runs server-side on the outbound call
+        await startCall(contact.phone, undefined, data.sessionId, data.confName);
+      } catch (e: any) {
+        alert('Call failed: ' + e.message);
+        setBridgeStatus('idle');
+      }
     }
-  }, [contacts, index, settings.callMode, settings.personalPhone, settings.phoneVerified, startCall]);
+  }, [contacts, index, settings.callMode, startCall]);
 
   // ─── End call ───────────────────────────────────────────────────────────────
   const handleEndCall = useCallback(async () => {
-    if (settings.callMode === 'bridge' && bridgeSessionId) {
+    // WebRTC and bridge modes both have a bridgeSessionId now — use bridge-hangup for both.
+    // bridge-hangup terminates the contact call AND the agent call SID.
+    // endCall() immediately disconnects the browser WebRTC call regardless.
+    endCall();
+    if (bridgeSessionId) {
       setBridgeStatus('ended');
       try {
         await authFetch(`${API_BASE}/dialer/bridge-hangup`, {
@@ -439,10 +458,8 @@ export default function Dialer() {
           body: JSON.stringify({ sessionId: bridgeSessionId }),
         });
       } catch {}
-    } else {
-      endCall();
     }
-  }, [settings.callMode, bridgeSessionId, endCall]);
+  }, [bridgeSessionId, endCall]);
 
   // ─── Save + advance ─────────────────────────────────────────────────────────
   const saveAndAdvance = useCallback(async (disp: string) => {

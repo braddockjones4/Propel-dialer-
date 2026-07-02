@@ -5,6 +5,8 @@ import { SequenceTrigger } from '../sequenceStore';
 import { pickCallerId } from './localPresence';
 import prisma from '../db';
 import { transcribeAndScoreCall } from './transcription';
+import { bridges } from './dialer';
+import { io } from '../socket';
 
 const router = Router();
 
@@ -45,65 +47,117 @@ router.post('/token', (req: Request, res: Response) => {
 });
 
 // ─── POST /api/twilio/voice ───────────────────────────────────────────────────
-// TwiML webhook — returns dial instructions with AMD enabled.
+// TwiML webhook for Twilio Device (WebRTC browser calls).
+//
+// Two modes depending on what params the browser passes via device.connect():
+//
+// A) Conference mode (WebRTC + AMD):
+//    Browser passes SessionId + ConfName → browser joins a named conference,
+//    backend creates the outbound call to the contact via REST API with AMD.
+//    AMD fires on the REST API call (reliable), same bridge-amd webhook handles drop.
+//
+// B) Legacy direct dial (fallback / inbound):
+//    Browser passes To → plain <Dial> to the number. No AMD in this path.
 router.post('/voice', async (req: Request, res: Response) => {
-  const to = req.body.To as string;
-  const callSid = req.body.CallSid as string;
-  const personalCallerId = req.body.CallerId as string | undefined; // set by browser when user has verified personal phone
   const { TWILIO_CALLER_ID } = process.env;
   const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
-
   const twiml = new twilio.twiml.VoiceResponse();
 
-  if (!to || !TWILIO_CALLER_ID) {
-    twiml.say('Configuration error.');
-    res.type('text/xml');
-    res.send(twiml.toString());
+  // ── A) Conference mode ────────────────────────────────────────────────────
+  const confNameParam = req.body.ConfName as string | undefined;
+  const sessionId     = req.body.SessionId as string | undefined;
+
+  if (confNameParam && sessionId) {
+    const b = bridges.get(sessionId);
+    if (!b) {
+      twiml.say({ voice: 'Polly.Joanna' }, 'Session not found. Please try again.');
+      twiml.hangup();
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
+
+    // Store browser call SID so bridge-hangup / bridge-b-status can disconnect it
+    b.agentCallSid = req.body.CallSid as string;
+    b.status = 'calling-contact';
+
+    // Determine caller ID: use agent's verified personal phone, else local presence
+    const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } }).catch(() => null);
+    const localFrom = await pickCallerId(b.contactPhone).catch(() => TWILIO_CALLER_ID || '');
+    const contactFrom = (settings?.phoneVerified && settings?.personalPhone)
+      ? settings.personalPhone
+      : localFrom;
+
+    // Create outbound call to contact via REST API with AMD — this is the ONLY reliable
+    // path for AMD. TwiML <Dial> AMD is inconsistent with the Node SDK type system.
+    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    try {
+      const contactCall = await client.calls.create({
+        to:   b.contactPhone,
+        from: contactFrom,
+        machineDetection:              'DetectMessageEnd',
+        asyncAmdStatusCallback:        `${ngrokBase}/api/dialer/bridge-amd?sessionId=${sessionId}`,
+        asyncAmdStatusCallbackMethod:  'POST',
+        url:            `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}`,
+        statusCallback: `${ngrokBase}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
+        statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
+        statusCallbackMethod: 'POST',
+      } as any);
+      b.contactCallSid = contactCall.sid;
+      console.log(`[WebRTC Bridge] Outbound call ${contactCall.sid} created for session ${sessionId}`);
+    } catch (e: any) {
+      console.error('[WebRTC Bridge] Failed to call contact:', e.message);
+      b.status = 'ended';
+      twiml.say({ voice: 'Polly.Joanna' }, 'Could not reach the contact. Please try again.');
+      twiml.hangup();
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
+
+    io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
+
+    // Return conference TwiML: browser joins the named conference
+    const dial = twiml.dial({
+      action: `${ngrokBase}/api/dialer/bridge-a-done?sessionId=${sessionId}`,
+    } as any);
+    (dial as any).conference(b.confName, {
+      startConferenceOnEnter: 'true',
+      endConferenceOnExit:    'false', // conference survives browser disconnect (so AMD can still play VM)
+      waitUrl: 'https://twimlets.com/holdmusic?Bucket=com.twilio.music.classical',
+      beep:    'false',
+    });
+    res.type('text/xml').send(twiml.toString());
     return;
   }
 
-  // Look up userId from verified personal phone so AMD can use their recorded voicemail.
-  // We embed userId in the AMD callback URL (query param) instead of using an in-memory map,
-  // because the AMD callback fires on the OUTBOUND call SID — a different SID from the
-  // inbound browser→Twilio SID stored here. URL param is reliable across any SID.
-  let amdUserId: string | null = null;
-  if (personalCallerId) {
-    try {
-      const s = await prisma.dialerSettings.findFirst({
-        where: { personalPhone: personalCallerId },
-        select: { userId: true },
-      });
-      amdUserId = s?.userId ?? null;
-    } catch {}
-  }
-  const amdCallbackUrl = amdUserId
-    ? `${ngrokBase}/api/twilio/amd-status?userId=${encodeURIComponent(amdUserId)}`
-    : `${ngrokBase}/api/twilio/amd-status`;
+  // ── B) Legacy direct dial ─────────────────────────────────────────────────
+  const to              = req.body.To as string;
+  const personalCallerId = req.body.CallerId as string | undefined;
 
-  // Use verified personal phone if provided, otherwise fall back to local presence matching
-  const localCallerId = await pickCallerId(to).catch(() => TWILIO_CALLER_ID);
+  if (!to || !TWILIO_CALLER_ID) {
+    twiml.say('Configuration error.');
+    res.type('text/xml').send(twiml.toString());
+    return;
+  }
+
+  const localCallerId   = await pickCallerId(to).catch(() => TWILIO_CALLER_ID);
   const effectiveCallerId = personalCallerId || localCallerId;
 
   const dial = twiml.dial({
     callerId: effectiveCallerId,
     record: 'record-from-answer-dual',
-    recordingStatusCallback: `${ngrokBase}/api/twilio/recording-status`,
+    recordingStatusCallback:       `${ngrokBase}/api/twilio/recording-status`,
     recordingStatusCallbackMethod: 'POST',
     action: `${ngrokBase}/api/twilio/call-status`,
-    // AMD: detect answering machine
-    machineDetection: 'DetectMessageEnd',
-    asyncAmdStatusCallback: amdCallbackUrl,
-    asyncAmdStatusCallbackMethod: 'POST',
   } as Parameters<typeof twiml.dial>[0]);
 
   dial.number({
     statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-    statusCallback: `${ngrokBase}/api/twilio/call-status`,
+    statusCallback:       `${ngrokBase}/api/twilio/call-status`,
     statusCallbackMethod: 'POST',
   } as Parameters<typeof dial.number>[0], to);
 
-  res.type('text/xml');
-  res.send(twiml.toString());
+  res.type('text/xml').send(twiml.toString());
 });
 
 // ─── POST /api/twilio/amd-status ─────────────────────────────────────────────
