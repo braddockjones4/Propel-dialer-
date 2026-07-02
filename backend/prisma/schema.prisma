@@ -139,6 +139,16 @@ model User {
 }
 
 
+// ─── Sequential Dialer Settings ──────────────────────────────────────────────
+model DialerSettings {
+  id            String   @id @default("singleton")
+  callMode      String   @default("webrtc")  // webrtc | bridge
+  personalPhone String   @default("")
+  voicemailUrl  String?  // Twilio recording URL played on VM drop
+  voicemailSid  String?  // Twilio RecordingSid
+  updatedAt     DateTime @updatedAt
+}
+
 // ─── Autonomous AI Agent ──────────────────────────────────────────────────────
 // Singleton config row (id = "singleton") controlling the autonomous agent.
 model AgentSettings {

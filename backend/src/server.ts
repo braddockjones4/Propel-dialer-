@@ -33,6 +33,7 @@ import authRoutes, { requireAuth, requirePlan } from './routes/auth';
 import promoRoutes from './routes/promo';
 import billingRoutes from './routes/billing';
 import teamRoutes from './routes/team';
+import dialerRoutes, { webhooks as dialerWebhooks } from './routes/dialer';
 import settingsRoutes from './routes/settings';
 import agentRoutes from './routes/agent';
 import { initAgentScheduler } from './agent/scheduler';
@@ -68,6 +69,8 @@ app.use('/api/local-presence', requireAuth, localPresenceRoutes);
 app.use('/api/analytics',      requireAuth, analyticsRoutes);
 app.use('/api/settings',       requireAuth, settingsRoutes);
 app.use('/api/agent',          requireAuth, agentRoutes);
+app.use('/api/dialer',         dialerWebhooks);        // public Twilio webhooks (no auth)
+app.use('/api/dialer',         requireAuth, dialerRoutes); // authenticated dialer endpoints
 
 // Pro+ features
 app.use('/api/sequences',      requireAuth, requirePlan('pro', 'elite'), sequenceRoutes);

@@ -1,24 +1,53 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+// ─── Sequential Single-Contact Dialer ────────────────────────────────────────
+// Replaces the triple-dial. Goes through a filtered contact list one at a time.
+// Two call modes:
+//   webrtc  — browser audio via Twilio Device (no extra hardware needed)
+//   bridge  — Twilio calls agent's personal cell, then bridges to the contact
+//             with AMD + pre-recorded voicemail drop on no-answer
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { useTwilioDevice } from '../hooks/useTwilioDevice';
-import DispositionPanel from './DispositionPanel';
-import NextActionPanel from './NextActionPanel';
-import type { Contact, DispositionType } from '../types';
-import { API_BASE, authFetch } from '../config';
+import { API_BASE, SOCKET_URL, authFetch } from '../config';
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
-  const s = (seconds % 60).toString().padStart(2, '0');
-  return `${m}:${s}`;
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface DialerContact {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  source: string;
+  status: string;
+  notes?: string;
+  leadScore?: number;
+  lastReplyAt?: string;
+  updatedAt: string;
+  calls?: Array<{ calledAt: string; disposition?: string; duration: number }>;
 }
 
+interface DialerSettings {
+  callMode: 'webrtc' | 'bridge';
+  personalPhone: string;
+  voicemailUrl?: string;
+  voicemailSid?: string;
+}
+
+type SessionView = 'setup' | 'session' | 'done';
+type BridgeStatus = 'idle' | 'ringing-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'call-ended' | 'ended' | 'error';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const GOLD = '#C9A84C';
+const DARK = '#0A0A0A';
+
 const SOURCE_LABELS: Record<string, string> = {
-  expired:       'Expired Listing',
+  expired:       'Expired',
   fsbo:          'FSBO',
-  circle:        'Circle Prospect',
+  circle:        'Circle',
   'past-client': 'Past Client',
   manual:        'Manual',
 };
-
 const SOURCE_COLORS: Record<string, string> = {
   expired:       '#ef4444',
   fsbo:          '#3b82f6',
@@ -27,835 +56,690 @@ const SOURCE_COLORS: Record<string, string> = {
   manual:        '#9ca3af',
 };
 
-const SCRIPTS: Record<string, string[]> = {
-  expired: [
-    "Hi, is this [Name]? Hi [Name], my name is Braddock and I am a real estate agent here in [City]. I noticed your home at [Address] was recently listed and did not sell. I specialize in this neighborhood and I have helped several owners in similar situations. I would love to share a few ideas that I think could get your home sold. Do you have two minutes?",
-    "Objection — Taking a break: Totally understand. A lot of sellers take a step back and re-evaluate. When you do decide to move forward, what would be most important to you in choosing an agent?",
-    "Close for appointment: I would love to stop by, take a look at the property, and share what I would do differently to get it sold. Would [day] or [day] work for a quick 20-minute walk-through?",
-  ],
-  fsbo: [
-    "Hi, is this [Name]? Hi [Name], my name is Braddock. I saw that your home at [Address] is for sale by owner. I am a local agent and I work with a lot of buyers actively looking in this area right now. Would you be open to working with a buyer's agent?",
-    "Objection — Commission: That is fair, and I totally respect that. If I brought you a qualified buyer who was ready to move, would that change your perspective at all?",
-  ],
-  circle: [
-    "Hi, is this [Name]? Hi [Name], my name is Braddock, I am a real estate agent in the area. I just helped a neighbor sell their home and I wanted to reach out — I have buyers who love this neighborhood. Have you given any thought to selling in the next 6-12 months?",
-  ],
-  'past-client': [
-    "Hi [Name]! It is Braddock, hope you are doing great. I am reaching out to check in — it has been a while and I wanted to see how you are enjoying the home. Is there anything I can help with? And if you know anyone thinking about buying or selling, I would love to help.",
-  ],
-  manual: [
-    "Hi, is this [Name]? Hi [Name], my name is Braddock, I am a local real estate agent. I am reaching out because I wanted to connect. Do you have a minute to chat?",
-  ],
-};
+const STATUS_FILTERS = [
+  { value: 'all',         label: 'All Contacts' },
+  { value: 'new',         label: 'New Leads' },
+  { value: 'hot',         label: 'Hot Leads' },
+  { value: 'callback',    label: 'Callbacks' },
+  { value: 'contacted',   label: 'Previously Contacted' },
+  { value: 'past-client', label: 'Past Clients (by source)' },
+];
 
-function mapContact(c: Record<string, string>): Contact {
-  return {
-    id: c.id,
-    firstName: c.firstName,
-    lastName: c.lastName,
-    name: `${c.firstName} ${c.lastName}`.trim(),
-    phone: c.phone,
-    address: c.address ? `${c.address}${c.city ? ', ' + c.city : ''}${c.state ? ', ' + c.state : ''}` : undefined,
-    source: (c.source as Contact['source']) || 'manual',
-    status: c.status,
-  };
+const DISPOSITIONS = [
+  { key: 'hot-lead',       label: 'Hot Lead',          color: '#C9A84C' },
+  { key: 'appointment',    label: 'Appointment Set',    color: '#8b5cf6' },
+  { key: 'callback',       label: 'Callback Scheduled', color: '#3b82f6' },
+  { key: 'left-voicemail', label: 'Left Voicemail',     color: '#6b7280' },
+  { key: 'no-answer',      label: 'No Answer',          color: '#6b7280' },
+  { key: 'not-interested', label: 'Not Interested',     color: '#6b7280' },
+  { key: 'wrong-number',   label: 'Wrong Number',       color: '#6b7280' },
+  { key: 'dnc',            label: 'DNC',                color: '#ef4444' },
+];
+
+function formatPhone(p: string) {
+  const d = p.replace(/\D/g, '');
+  if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
+  return p;
 }
 
-// Disposition emoji map for the session log
-const DISP_EMOJI: Record<string, string> = {
-  'not-home': '📵', 'left-voicemail': '📬', 'callback-scheduled': '📅',
-  'not-interested': '👎', 'wrong-number': '🔢', 'dnc': '🚫', 'hot-lead': '🔥',
-};
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diff / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 30) return `${days}d ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
 
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function Dialer() {
-  const { deviceStatus, callStatus, callDuration, activeCall, startCall, endCall, muteCall, isMuted, errorMessage } = useTwilioDevice();
+  const {
+    deviceStatus, callStatus, callDuration, activeCall,
+    startCall, endCall, muteCall, isMuted,
+  } = useTwilioDevice();
 
-  const [contacts, setContacts]               = useState<Contact[]>([]);
-  const [loading, setLoading]                 = useState(true);
-  const [currentContactIndex, setCurrentContactIndex] = useState(0);
-  const [manualPhone, setManualPhone]         = useState('');
-  const [sessionCalls, setSessionCalls]       = useState(0);
-  const [dailyGoal, setDailyGoal]             = useState(50);
-  const [hotLeads, setHotLeads]               = useState(0);
-  const [notes, setNotes]                     = useState('');
-  const [lastDisposition, setLastDisposition] = useState<DispositionType | null>(null);
-  const [callHistory, setCallHistory]         = useState<Array<{ name: string; phone: string; disposition: DispositionType; duration: number }>>([]);
-  const [vmDropped, setVmDropped]             = useState(false);
-  const [autoAdvance, setAutoAdvance]         = useState(false);
-  const [countdown, setCountdown]             = useState<number | null>(null);
-  const [aiScript, setAiScript]               = useState<any>(null);
-  const [aiScriptLoading, setAiScriptLoading] = useState(false);
-  const [smartHoursWarning, setSmartHoursWarning] = useState('');
-  const [searchQuery, setSearchQuery]         = useState('');
-  const [searchOpen, setSearchOpen]           = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Views & session
+  const [view, setView]                 = useState<SessionView>('setup');
+  const [contacts, setContacts]         = useState<DialerContact[]>([]);
+  const [index, setIndex]               = useState(0);
+  const [sessionFilter, setSessionFilter] = useState('all');
+  const [loadingContacts, setLoadingContacts] = useState(false);
 
-  // Close search dropdown on outside click
+  // Settings
+  const [settings, setSettings]         = useState<DialerSettings>({ callMode: 'webrtc', personalPhone: '' });
+
+  // Voicemail recording
+  const [vmRecordStatus, setVmRecordStatus] = useState<'idle' | 'calling' | 'done'>('idle');
+
+  // Bridge mode
+  const [bridgeSessionId, setBridgeSessionId] = useState<string | null>(null);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('idle');
+
+  // Post-call
+  const [disposition, setDisposition]   = useState<string | null>(null);
+  const [notes, setNotes]               = useState('');
+  const [sessionLog, setSessionLog]     = useState<Array<{ name: string; disp: string; duration: number }>>([]);
+
+  // AI script
+  const [aiScript, setAiScript]         = useState<any>(null);
+  const [scriptOpen, setScriptOpen]     = useState(false);
+
+  const socketRef = useRef<Socket | null>(null);
+  const bridgeIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync so socket handler always sees current sessionId
+  useEffect(() => { bridgeIdRef.current = bridgeSessionId; }, [bridgeSessionId]);
+
+  // ─── Socket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setSearchOpen(false);
-        setSearchQuery('');
+    const socket = io(SOCKET_URL, { transports: ['websocket'] });
+    socketRef.current = socket;
+
+    socket.on('bridge-status', (data: { sessionId: string; status: string }) => {
+      if (!bridgeIdRef.current || data.sessionId === bridgeIdRef.current) {
+        setBridgeStatus(data.status as BridgeStatus);
+        if (data.status === 'vm-dropped')  setDisposition('left-voicemail');
+        if (data.status === 'no-answer')   setDisposition('no-answer');
       }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    });
+
+    socket.on('vm-recorded', () => {
+      setVmRecordStatus('done');
+      loadSettings();
+    });
+
+    return () => { socket.disconnect(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const searchResults = searchQuery.trim().length > 0
-    ? contacts.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery)).slice(0, 8)
-    : [];
-
-  const jumpToContact = (index: number) => {
-    setCurrentContactIndex(index);
-    setLastDisposition(null);
-    setNotes('');
-    setVmDropped(false);
-    setSearchQuery('');
-    setSearchOpen(false);
-  };
-
-  useEffect(() => {
-    authFetch(`${API_BASE}/contacts?limit=300`)
-      .then(r => r.json())
-      .then(data => {
-        const arr = Array.isArray(data) ? data : [];
-        const sorted = [...arr].sort((a: any, b: any) => (b.leadScore ?? 0) - (a.leadScore ?? 0));
-        // Pin Braddock Jones to first position for demo
-        const pinned = sorted.find((c: any) =>
-          c.firstName?.toLowerCase().includes('braddock') ||
-          c.lastName?.toLowerCase().includes('braddock') ||
-          `${c.firstName} ${c.lastName}`.toLowerCase().includes('braddock')
-        );
-        const rest = sorted.filter((c: any) => c !== pinned);
-        const final = pinned ? [pinned, ...rest] : sorted;
-        setContacts(final.map(mapContact));
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+  // ─── Load settings ──────────────────────────────────────────────────────────
+  const loadSettings = useCallback(async () => {
+    try {
+      const r = await authFetch(`${API_BASE}/dialer/settings`);
+      if (r.ok) setSettings(await r.json());
+    } catch {}
   }, []);
 
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  // ─── Load contacts ──────────────────────────────────────────────────────────
+  const loadContacts = useCallback(async (filter: string) => {
+    setLoadingContacts(true);
+    try {
+      let statusParam = filter;
+      if (filter === 'past-client') statusParam = 'all';
+      const r = await authFetch(
+        `${API_BASE}/dialer/contacts?status=${statusParam === 'all' ? 'all' : statusParam}&limit=200`
+      );
+      let data: DialerContact[] = await r.json();
+      if (!Array.isArray(data)) data = [];
+
+      if (filter === 'past-client') {
+        data = data.filter(c => c.source === 'past-client');
+      }
+
+      // Pin Braddock Jones first for demo
+      const pinned = data.find(c =>
+        c.firstName?.toLowerCase().includes('braddock') ||
+        `${c.firstName} ${c.lastName}`.toLowerCase().includes('braddock jones')
+      );
+      const rest = data.filter(c => c !== pinned);
+      setContacts(pinned ? [pinned, ...rest] : data);
+    } catch {}
+    setLoadingContacts(false);
+  }, []);
+
+  // ─── Load AI script when contact changes ────────────────────────────────────
   useEffect(() => {
-    const contact = contacts[currentContactIndex];
-    if (!contact) return;
+    const contact = contacts[index];
+    if (!contact || view !== 'session') return;
     setAiScript(null);
-    setAiScriptLoading(true);
+    setScriptOpen(false);
     authFetch(`${API_BASE}/ai-script/${contact.id}`)
       .then(r => r.json())
-      .then(data => { setAiScript(data); setAiScriptLoading(false); })
-      .catch(() => setAiScriptLoading(false));
-  }, [currentContactIndex, contacts]);
+      .then(d => setAiScript(d))
+      .catch(() => {});
+  }, [index, contacts, view]);
 
-  useEffect(() => {
-    const contact = contacts[currentContactIndex];
-    if (!contact?.phone) { setSmartHoursWarning(''); return; }
-    const hour = new Date().getHours();
-    if (hour < 8 || hour >= 21) {
-      setSmartHoursWarning(`It's ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} — calling outside 8am–9pm may violate TCPA`);
-    } else {
-      setSmartHoursWarning('');
+  // ─── Save settings ──────────────────────────────────────────────────────────
+  const saveSettings = useCallback(async (patch: Partial<DialerSettings>) => {
+    setSettings(s => ({ ...s, ...patch }));
+    try {
+      await authFetch(`${API_BASE}/dialer/settings`, {
+        method: 'PUT',
+        body: JSON.stringify(patch),
+      });
+    } catch {}
+  }, []);
+
+  // ─── Record voicemail ───────────────────────────────────────────────────────
+  const recordVoicemail = async () => {
+    const phone = settings.personalPhone;
+    if (!phone) { alert('Enter your personal phone number first.'); return; }
+    setVmRecordStatus('calling');
+    try {
+      const r = await authFetch(`${API_BASE}/dialer/record-vm`, {
+        method: 'POST',
+        body: JSON.stringify({ personalPhone: phone }),
+      });
+      const d = await r.json();
+      if (d.error) { alert(d.error); setVmRecordStatus('idle'); }
+    } catch (e: any) {
+      alert('Failed to initiate call: ' + e.message);
+      setVmRecordStatus('idle');
     }
-  }, [currentContactIndex, contacts]);
-
-  const currentContact = contacts[currentContactIndex] ?? null;
-  const isInCall = callStatus === 'in-call' || callStatus === 'connecting' || callStatus === 'ringing';
-  const isPostCall = callStatus === 'completed' || callStatus === 'idle';
-  const showDisposition = isPostCall && !lastDisposition && sessionCalls > 0;
-
-  const handleDial = useCallback(async () => {
-    const phone = currentContact?.phone || manualPhone;
-    if (!phone) return;
-    await startCall(phone);
-    setSessionCalls(c => c + 1);
-    setNotes('');
-    setLastDisposition(null);
-    setVmDropped(false);
-  }, [currentContact, manualPhone, startCall]);
-
-  const handleDisposition = useCallback(async (type: DispositionType) => {
-    setLastDisposition(type);
-    if (type === 'hot-lead') setHotLeads(h => h + 1);
-    if (currentContact) {
-      setCallHistory(h => [{ name: currentContact.name, phone: currentContact.phone, disposition: type, duration: callDuration }, ...h]);
-      try {
-        const twilioSid = (activeCall as any)?.parameters?.CallSid || undefined;
-        await authFetch(`${API_BASE}/contacts/${currentContact.id}/calls`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ duration: callDuration, disposition: type, notes, twilioSid }),
-        });
-        if (type === 'hot-lead' || type === 'callback-scheduled') {
-          await authFetch(`${API_BASE}/twilio/disposition`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              disposition: type === 'hot-lead' ? 'hot-lead' : 'callback',
-              contact: {
-                firstName: currentContact.firstName || currentContact.name.split(' ')[0],
-                fullName: currentContact.name,
-                address: currentContact.address || 'your property',
-                phone: currentContact.phone,
-              },
-            }),
-          });
-        }
-      } catch (err) { console.error('Failed to save call:', err); }
-    }
-    endCall();
-
-    const advanceToNext = () => {
-      if (currentContactIndex < contacts.length - 1) setCurrentContactIndex(i => i + 1);
-      setLastDisposition(null);
-      setNotes('');
-      setVmDropped(false);
-    };
-
-    if (autoAdvance && currentContactIndex < contacts.length - 1) {
-      setCountdown(3);
-      let count = 3;
-      if (countdownRef.current) clearInterval(countdownRef.current);
-      countdownRef.current = setInterval(() => {
-        count--;
-        setCountdown(count);
-        if (count <= 0) {
-          clearInterval(countdownRef.current!);
-          setCountdown(null);
-          advanceToNext();
-          setTimeout(() => {
-            const nextContact = contacts[currentContactIndex + 1];
-            if (nextContact?.phone) startCall(nextContact.phone);
-          }, 400);
-        }
-      }, 1000);
-    } else {
-      setTimeout(advanceToNext, 800);
-    }
-  }, [currentContact, callDuration, currentContactIndex, contacts, endCall, notes, autoAdvance, startCall]);
-
-  const cancelAutoAdvance = () => {
-    if (countdownRef.current) clearInterval(countdownRef.current);
-    setCountdown(null);
   };
 
-  useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current); }, []);
+  // ─── Start session ──────────────────────────────────────────────────────────
+  const startSession = async () => {
+    await loadContacts(sessionFilter);
+    setIndex(0);
+    setDisposition(null);
+    setNotes('');
+    setSessionLog([]);
+    setBridgeStatus('idle');
+    setBridgeSessionId(null);
+    setView('session');
+  };
 
-  const sourceLabel = currentContact ? (SOURCE_LABELS[currentContact.source] || SOURCE_LABELS.manual) : null;
-  const sourceColor = currentContact ? (SOURCE_COLORS[currentContact.source] || SOURCE_COLORS.manual) : '#9ca3af';
+  // ─── Initiate call ──────────────────────────────────────────────────────────
+  const initiateCall = useCallback(async () => {
+    const contact = contacts[index];
+    if (!contact) return;
+    setDisposition(null);
+    setNotes('');
 
-  // Progress percent through queue
-  const queuePercent = contacts.length > 0 ? Math.round((currentContactIndex / contacts.length) * 100) : 0;
+    if (settings.callMode === 'bridge') {
+      setBridgeStatus('ringing-agent');
+      try {
+        const r = await authFetch(`${API_BASE}/dialer/call`, {
+          method: 'POST',
+          body: JSON.stringify({ contactId: contact.id, mode: 'bridge' }),
+        });
+        const data = await r.json();
+        if (data.error) { alert(data.error); setBridgeStatus('idle'); return; }
+        setBridgeSessionId(data.sessionId);
+      } catch (e: any) {
+        alert('Call failed: ' + e.message);
+        setBridgeStatus('idle');
+      }
+    } else {
+      await startCall(contact.phone);
+    }
+  }, [contacts, index, settings.callMode, startCall]);
 
-  return (
-    <div className="h-[calc(100vh-109px)] md:h-auto md:min-h-screen" style={{ background: '#f8f8f8', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+  // ─── End call ───────────────────────────────────────────────────────────────
+  const handleEndCall = useCallback(async () => {
+    if (settings.callMode === 'bridge' && bridgeSessionId) {
+      setBridgeStatus('ended');
+      try {
+        await authFetch(`${API_BASE}/dialer/bridge-hangup`, {
+          method: 'POST',
+          body: JSON.stringify({ sessionId: bridgeSessionId }),
+        });
+      } catch {}
+    } else {
+      endCall();
+    }
+  }, [settings.callMode, bridgeSessionId, endCall]);
 
-      {/* ── Stats bar ─────────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-2 px-4 md:px-5 py-2.5 bg-white border-b" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
-        <div className="flex items-center gap-4 md:gap-7 flex-wrap">
-          {/* Session stats */}
-          {[
-            { label: 'Calls', value: sessionCalls, gold: false },
-            { label: 'Hot',   value: hotLeads,     gold: true  },
-          ].map(stat => (
-            <div key={stat.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 300, letterSpacing: '-0.5px', color: stat.gold ? '#9A7A2E' : '#111', lineHeight: 1 }}>
-                {stat.value}
-              </div>
-              <div style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 2 }}>
-                {stat.label}
-              </div>
+  // ─── Save + advance ─────────────────────────────────────────────────────────
+  const saveAndAdvance = useCallback(async (disp: string) => {
+    const contact = contacts[index];
+    if (!contact) return;
+    const duration = settings.callMode === 'bridge' ? 0 : callDuration;
+
+    setSessionLog(log => [
+      { name: `${contact.firstName} ${contact.lastName}`, disp, duration },
+      ...log,
+    ]);
+
+    try {
+      await authFetch(`${API_BASE}/dialer/log-call`, {
+        method: 'POST',
+        body: JSON.stringify({
+          contactId: contact.id,
+          disposition: disp,
+          notes,
+          duration,
+          twilioSid: (activeCall as any)?.parameters?.CallSid,
+        }),
+      });
+    } catch {}
+
+    setDisposition(null);
+    setNotes('');
+    setBridgeStatus('idle');
+    setBridgeSessionId(null);
+
+    if (index + 1 >= contacts.length) {
+      setView('done');
+    } else {
+      setIndex(i => i + 1);
+    }
+  }, [contacts, index, notes, callDuration, activeCall, settings.callMode]);
+
+  // ─── Skip ───────────────────────────────────────────────────────────────────
+  const skipContact = () => {
+    if (settings.callMode === 'bridge' && bridgeSessionId) {
+      authFetch(`${API_BASE}/dialer/bridge-hangup`, {
+        method: 'POST',
+        body: JSON.stringify({ sessionId: bridgeSessionId }),
+      }).catch(() => {});
+    } else {
+      endCall();
+    }
+    setBridgeStatus('idle');
+    setBridgeSessionId(null);
+    setDisposition(null);
+    setNotes('');
+    if (index + 1 >= contacts.length) setView('done');
+    else setIndex(i => i + 1);
+  };
+
+  // ─── Derived ─────────────────────────────────────────────────────────────────
+  const contact          = contacts[index] ?? null;
+  const isWebrtcInCall   = settings.callMode === 'webrtc' && ['in-call','connecting','ringing'].includes(callStatus);
+  const isWebrtcDone     = settings.callMode === 'webrtc' && callStatus === 'completed';
+  const isBridgeActive   = settings.callMode === 'bridge' && ['ringing-agent','calling-contact','connected'].includes(bridgeStatus);
+  const isBridgeDone     = settings.callMode === 'bridge' && ['vm-dropped','no-answer','call-ended','ended'].includes(bridgeStatus);
+  const showCallBtn      = !isWebrtcInCall && !isBridgeActive && !isWebrtcDone && !isBridgeDone;
+  const showDisposition  = isWebrtcDone || isBridgeDone;
+
+  const bridgeLabel: Record<string, string> = {
+    'ringing-agent':    'Calling your phone…',
+    'calling-contact':  `Connecting to ${contact?.firstName ?? ''}…`,
+    connected:          `Connected — ${contact?.firstName ?? ''}`,
+    'vm-dropped':       'Voicemail dropped',
+    'no-answer':        'No answer',
+    'call-ended':       'Call ended',
+    ended:              'Call ended',
+    error:              'Call failed',
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // SETUP SCREEN
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (view === 'setup') {
+    return (
+      <div style={{ minHeight: '100vh', background: '#f8f8f8', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 16px 40px' }}>
+        <div style={{ width: '100%', maxWidth: 520 }}>
+
+          {/* Header */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 10, letterSpacing: '0.35em', color: GOLD, textTransform: 'uppercase', marginBottom: 6 }}>
+              Propel Dialer
             </div>
-          ))}
-
-          {/* Queue progress */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Queue</span>
-              <span style={{ fontSize: 10, fontWeight: 600, color: '#555' }}>
-                {currentContactIndex + 1}/{contacts.length}
-              </span>
-            </div>
-            <div style={{ width: 60, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${queuePercent}%`, background: '#C9A84C', borderRadius: 99, transition: 'width 0.4s' }} />
-            </div>
+            <h1 style={{ fontSize: 26, fontWeight: 300, color: DARK, margin: 0 }}>New Session</h1>
           </div>
 
-          {/* Daily goal — desktop only */}
-          <div className="hidden sm:flex" style={{ flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Goal</span>
-              <input
-                type="number" value={dailyGoal}
-                onChange={e => setDailyGoal(Number(e.target.value))}
-                style={{ width: 32, fontSize: 10, textAlign: 'center', border: 'none', borderBottom: '1px solid #e5e7eb', background: 'transparent', outline: 'none', color: '#555' }}
-              />
-            </div>
-            <div style={{ width: 60, height: 3, background: '#eee', borderRadius: 99, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${Math.min(100, (sessionCalls / dailyGoal) * 100)}%`, background: sessionCalls >= dailyGoal ? '#10b981' : '#C9A84C', borderRadius: 99, transition: 'width 0.4s' }} />
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Auto-advance toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Auto</span>
-            <button
-              onClick={() => setAutoAdvance(a => !a)}
-              style={{
-                position: 'relative', width: 32, height: 16, borderRadius: 99, border: 'none', cursor: 'pointer',
-                background: autoAdvance ? '#C9A84C' : '#e5e7eb', transition: 'background 0.25s',
-              }}
-            >
-              <span style={{
-                position: 'absolute', top: 2, left: autoAdvance ? 16 : 2,
-                width: 12, height: 12, borderRadius: '50%', background: '#fff',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.25s',
-              }} />
-            </button>
-          </div>
-
-          {/* Device status dot */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{
-              width: 7, height: 7, borderRadius: '50%',
-              background: deviceStatus === 'ready' ? '#10b981' : deviceStatus === 'error' ? '#ef4444' : '#d1d5db',
-              boxShadow: deviceStatus === 'ready' ? '0 0 0 2px rgba(16,185,129,0.2)' : 'none',
-            }} />
-            <span className="hidden sm:inline" style={{ fontSize: 9, color: '#aaa', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-              {deviceStatus === 'ready' ? 'Ready' : deviceStatus === 'loading' ? 'Connecting…' : deviceStatus === 'error' ? 'Error' : deviceStatus}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Banners ────────────────────────────────────────── */}
-      {smartHoursWarning && (
-        <div style={{ background: '#fffbeb', borderBottom: '1px solid #fde68a', color: '#92400e', fontSize: 11, padding: '8px 20px', display: 'flex', alignItems: 'center', gap: 8 }}>
-          ⚠️ <span>{smartHoursWarning}</span>
-        </div>
-      )}
-      {countdown !== null && (
-        <div style={{ background: '#111', color: '#fff', padding: '10px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 13 }}>Auto-dialing next contact in <strong style={{ color: '#C9A84C' }}>{countdown}s</strong>…</span>
-          <button onClick={cancelAutoAdvance} style={{ fontSize: 11, color: '#C9A84C', background: 'none', border: '1px solid rgba(201,168,76,0.4)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer' }}>
-            Cancel
-          </button>
-        </div>
-      )}
-      {errorMessage && (
-        <div style={{ background: '#fef2f2', borderBottom: '1px solid #fecaca', color: '#dc2626', fontSize: 11, padding: '8px 20px' }}>
-          ⚠️ {errorMessage}
-        </div>
-      )}
-
-      {/* ── Main layout ────────────────────────────────────── */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-
-        {/* ── LEFT: Contact card ───────────────────────────── */}
-        <div style={{
-          width: 280, flexShrink: 0,
-          borderRight: '1px solid rgba(0,0,0,0.06)',
-          background: '#fff',
-          display: 'flex', flexDirection: 'column',
-          overflow: 'auto',
-        }}
-          className="w-full md:w-[280px]"
-        >
-          {/* ── Search / Jump to Contact ── */}
-          <div ref={searchRef} style={{ padding: '10px 12px', borderBottom: '1px solid rgba(0,0,0,0.06)', position: 'relative' }}>
-            <div style={{ position: 'relative' }}>
-              <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: '#bbb', pointerEvents: 'none' }}>🔍</span>
-              <input
-                type="text"
-                placeholder="Jump to contact…"
-                value={searchQuery}
-                onChange={e => { setSearchQuery(e.target.value); setSearchOpen(true); }}
-                onFocus={() => setSearchOpen(true)}
-                disabled={isInCall}
-                style={{
-                  width: '100%', boxSizing: 'border-box',
-                  padding: '7px 10px 7px 28px',
-                  border: '1px solid #e5e7eb', borderRadius: 7,
-                  fontSize: 12, color: '#374151', outline: 'none', background: '#fafafa',
-                  opacity: isInCall ? 0.4 : 1,
-                  cursor: isInCall ? 'not-allowed' : 'text',
-                }}
-              />
-            </div>
-            {searchOpen && searchResults.length > 0 && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 12, right: 12, zIndex: 50,
-                background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.1)', overflow: 'hidden',
-              }}>
-                {searchResults.map(contact => {
-                  const idx = contacts.indexOf(contact);
-                  return (
-                    <button
-                      key={contact.id}
-                      onClick={() => jumpToContact(idx)}
-                      style={{
-                        width: '100%', textAlign: 'left', padding: '9px 12px',
-                        background: idx === currentContactIndex ? 'rgba(201,168,76,0.07)' : '#fff',
-                        border: 'none', borderBottom: '1px solid #f5f5f5',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-                        transition: 'background 0.15s',
-                      }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(201,168,76,0.05)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = idx === currentContactIndex ? 'rgba(201,168,76,0.07)' : '#fff')}
-                    >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contact.name}</div>
-                        <div style={{ fontSize: 10, color: '#9ca3af', fontFamily: 'monospace' }}>{contact.phone}</div>
-                      </div>
-                      <div style={{ fontSize: 9, color: '#ccc', flexShrink: 0 }}>#{idx + 1}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {searchOpen && searchQuery.trim().length > 0 && searchResults.length === 0 && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 12, right: 12, zIndex: 50,
-                background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.1)', padding: '12px',
-                fontSize: 11, color: '#9ca3af', textAlign: 'center',
-              }}>
-                No contacts match "{searchQuery}"
-              </div>
-            )}
-          </div>
-
-          {loading ? (
-            <div style={{ padding: 24 }}>
-              {[1, 2, 3].map(i => (
-                <div key={i} style={{ height: 16, background: '#f3f4f6', borderRadius: 4, marginBottom: 10, width: i === 1 ? '60%' : i === 2 ? '40%' : '80%' }} className="animate-pulse" />
+          {/* ── Who to call ── */}
+          <Card title="Who to call" mb={14}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {STATUS_FILTERS.map(f => (
+                <button key={f.value} onClick={() => setSessionFilter(f.value)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                    borderRadius: 10, textAlign: 'left', cursor: 'pointer',
+                    background: sessionFilter === f.value ? DARK : 'transparent',
+                    border: `1px solid ${sessionFilter === f.value ? DARK : 'rgba(0,0,0,0.09)'}`,
+                    transition: 'all 0.15s',
+                  }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: sessionFilter === f.value ? GOLD : '#d1d5db', flexShrink: 0 }} />
+                  <span style={{ fontSize: 14, color: sessionFilter === f.value ? '#fff' : '#374151', fontWeight: sessionFilter === f.value ? 500 : 400 }}>
+                    {f.label}
+                  </span>
+                </button>
               ))}
             </div>
-          ) : currentContact ? (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+          </Card>
 
-              {/* Contact header */}
-              <div className="px-4 py-3 md:px-5 md:py-5" style={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-                {/* Source badge + lead score */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <span style={{
-                    fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
-                    padding: '2px 8px', borderRadius: 99,
-                    background: `${sourceColor}15`,
-                    color: sourceColor,
-                    border: `1px solid ${sourceColor}30`,
-                  }}>
-                    {sourceLabel}
-                  </span>
-                  {currentContact.leadScore != null && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 600,
-                      padding: '2px 8px', borderRadius: 99,
-                      background: currentContact.leadScore >= 70 ? 'rgba(201,168,76,0.12)' : 'rgba(0,0,0,0.04)',
-                      color: currentContact.leadScore >= 70 ? '#9A7A2E' : '#9ca3af',
-                      border: `1px solid ${currentContact.leadScore >= 70 ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.08)'}`,
-                    }}>
-                      {currentContact.leadScore >= 70 ? '🔥 ' : ''}{currentContact.leadScore}
-                    </span>
-                  )}
-                </div>
-
-                <h2 className="text-lg md:text-2xl" style={{ fontWeight: 300, color: '#111', letterSpacing: '0.02em', margin: 0, lineHeight: 1.2 }}>
-                  {currentContact.name}
-                </h2>
-                <div style={{ fontFamily: 'monospace', fontSize: 13, color: '#C9A84C', marginTop: 6, letterSpacing: '0.05em' }}>
-                  {currentContact.phone}
-                </div>
-                {currentContact.address && (
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4, lineHeight: 1.5 }}>
-                    📍 {currentContact.address}
-                  </div>
-                )}
-              </div>
-
-              {/* ── IDLE: Call button ── */}
-              {!isInCall && callStatus !== 'completed' && (
-                <div className="px-4 pt-3 md:px-5 md:pt-5">
-                  <button
-                    onClick={handleDial}
-                    disabled={deviceStatus !== 'ready'}
-                    style={{
-                      width: '100%',
-                      padding: '14px 0',
-                      borderRadius: 10,
-                      border: 'none',
-                      background: deviceStatus !== 'ready' ? '#e5e7eb' : 'linear-gradient(135deg, #C9A84C, #e8c96e)',
-                      color: deviceStatus !== 'ready' ? '#9ca3af' : '#fff',
-                      fontSize: 13, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                      cursor: deviceStatus !== 'ready' ? 'not-allowed' : 'pointer',
-                      boxShadow: deviceStatus !== 'ready' ? 'none' : '0 4px 14px rgba(201,168,76,0.35)',
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    📞 Call {currentContact.firstName || currentContact.name.split(' ')[0]}
-                  </button>
-                  {deviceStatus !== 'ready' && (
-                    <p style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 8, letterSpacing: '0.05em' }}>
-                      {deviceStatus === 'loading' ? 'Setting up phone…' : 'Device not ready'}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* ── IN-CALL state ── */}
-              {isInCall && (
-                <div className="px-4 pt-3 md:px-5 md:pt-4">
-                  {/* Live indicator */}
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    padding: '10px 0', marginBottom: 12,
-                    background: callStatus === 'in-call' ? 'rgba(239,68,68,0.06)' : 'rgba(201,168,76,0.06)',
-                    borderRadius: 8, border: `1px solid ${callStatus === 'in-call' ? 'rgba(239,68,68,0.2)' : 'rgba(201,168,76,0.2)'}`,
-                  }}>
-                    <div style={{
-                      width: 8, height: 8, borderRadius: '50%',
-                      background: callStatus === 'in-call' ? '#ef4444' : '#C9A84C',
-                      boxShadow: callStatus === 'in-call' ? '0 0 0 3px rgba(239,68,68,0.2)' : '0 0 0 3px rgba(201,168,76,0.2)',
-                      animation: 'pulse 1.5s infinite',
-                    }} />
-                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: callStatus === 'in-call' ? '#ef4444' : '#9A7A2E' }}>
-                      {callStatus === 'connecting' ? 'Connecting…' : callStatus === 'ringing' ? 'Ringing…' : 'Live'}
-                    </span>
-                    {callStatus === 'in-call' && (
-                      <span style={{ fontFamily: 'monospace', fontSize: 14, fontWeight: 300, color: '#111', letterSpacing: '0.1em' }}>
-                        {formatDuration(callDuration)}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Mute + Hang Up */}
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                    <button
-                      onClick={() => muteCall(!isMuted)}
-                      style={{
-                        flex: 1, padding: '10px 0', borderRadius: 8,
-                        border: `1px solid ${isMuted ? 'rgba(239,68,68,0.4)' : 'rgba(0,0,0,0.12)'}`,
-                        background: isMuted ? 'rgba(239,68,68,0.08)' : '#f9f9f9',
-                        color: isMuted ? '#ef4444' : '#555',
-                        fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {isMuted ? '🔇 Muted' : '🎤 Mute'}
-                    </button>
-                    <button
-                      onClick={endCall}
-                      style={{
-                        flex: 1, padding: '10px 0', borderRadius: 8,
-                        border: 'none',
-                        background: '#ef4444',
-                        color: '#fff',
-                        fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
-                        cursor: 'pointer',
-                        boxShadow: '0 2px 8px rgba(239,68,68,0.35)',
-                      }}
-                    >
-                      📵 Hang Up
-                    </button>
-                  </div>
-
-                  {/* VM Drop */}
-                  <button
-                    disabled={vmDropped}
-                    onClick={async () => {
-                      const callSid = (activeCall as any)?.parameters?.CallSid;
-                      if (!callSid) return;
-                      await authFetch(`${API_BASE}/twilio/voicemail-drop`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ callSid }),
-                      });
-                      setVmDropped(true);
-                      setTimeout(() => endCall(), 1000);
-                    }}
-                    style={{
-                      width: '100%', padding: '8px 0', borderRadius: 7,
-                      border: `1px solid ${vmDropped ? 'rgba(201,168,76,0.3)' : 'rgba(201,168,76,0.4)'}`,
-                      background: vmDropped ? 'rgba(201,168,76,0.08)' : 'transparent',
-                      color: vmDropped ? '#C9A84C' : '#9A7A2E',
-                      fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-                      cursor: vmDropped ? 'not-allowed' : 'pointer',
-                      opacity: vmDropped ? 0.7 : 1,
-                    }}
-                  >
-                    {vmDropped ? '✓ Voicemail Sent' : '📤 Drop Voicemail'}
-                  </button>
-                </div>
-              )}
-
-              {/* ── POST-CALL: Logged confirmation ── */}
-              {lastDisposition && (
-                <div style={{ padding: '16px 20px 0', textAlign: 'center' }}>
-                  <div style={{
-                    padding: '10px', borderRadius: 8,
-                    background: 'rgba(16,185,129,0.08)',
-                    border: '1px solid rgba(16,185,129,0.2)',
-                    color: '#059669', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em',
-                  }}>
-                    ✓ Logged — moving to next
-                  </div>
-                </div>
-              )}
-
-              {/* Notes */}
-              <div className="px-4 pt-3 md:px-5 md:pt-4">
-                <label className="hidden md:block" style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa', display: 'block', marginBottom: 6 }}>
-                  Call Notes
-                </label>
-                <textarea
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  placeholder="Call notes…"
-                  rows={2}
+          {/* ── Call mode ── */}
+          <Card title="Call mode" mb={14}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {([
+                { mode: 'webrtc', title: 'Browser Audio', sub: 'Use computer mic & speakers' },
+                { mode: 'bridge', title: 'Personal Phone', sub: 'Twilio rings your cell first' },
+              ] as const).map(opt => (
+                <button key={opt.mode} onClick={() => saveSettings({ callMode: opt.mode })}
                   style={{
-                    width: '100%', boxSizing: 'border-box',
-                    padding: '8px 10px', borderRadius: 7,
-                    border: '1px solid #e5e7eb', background: '#fafafa',
-                    fontSize: 12, color: '#374151', resize: 'none', outline: 'none',
-                    lineHeight: 1.5,
-                  }}
-                />
-              </div>
-
-              {/* Disposition — mobile only */}
-              <div className="md:hidden px-4 pt-2 pb-2">
-                <DispositionPanel
-                  onDisposition={handleDisposition}
-                  disabled={isInCall || Boolean(lastDisposition)}
-                />
-                {lastDisposition && currentContact && (
-                  <div style={{ marginTop: 12 }}>
-                    <NextActionPanel contactId={currentContact.id} onBook={() => {}} />
-                  </div>
-                )}
-              </div>
-
-              {/* Skip button */}
-              <div className="px-4 py-2 md:px-5 md:py-4" style={{ marginTop: 'auto' }}>
-                <button
-                  onClick={() => {
-                    if (currentContactIndex < contacts.length - 1) {
-                      setCurrentContactIndex(i => i + 1);
-                      setLastDisposition(null);
-                      setNotes('');
-                      setVmDropped(false);
-                    }
-                  }}
-                  disabled={isInCall || currentContactIndex >= contacts.length - 1}
-                  style={{
-                    width: '100%', padding: '8px 0',
-                    borderRadius: 7, border: '1px solid #e5e7eb',
-                    background: 'transparent', color: '#9ca3af',
-                    fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
-                    cursor: isInCall || currentContactIndex >= contacts.length - 1 ? 'not-allowed' : 'pointer',
-                    opacity: isInCall || currentContactIndex >= contacts.length - 1 ? 0.4 : 1,
+                    padding: '14px 12px', borderRadius: 10, textAlign: 'left', cursor: 'pointer',
+                    background: settings.callMode === opt.mode ? DARK : 'transparent',
+                    border: `1px solid ${settings.callMode === opt.mode ? DARK : 'rgba(0,0,0,0.09)'}`,
                     transition: 'all 0.15s',
-                  }}
-                  onMouseEnter={e => { if (!isInCall) (e.currentTarget as HTMLButtonElement).style.borderColor = '#C9A84C'; }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#e5e7eb'; }}
-                >
-                  Skip Contact →
+                  }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: settings.callMode === opt.mode ? '#fff' : '#111', marginBottom: 3 }}>{opt.title}</div>
+                  <div style={{ fontSize: 11, color: settings.callMode === opt.mode ? 'rgba(255,255,255,0.45)' : '#9ca3af' }}>{opt.sub}</div>
                 </button>
-              </div>
+              ))}
             </div>
 
-          ) : (
-            /* No contacts — manual dial */
-            <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div style={{ padding: 16, borderRadius: 8, background: '#f9fafb', border: '1px solid #e5e7eb', textAlign: 'center' }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
-                <p style={{ fontSize: 12, color: '#6b7280', margin: 0, lineHeight: 1.5 }}>No contacts in queue.<br />Enter a number to dial manually.</p>
+            {settings.callMode === 'bridge' && (
+              <div style={{ marginTop: 14 }}>
+                <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 5 }}>Your personal phone number</label>
+                <input
+                  type="tel" placeholder="+1 (555) 000-0000"
+                  value={settings.personalPhone}
+                  onChange={e => setSettings(s => ({ ...s, personalPhone: e.target.value }))}
+                  onBlur={() => saveSettings({ personalPhone: settings.personalPhone })}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, fontSize: 14, border: '1px solid rgba(0,0,0,0.14)', outline: 'none', boxSizing: 'border-box' }}
+                />
               </div>
-              <label style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#aaa' }}>Phone Number</label>
-              <input
-                type="tel" value={manualPhone}
-                onChange={e => setManualPhone(e.target.value)}
-                placeholder="+1 (555) 000-0000"
-                style={{ padding: '10px 12px', border: '1px solid #e5e7eb', borderRadius: 7, fontSize: 13, outline: 'none' }}
-              />
-              <button
-                onClick={handleDial}
-                disabled={deviceStatus !== 'ready' || !manualPhone}
-                style={{
-                  padding: '12px 0', borderRadius: 8, border: 'none',
-                  background: !manualPhone || deviceStatus !== 'ready' ? '#e5e7eb' : 'linear-gradient(135deg, #C9A84C, #e8c96e)',
-                  color: !manualPhone || deviceStatus !== 'ready' ? '#9ca3af' : '#fff',
-                  fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                  cursor: !manualPhone || deviceStatus !== 'ready' ? 'not-allowed' : 'pointer',
-                }}
-              >
-                📞 Dial
-              </button>
-            </div>
-          )}
-        </div>
+            )}
+          </Card>
 
-        {/* ── CENTER: AI Script ─────────────────────────────── */}
-        <div className="hidden md:flex" style={{ flex: 1, flexDirection: 'column', gap: 16, padding: 20, overflow: 'auto', background: '#f8f8f8' }}>
-
-          {/* AI Script card */}
-          <div style={{
-            background: '#fff', borderRadius: 12, border: '1px solid rgba(201,168,76,0.18)',
-            padding: 20, flex: 1, overflow: 'auto',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#9A7A2E' }}>
-                  ✨ AI Script
-                </span>
-                {aiScript?.cached && (
-                  <span style={{ fontSize: 9, color: '#ccc', letterSpacing: '0.08em', textTransform: 'uppercase' }}>cached</span>
-                )}
-                {aiScriptLoading && (
-                  <span style={{ fontSize: 9, color: '#C9A84C', letterSpacing: '0.08em', textTransform: 'uppercase' }}>generating…</span>
-                )}
-              </div>
-              <button
-                onClick={() => {
-                  if (!currentContact) return;
-                  setAiScript(null);
-                  setAiScriptLoading(true);
-                  authFetch(`${API_BASE}/ai-script/${currentContact.id}?refresh=true`)
-                    .then(r => r.json()).then(d => { setAiScript(d); setAiScriptLoading(false); })
-                    .catch(() => setAiScriptLoading(false));
-                }}
-                style={{ fontSize: 10, color: '#C9A84C', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.06em' }}
-              >
-                ↺ Refresh
-              </button>
-            </div>
-
-            {aiScript ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Opener */}
-                <div style={{ padding: '14px 16px', borderRadius: 8, background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.25)' }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#C9A84C', marginBottom: 8 }}>
-                    Opener
-                  </div>
-                  <p style={{ fontSize: 13, lineHeight: 1.65, color: '#1f2937', margin: 0 }}>{aiScript.opener}</p>
+          {/* ── Voicemail drop ── */}
+          <Card title="Voicemail drop" mb={24}>
+            {settings.voicemailUrl ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
+                  <span style={{ fontSize: 13, color: '#374151' }}>Voicemail recorded</span>
                 </div>
-
-                {/* Objections */}
-                {aiScript.objections?.map((obj: any, i: number) => (
-                  <div key={i} style={{ padding: '12px 14px', borderRadius: 8, border: '1px solid #f0f0f0', background: '#fff', cursor: 'pointer', transition: 'border-color 0.15s' }}
-                    onMouseEnter={e => (e.currentTarget as HTMLDivElement).style.borderColor = 'rgba(201,168,76,0.3)'}
-                    onMouseLeave={e => (e.currentTarget as HTMLDivElement).style.borderColor = '#f0f0f0'}
-                  >
-                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 6 }}>
-                      If they say: "{obj.trigger}"
-                    </div>
-                    <p style={{ fontSize: 12, lineHeight: 1.6, color: '#4b5563', margin: 0 }}>{obj.response}</p>
-                  </div>
-                ))}
-
-                {/* Close */}
-                <div style={{ padding: '12px 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fafafa' }}>
-                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#C9A84C', marginBottom: 6 }}>
-                    Close Attempt
-                  </div>
-                  <p style={{ fontSize: 12, lineHeight: 1.6, color: '#374151', margin: 0 }}>{aiScript.closeAttempt}</p>
-                </div>
-
-                {/* Tip */}
-                {aiScript.tip && (
-                  <div style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #f0f0f0', background: '#f9fafb' }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#d1d5db', marginBottom: 5 }}>
-                      💡 Coach Tip
-                    </div>
-                    <p style={{ fontSize: 11, lineHeight: 1.55, color: '#6b7280', margin: 0 }}>{aiScript.tip}</p>
-                  </div>
-                )}
-              </div>
-            ) : aiScriptLoading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[80, 120, 60].map((h, i) => (
-                  <div key={i} className="animate-pulse" style={{ height: h, borderRadius: 8, background: 'rgba(201,168,76,0.06)' }} />
-                ))}
+                <audio controls src={settings.voicemailUrl} style={{ width: '100%', height: 36, borderRadius: 6, marginBottom: 10 }} />
+                <button onClick={recordVoicemail} disabled={vmRecordStatus === 'calling'}
+                  style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                  {vmRecordStatus === 'calling' ? 'Calling your phone…' : 'Re-record'}
+                </button>
+              </>
+            ) : vmRecordStatus === 'calling' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: '#fefce8', borderRadius: 10 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: GOLD }} />
+                <span style={{ fontSize: 13, color: '#92400e' }}>Pick up — record your message, then press #</span>
               </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>✨</div>
-                <p style={{ fontSize: 12, color: '#9ca3af', lineHeight: 1.5 }}>Select a contact to generate a personalized AI script.</p>
+              <>
+                <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 14px', lineHeight: 1.5 }}>
+                  Record a short message played automatically when a call hits voicemail.
+                  {settings.callMode === 'bridge' && !settings.personalPhone && ' Enter your phone number above first.'}
+                </p>
+                <button onClick={recordVoicemail}
+                  disabled={settings.callMode === 'bridge' && !settings.personalPhone}
+                  style={{
+                    padding: '10px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                    background: DARK, color: '#fff', border: 'none', cursor: 'pointer',
+                    opacity: (settings.callMode === 'bridge' && !settings.personalPhone) ? 0.4 : 1,
+                  }}>
+                  Record Voicemail
+                </button>
+              </>
+            )}
+          </Card>
+
+          {/* Start */}
+          <button onClick={startSession} disabled={loadingContacts}
+            style={{
+              width: '100%', padding: '16px', borderRadius: 14, fontSize: 16, fontWeight: 600,
+              background: `linear-gradient(135deg, ${DARK} 0%, #1a1a1a 100%)`,
+              color: '#fff', border: `1px solid rgba(201,168,76,0.3)`,
+              cursor: loadingContacts ? 'not-allowed' : 'pointer',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+            }}>
+            {loadingContacts ? 'Loading…' : 'Start Session'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DONE SCREEN
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (view === 'done') {
+    const counts = {
+      hot:  sessionLog.filter(l => l.disp === 'hot-lead').length,
+      appt: sessionLog.filter(l => l.disp === 'appointment').length,
+      vm:   sessionLog.filter(l => l.disp === 'left-voicemail').length,
+    };
+    return (
+      <div style={{ minHeight: '100vh', background: '#f8f8f8', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 16px' }}>
+        <div style={{ width: '100%', maxWidth: 480 }}>
+          <div style={{ textAlign: 'center', marginBottom: 28 }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: `${GOLD}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', fontSize: 22 }}>✓</div>
+            <h2 style={{ fontSize: 24, fontWeight: 300, color: DARK, margin: '0 0 6px' }}>Session Complete</h2>
+            <p style={{ fontSize: 14, color: '#9ca3af', margin: 0 }}>{sessionLog.length} contacts reached</p>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+            {[
+              { label: 'Hot Leads',    value: counts.hot,  gold: true },
+              { label: 'Appointments', value: counts.appt, gold: true },
+              { label: 'Voicemails',   value: counts.vm,   gold: false },
+            ].map(s => (
+              <div key={s.label} style={{ background: '#fff', borderRadius: 12, padding: '16px', textAlign: 'center', border: '1px solid rgba(0,0,0,0.07)' }}>
+                <div style={{ fontSize: 28, fontWeight: 300, color: s.gold ? GOLD : '#111' }}>{s.value}</div>
+                <div style={{ fontSize: 9, color: '#9ca3af', letterSpacing: '0.1em', textTransform: 'uppercase', marginTop: 4 }}>{s.label}</div>
               </div>
+            ))}
+          </div>
+
+          {sessionLog.length > 0 && (
+            <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.07)', marginBottom: 20 }}>
+              {sessionLog.map((l, i) => (
+                <div key={i} style={{ padding: '11px 16px', borderBottom: i < sessionLog.length - 1 ? '1px solid rgba(0,0,0,0.05)' : 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 13, color: '#374151' }}>{l.name}</span>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: DISPOSITIONS.find(d => d.key === l.disp)?.color || '#9ca3af' }}>
+                    {DISPOSITIONS.find(d => d.key === l.disp)?.label || l.disp}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={() => { setView('setup'); setContacts([]); setIndex(0); }}
+            style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 15, fontWeight: 600, background: DARK, color: '#fff', border: 'none', cursor: 'pointer' }}>
+            New Session
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // ACTIVE SESSION
+  // ─────────────────────────────────────────────────────────────────────────────
+  if (!contact) return null;
+
+  const lastCall = contact.calls?.[0];
+  const pct      = Math.round((index / contacts.length) * 100);
+
+  return (
+    <div className="h-[calc(100vh-109px)] md:h-auto md:min-h-screen"
+      style={{ background: '#f8f8f8', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+      {/* Progress bar */}
+      <div style={{ background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.06)', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+        <div style={{ flex: 1, height: 3, background: '#f3f4f6', borderRadius: 99, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, background: GOLD, borderRadius: 99, transition: 'width 0.4s' }} />
+        </div>
+        <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>{index + 1} / {contacts.length}</span>
+        <button onClick={() => setView('setup')}
+          style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}>
+          End
+        </button>
+      </div>
+
+      {/* Scrollable content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 24px' }}>
+
+        {/* Contact card */}
+        <div style={{ background: '#fff', borderRadius: 16, padding: '18px', marginBottom: 12, border: '1px solid rgba(0,0,0,0.07)', boxShadow: '0 2px 12px rgba(0,0,0,0.04)' }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', padding: '3px 8px', borderRadius: 6, background: `${SOURCE_COLORS[contact.source] || '#9ca3af'}18`, color: SOURCE_COLORS[contact.source] || '#9ca3af' }}>
+              {SOURCE_LABELS[contact.source] || contact.source}
+            </span>
+            {contact.status !== 'new' && (
+              <span style={{ fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 6, background: '#f3f4f6', color: '#6b7280', textTransform: 'capitalize' }}>
+                {contact.status}
+              </span>
+            )}
+            {(contact.leadScore ?? 0) > 70 && (
+              <span style={{ fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 6, background: `${GOLD}18`, color: '#9A7A2E' }}>
+                Score {contact.leadScore}
+              </span>
             )}
           </div>
 
-          {/* Session Log */}
-          {callHistory.length > 0 && (
-            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid rgba(0,0,0,0.06)', padding: '16px 20px' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 12 }}>
-                Session Log
+          <h2 style={{ fontSize: 26, fontWeight: 300, color: DARK, margin: '0 0 3px', letterSpacing: '0.01em' }}>
+            {contact.firstName} {contact.lastName}
+          </h2>
+          <div style={{ fontSize: 15, color: '#6b7280', marginBottom: 10 }}>{formatPhone(contact.phone)}</div>
+
+          {contact.address && (
+            <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>
+              {contact.address}{contact.city ? `, ${contact.city}` : ''}{contact.state ? `, ${contact.state}` : ''}
+            </div>
+          )}
+
+          {lastCall && (
+            <div style={{ fontSize: 11, color: '#9ca3af', borderTop: '1px solid rgba(0,0,0,0.05)', paddingTop: 10, marginTop: 6, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <span>Last: {timeAgo(lastCall.calledAt)}</span>
+              {lastCall.disposition && (
+                <span>· {DISPOSITIONS.find(d => d.key === lastCall.disposition)?.label || lastCall.disposition}</span>
+              )}
+            </div>
+          )}
+
+          {contact.notes && (
+            <div style={{ fontSize: 12, color: '#6b7280', background: '#fafafa', borderRadius: 8, padding: '8px 10px', marginTop: 10, borderLeft: `3px solid ${GOLD}` }}>
+              {contact.notes}
+            </div>
+          )}
+        </div>
+
+        {/* Call controls */}
+        <div style={{ background: '#fff', borderRadius: 16, padding: '16px', marginBottom: 12, border: '1px solid rgba(0,0,0,0.07)' }}>
+
+          {/* Bridge status pill */}
+          {settings.callMode === 'bridge' && bridgeStatus !== 'idle' && !isBridgeDone && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderRadius: 10, marginBottom: 14, background: bridgeStatus === 'connected' ? '#f0fdf4' : '#fefce8' }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: bridgeStatus === 'connected' ? '#22c55e' : GOLD, flexShrink: 0 }} />
+              <span style={{ fontSize: 13, fontWeight: 500, color: bridgeStatus === 'connected' ? '#15803d' : '#92400e' }}>
+                {bridgeLabel[bridgeStatus] || ''}
+              </span>
+            </div>
+          )}
+
+          {/* WebRTC in-call status */}
+          {settings.callMode === 'webrtc' && isWebrtcInCall && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', background: '#f0fdf4', borderRadius: 10, marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
+                <span style={{ fontSize: 13, fontWeight: 500, color: '#15803d' }}>
+                  {callStatus === 'ringing' ? 'Ringing…' : callStatus === 'connecting' ? 'Connecting…'
+                    : `${String(Math.floor(callDuration / 60)).padStart(2,'0')}:${String(callDuration % 60).padStart(2,'0')}`}
+                </span>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {callHistory.slice(0, 8).map((c, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
-                    <span style={{ fontSize: 14 }}>{DISP_EMOJI[c.disposition] || '📞'}</span>
-                    <span style={{ flex: 1, fontWeight: 500, color: '#1f2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#9ca3af' }}>{formatDuration(c.duration)}</span>
-                    <span style={{ fontSize: 10, color: '#6b7280', textTransform: 'capitalize', letterSpacing: '0.02em' }}>{c.disposition.replace(/-/g, ' ')}</span>
-                  </div>
+              <button onClick={() => muteCall(!isMuted)}
+                style={{ fontSize: 11, color: isMuted ? '#ef4444' : '#6b7280', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                {isMuted ? 'Unmute' : 'Mute'}
+              </button>
+            </div>
+          )}
+
+          {/* Call button */}
+          {showCallBtn && (
+            <button onClick={initiateCall}
+              disabled={settings.callMode === 'webrtc' && deviceStatus !== 'ready'}
+              style={{
+                width: '100%', padding: '15px', borderRadius: 12, fontSize: 16, fontWeight: 600,
+                background: `linear-gradient(135deg, ${DARK} 0%, #1a1a1a 100%)`,
+                color: '#fff', border: `1px solid rgba(201,168,76,0.3)`, cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                opacity: settings.callMode === 'webrtc' && deviceStatus !== 'ready' ? 0.5 : 1,
+              }}>
+              Call {contact.firstName}
+            </button>
+          )}
+
+          {(isWebrtcInCall || isBridgeActive) && (
+            <button onClick={handleEndCall}
+              style={{ width: '100%', padding: '15px', borderRadius: 12, fontSize: 16, fontWeight: 600, background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', cursor: 'pointer' }}>
+              End Call
+            </button>
+          )}
+
+          {settings.callMode === 'webrtc' && deviceStatus === 'loading' && !isWebrtcInCall && (
+            <p style={{ textAlign: 'center', fontSize: 12, color: '#9ca3af', margin: '8px 0 0' }}>Initializing dialer…</p>
+          )}
+        </div>
+
+        {/* Disposition */}
+        {showDisposition && (
+          <div style={{ background: '#fff', borderRadius: 16, padding: '18px', marginBottom: 12, border: '1px solid rgba(0,0,0,0.07)' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 14 }}>
+              How did it go?
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+              {DISPOSITIONS.map(d => (
+                <button key={d.key} onClick={() => setDisposition(d.key)}
+                  style={{
+                    padding: '10px 12px', borderRadius: 10, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                    background: disposition === d.key ? d.color : 'transparent',
+                    color: disposition === d.key ? '#fff' : '#374151',
+                    border: `1px solid ${disposition === d.key ? d.color : 'rgba(0,0,0,0.09)'}`,
+                    transition: 'all 0.15s',
+                  }}>
+                  {d.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Notes (optional)…" rows={2}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 10, fontSize: 13, border: '1px solid rgba(0,0,0,0.09)', outline: 'none', resize: 'none', boxSizing: 'border-box', marginBottom: 12, fontFamily: 'inherit' }}
+            />
+            <button onClick={() => disposition && saveAndAdvance(disposition)} disabled={!disposition}
+              style={{
+                width: '100%', padding: '13px', borderRadius: 12, fontSize: 15, fontWeight: 600,
+                background: DARK, color: '#fff', border: 'none',
+                cursor: disposition ? 'pointer' : 'not-allowed', opacity: disposition ? 1 : 0.4,
+              }}>
+              {index + 1 >= contacts.length ? 'Finish Session' : 'Next Contact →'}
+            </button>
+          </div>
+        )}
+
+        {/* AI Script */}
+        {aiScript?.script && (
+          <div style={{ background: '#fff', borderRadius: 16, border: '1px solid rgba(0,0,0,0.07)', marginBottom: 12, overflow: 'hidden' }}>
+            <button onClick={() => setScriptOpen(o => !o)}
+              style={{ width: '100%', padding: '13px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af' }}>Call Script</span>
+              <span style={{ fontSize: 11, color: '#9ca3af' }}>{scriptOpen ? '▲' : '▼'}</span>
+            </button>
+            {scriptOpen && (
+              <div style={{ padding: '0 18px 16px' }}>
+                {(Array.isArray(aiScript.script) ? aiScript.script : [aiScript.script]).map((line: string, i: number) => (
+                  <p key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.65, marginBottom: 10, margin: i > 0 ? '10px 0 0' : 0 }}>{line}</p>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* ── RIGHT: Disposition ───────────────────────────── */}
-        <div
-          className="hidden md:flex"
-          style={{
-            width: 200, flexShrink: 0,
-            borderLeft: '1px solid rgba(0,0,0,0.06)',
-            background: '#fff', padding: '20px 16px',
-            flexDirection: 'column', gap: 16,
-            overflow: 'auto',
-          }}
-        >
-          {/* Step hint */}
-          <div style={{
-            padding: '10px 12px', borderRadius: 8,
-            background: isInCall ? 'rgba(239,68,68,0.05)' : showDisposition ? 'rgba(201,168,76,0.08)' : 'rgba(0,0,0,0.03)',
-            border: `1px solid ${isInCall ? 'rgba(239,68,68,0.2)' : showDisposition ? 'rgba(201,168,76,0.25)' : 'rgba(0,0,0,0.06)'}`,
-          }}>
-            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: isInCall ? '#ef4444' : showDisposition ? '#9A7A2E' : '#9ca3af', marginBottom: 3 }}>
-              {isInCall ? 'On a call' : showDisposition ? 'Call ended' : 'Waiting'}
-            </div>
-            <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
-              {isInCall
-                ? 'Use Hang Up when done'
-                : showDisposition
-                ? 'Log the outcome below ↓'
-                : sessionCalls === 0
-                ? 'Press Call to start'
-                : 'Press Call for next contact'}
-            </div>
+            )}
           </div>
+        )}
 
-          <DispositionPanel
-            onDisposition={handleDisposition}
-            disabled={isInCall || Boolean(lastDisposition) || sessionCalls === 0}
-            vertical
-          />
-
-          {lastDisposition && currentContact && (
-            <NextActionPanel contactId={currentContact.id} onBook={() => {}} />
-          )}
-        </div>
+        {/* Skip */}
+        {!showDisposition && !isBridgeActive && !isWebrtcInCall && (
+          <button onClick={skipContact}
+            style={{ width: '100%', padding: '11px', borderRadius: 12, fontSize: 13, color: '#9ca3af', background: 'transparent', border: '1px solid rgba(0,0,0,0.08)', cursor: 'pointer' }}>
+            Skip
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
 
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-      `}</style>
+// ─── Helper card component ────────────────────────────────────────────────────
+function Card({ title, children, mb = 0 }: { title: string; children: React.ReactNode; mb?: number }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 14, padding: '18px', marginBottom: mb, border: '1px solid rgba(0,0,0,0.07)' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 12 }}>
+        {title}
+      </div>
+      {children}
     </div>
   );
 }

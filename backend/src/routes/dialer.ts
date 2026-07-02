@@ -1,0 +1,487 @@
+// ─── Sequential Dialer ────────────────────────────────────────────────────────
+// Single-contact dialer with two call modes:
+//   webrtc  — browser handles audio via Twilio Device (existing token flow)
+//   bridge  — Twilio calls agent's personal cell, then bridges to contact
+//             via a conference room with AMD + pre-recorded voicemail drop
+//
+// Bridge call flow:
+//   1. POST /call       → Twilio calls agent's personal phone (Leg A)
+//   2. /bridge-a-twiml  → Agent picks up → plays "Calling [Name]…" → joins conf
+//   3. /bridge-a-status → Twilio fires "in-progress" → backend creates Leg B (contact)
+//                         with AMD enabled
+//   4. /bridge-b-twiml  → Contact picks up → joins same conference (connected!)
+//   5. /bridge-amd      → AMD result:
+//        human   → already connected via conference (do nothing extra)
+//        machine → play voicemail on Leg B, say "VM dropped" to Leg A, both hangup
+//
+// Voicemail recording:
+//   POST /record-vm → Twilio calls agent's phone → agent speaks → presses #
+//   → /vm-done fires → saves Twilio recording URL to DialerSettings
+
+import { Router, Request, Response } from 'express';
+import twilio from 'twilio';
+import crypto from 'crypto';
+import prisma from '../db';
+import { pickCallerId } from './localPresence';
+import { io } from '../socket';
+
+const router = Router();       // auth-protected endpoints
+export const webhooks = Router(); // public Twilio webhook endpoints (no auth)
+
+function BACKEND() {
+  return process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com';
+}
+
+function twilioClient() {
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) throw new Error('Twilio not configured');
+  return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+}
+
+// ─── In-memory bridge session store ──────────────────────────────────────────
+interface BridgeSession {
+  contactId: string;
+  contactPhone: string;
+  contactName: string;
+  confName: string;
+  agentCallSid: string | null;
+  contactCallSid: string | null;
+  status: 'waiting-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'ended';
+  createdAt: number;
+}
+const bridges = new Map<string, BridgeSession>();
+setInterval(() => {
+  const cutoff = Date.now() - 15 * 60 * 1000;
+  for (const [id, b] of bridges) if (b.createdAt < cutoff) bridges.delete(id);
+}, 60_000);
+
+// ─── GET /api/dialer/settings ─────────────────────────────────────────────────
+router.get('/settings', async (_req: Request, res: Response) => {
+  const s = await prisma.dialerSettings.upsert({
+    where: { id: 'singleton' },
+    create: { id: 'singleton' },
+    update: {},
+  });
+  res.json(s);
+});
+
+// ─── PUT /api/dialer/settings ─────────────────────────────────────────────────
+router.put('/settings', async (req: Request, res: Response) => {
+  const { callMode, personalPhone, voicemailUrl, voicemailSid } = req.body;
+  const s = await prisma.dialerSettings.upsert({
+    where: { id: 'singleton' },
+    create: { id: 'singleton', callMode, personalPhone, voicemailUrl, voicemailSid },
+    update: {
+      ...(callMode !== undefined && { callMode }),
+      ...(personalPhone !== undefined && { personalPhone }),
+      ...(voicemailUrl !== undefined && { voicemailUrl }),
+      ...(voicemailSid !== undefined && { voicemailSid }),
+    },
+  });
+  res.json(s);
+});
+
+// ─── POST /api/dialer/record-vm ───────────────────────────────────────────────
+// Calls agent's personal phone to record their voicemail greeting.
+router.post('/record-vm', async (req: Request, res: Response) => {
+  const { personalPhone } = req.body;
+  if (!personalPhone) { res.status(400).json({ error: 'personalPhone required' }); return; }
+  const from = process.env.TWILIO_CALLER_ID || process.env.AGENT_PHONE || '';
+  if (!from) { res.status(500).json({ error: 'TWILIO_CALLER_ID not set' }); return; }
+  try {
+    const call = await twilioClient().calls.create({
+      to: personalPhone,
+      from,
+      url: `${BACKEND()}/api/dialer/vm-twiml`,
+    });
+    res.json({ callSid: call.sid, status: 'calling' });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── POST /api/dialer/vm-twiml (public — called by Twilio) ───────────────────
+webhooks.post('/vm-twiml', (_req: Request, res: Response) => {
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.say({ voice: 'Polly.Joanna' },
+    'After the beep, record your voicemail message. Press pound when done, or wait 60 seconds.');
+  twiml.record({
+    maxLength: 60,
+    finishOnKey: '#',
+    action: `${BACKEND()}/api/dialer/vm-done`,
+    playBeep: true,
+  } as any);
+  twiml.say({ voice: 'Polly.Joanna' }, 'No recording detected. Goodbye.');
+  twiml.hangup();
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── POST /api/dialer/vm-done (public — called by Twilio) ────────────────────
+webhooks.post('/vm-done', async (req: Request, res: Response) => {
+  const { RecordingUrl, RecordingSid } = req.body;
+  if (RecordingUrl) {
+    const url = RecordingUrl.endsWith('.mp3') ? RecordingUrl : `${RecordingUrl}.mp3`;
+    await prisma.dialerSettings.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton', voicemailUrl: url, voicemailSid: RecordingSid },
+      update: { voicemailUrl: url, voicemailSid: RecordingSid },
+    });
+    io.emit('vm-recorded', { url });
+  }
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.say({ voice: 'Polly.Joanna' }, 'Voicemail saved. You can hang up now.');
+  twiml.hangup();
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── POST /api/dialer/call ────────────────────────────────────────────────────
+// Initiate a call. Bridge mode starts the 2-leg flow; webrtc just returns contact info
+// (the browser uses the Twilio Device token to handle audio itself).
+router.post('/call', async (req: Request, res: Response) => {
+  const { contactId, mode } = req.body;
+  if (!contactId) { res.status(400).json({ error: 'contactId required' }); return; }
+
+  const contact = await prisma.contact.findUnique({ where: { id: contactId } });
+  if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
+
+  if (mode === 'bridge') {
+    const settings = await prisma.dialerSettings.findUnique({ where: { id: 'singleton' } });
+    if (!settings?.personalPhone) {
+      res.status(400).json({ error: 'Enter your personal phone number in dialer settings first.' });
+      return;
+    }
+
+    const sessionId = crypto.randomUUID();
+    const confName = `propel-${sessionId}`;
+    const contactName = `${contact.firstName} ${contact.lastName}`.trim();
+
+    bridges.set(sessionId, {
+      contactId,
+      contactPhone: contact.phone,
+      contactName,
+      confName,
+      agentCallSid: null,
+      contactCallSid: null,
+      status: 'waiting-agent',
+      createdAt: Date.now(),
+    });
+
+    const from = process.env.TWILIO_CALLER_ID || process.env.AGENT_PHONE || '';
+    try {
+      const call = await twilioClient().calls.create({
+        to: settings.personalPhone,
+        from,
+        url: `${BACKEND()}/api/dialer/bridge-a-twiml?sessionId=${sessionId}`,
+        statusCallback: `${BACKEND()}/api/dialer/bridge-a-status?sessionId=${sessionId}`,
+        statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+        statusCallbackMethod: 'POST',
+      });
+      bridges.get(sessionId)!.agentCallSid = call.sid;
+      res.json({ sessionId, status: 'ringing-agent', agentCallSid: call.sid });
+    } catch (e: any) {
+      bridges.delete(sessionId);
+      res.status(500).json({ error: e.message });
+    }
+  } else {
+    // WebRTC — browser handles via Twilio Device; just return contact details
+    res.json({
+      mode: 'webrtc',
+      contact: {
+        id: contact.id,
+        phone: contact.phone,
+        name: `${contact.firstName} ${contact.lastName}`.trim(),
+      },
+    });
+  }
+});
+
+// ─── POST /api/dialer/bridge-a-twiml (public) ────────────────────────────────
+// TwiML for agent's personal phone (Leg A). Agent hears contact name then waits in conf.
+webhooks.post('/bridge-a-twiml', (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const b = bridges.get(sessionId);
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  if (!b) {
+    twiml.say('Session expired.');
+    twiml.hangup();
+    res.type('text/xml').send(twiml.toString());
+    return;
+  }
+
+  twiml.say({ voice: 'Polly.Joanna' }, `Calling ${b.contactName} now.`);
+  const dial = twiml.dial({
+    action: `${BACKEND()}/api/dialer/bridge-a-done?sessionId=${sessionId}`,
+  });
+  (dial as any).conference(b.confName, {
+    startConferenceOnEnter: 'true',
+    endConferenceOnExit: 'false',
+    waitUrl: 'https://twimlets.com/holdmusic?Bucket=com.twilio.music.classical',
+    beep: 'false',
+  });
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── POST /api/dialer/bridge-a-status (public) ───────────────────────────────
+// Status webhook for agent leg. When in-progress → dial the contact.
+webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const { CallStatus, CallSid } = req.body;
+  const b = bridges.get(sessionId);
+
+  if (!b) { res.sendStatus(204); return; }
+
+  if (CallStatus === 'in-progress' && b.status === 'waiting-agent') {
+    b.status = 'calling-contact';
+    b.agentCallSid = CallSid;
+    io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
+
+    // Dial the contact (Leg B) with AMD
+    const settings = await prisma.dialerSettings.findUnique({ where: { id: 'singleton' } });
+    const localFrom = await pickCallerId(b.contactPhone).catch(() => process.env.TWILIO_CALLER_ID || '');
+
+    try {
+      const contactCall = await twilioClient().calls.create({
+        to: b.contactPhone,
+        from: localFrom,
+        machineDetection: 'DetectMessageEnd',
+        asyncAmdStatusCallback: `${BACKEND()}/api/dialer/bridge-amd?sessionId=${sessionId}`,
+        asyncAmdStatusCallbackMethod: 'POST',
+        url: `${BACKEND()}/api/dialer/bridge-b-twiml?sessionId=${sessionId}`,
+        statusCallback: `${BACKEND()}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
+        statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
+        statusCallbackMethod: 'POST',
+      } as any);
+      b.contactCallSid = contactCall.sid;
+    } catch (e: any) {
+      console.error('[Bridge] Failed to call contact:', e.message);
+      b.status = 'ended';
+      // Notify agent
+      try {
+        await twilioClient().calls(b.agentCallSid!).update({
+          twiml: '<Response><Say voice="Polly.Joanna">Could not reach the contact. Goodbye.</Say><Hangup/></Response>',
+        });
+      } catch {}
+      io.emit('bridge-status', { sessionId, status: 'error', error: e.message });
+    }
+  }
+
+  if ((CallStatus === 'completed' || CallStatus === 'failed') && b.agentCallSid === CallSid) {
+    // Agent hung up — end contact call if still going
+    if (b.contactCallSid && b.status === 'connected') {
+      try { await twilioClient().calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
+    }
+    b.status = 'ended';
+    io.emit('bridge-status', { sessionId, status: 'ended' });
+  }
+
+  res.sendStatus(204);
+});
+
+// ─── POST /api/dialer/bridge-b-twiml (public) ────────────────────────────────
+// TwiML for contact (Leg B). Joins the same conference → both parties connected.
+webhooks.post('/bridge-b-twiml', (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const b = bridges.get(sessionId);
+  const twiml = new twilio.twiml.VoiceResponse();
+
+  if (!b) { twiml.hangup(); res.type('text/xml').send(twiml.toString()); return; }
+
+  // Mark connected (AMD may override this to vm-dropped)
+  if (b.status === 'calling-contact') {
+    b.status = 'connected';
+    io.emit('bridge-status', { sessionId, status: 'connected', contactName: b.contactName });
+  }
+
+  const dial = twiml.dial({
+    action: `${BACKEND()}/api/dialer/bridge-b-done?sessionId=${sessionId}`,
+  });
+  (dial as any).conference(b.confName, {
+    startConferenceOnEnter: 'true',
+    endConferenceOnExit: 'true',
+    beep: 'false',
+  });
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── POST /api/dialer/bridge-amd (public) ────────────────────────────────────
+// AMD result for the contact leg (Leg B).
+webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const { AnsweredBy, CallSid } = req.body;
+  const b = bridges.get(sessionId);
+  console.log(`[Bridge AMD] session=${sessionId} answeredBy=${AnsweredBy}`);
+
+  const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
+
+  if (isMachine && b) {
+    b.status = 'vm-dropped';
+    io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
+
+    // Play voicemail on contact leg
+    const settings = await prisma.dialerSettings.findUnique({ where: { id: 'singleton' } }).catch(() => null);
+    const vmUrl = settings?.voicemailUrl;
+    const fallbackText = `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling. Please call me back when you get a chance. Thank you!`;
+    const vmTwiml = vmUrl
+      ? `<Response><Play>${vmUrl}</Play><Hangup/></Response>`
+      : `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
+
+    try { await twilioClient().calls(CallSid).update({ twiml: vmTwiml }); } catch (e: any) {
+      console.error('[Bridge AMD] VM drop failed:', e.message);
+    }
+
+    // Release agent leg
+    try {
+      if (b.agentCallSid) {
+        await twilioClient().calls(b.agentCallSid).update({
+          twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
+        });
+      }
+    } catch {}
+  }
+
+  res.sendStatus(204);
+});
+
+// ─── POST /api/dialer/bridge-b-status (public) ───────────────────────────────
+// Contact leg status — detect no-answer / busy.
+webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const { CallStatus } = req.body;
+  const b = bridges.get(sessionId);
+
+  if (b && (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed')) {
+    b.status = 'no-answer';
+    io.emit('bridge-status', { sessionId, status: 'no-answer' });
+    // Release agent
+    try {
+      if (b.agentCallSid) {
+        const msg = CallStatus === 'busy' ? 'Line busy.' : 'No answer.';
+        await twilioClient().calls(b.agentCallSid).update({
+          twiml: `<Response><Say voice="Polly.Joanna">${msg} Moving to next contact.</Say><Hangup/></Response>`,
+        });
+      }
+    } catch {}
+  }
+
+  if (b && CallStatus === 'completed' && b.status === 'connected') {
+    b.status = 'ended';
+    io.emit('bridge-status', { sessionId, status: 'call-ended' });
+  }
+
+  res.sendStatus(204);
+});
+
+// ─── POST /api/dialer/bridge-a-done (public) ─────────────────────────────────
+webhooks.post('/bridge-a-done', (_req: Request, res: Response) => {
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.hangup();
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── POST /api/dialer/bridge-b-done (public) ─────────────────────────────────
+webhooks.post('/bridge-b-done', (_req: Request, res: Response) => {
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.hangup();
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── GET /api/dialer/bridge-session/:id ──────────────────────────────────────
+router.get('/bridge-session/:id', (req: Request, res: Response) => {
+  const b = bridges.get(req.params.id);
+  if (!b) { res.status(404).json({ error: 'Session not found' }); return; }
+  res.json({ sessionId: req.params.id, status: b.status, contactName: b.contactName });
+});
+
+// ─── POST /api/dialer/bridge-hangup ──────────────────────────────────────────
+// Agent clicks "End Call" in app — hangup both legs.
+router.post('/bridge-hangup', async (req: Request, res: Response) => {
+  const { sessionId } = req.body;
+  const b = bridges.get(sessionId);
+  if (!b) { res.json({ ok: true }); return; }
+
+  const c = twilioClient();
+  if (b.agentCallSid) {
+    try { await c.calls(b.agentCallSid).update({ status: 'completed' }); } catch {}
+  }
+  if (b.contactCallSid) {
+    try { await c.calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
+  }
+  b.status = 'ended';
+  bridges.delete(sessionId);
+  res.json({ ok: true });
+});
+
+// ─── POST /api/dialer/log-call ───────────────────────────────────────────────
+// Save a call record after the agent picks a disposition.
+router.post('/log-call', async (req: Request, res: Response) => {
+  const { contactId, disposition, notes, duration, twilioSid } = req.body;
+  if (!contactId || !disposition) {
+    res.status(400).json({ error: 'contactId and disposition required' }); return;
+  }
+
+  const STATUS_MAP: Record<string, string> = {
+    'hot-lead':           'hot',
+    'appointment':        'appointment',
+    'callback':           'callback',
+    'left-voicemail':     'contacted',
+    'no-answer':          'contacted',
+    'not-interested':     'contacted',
+    'wrong-number':       'contacted',
+    'dnc':                'dnc',
+  };
+
+  try {
+    const [call] = await Promise.all([
+      prisma.call.create({
+        data: {
+          contactId,
+          disposition,
+          notes: notes || null,
+          duration: duration || 0,
+          twilioSid: twilioSid || null,
+        },
+      }),
+      prisma.contact.update({
+        where: { id: contactId },
+        data: { status: STATUS_MAP[disposition] || 'contacted' },
+      }),
+    ]);
+    res.json({ callId: call.id });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/dialer/contacts ─────────────────────────────────────────────────
+// Returns contacts for a session, ordered by lead score desc.
+// ?status=new,hot,callback,all  (comma-separated)
+router.get('/contacts', async (req: Request, res: Response) => {
+  const { status = 'all', limit = '200' } = req.query as { status?: string; limit?: string };
+
+  const where: any = { NOT: { status: 'dnc' } };
+  if (status && status !== 'all') {
+    where.status = { in: status.split(',').map(s => s.trim()) };
+  }
+
+  const contacts = await prisma.contact.findMany({
+    where,
+    orderBy: [{ leadScore: 'desc' }, { updatedAt: 'desc' }],
+    take: parseInt(limit, 10),
+    select: {
+      id: true, firstName: true, lastName: true, phone: true,
+      address: true, city: true, state: true, zip: true,
+      source: true, status: true, notes: true, leadScore: true,
+      lastReplyAt: true, updatedAt: true,
+      calls: {
+        orderBy: { calledAt: 'desc' },
+        take: 1,
+        select: { calledAt: true, disposition: true, duration: true },
+      },
+    },
+  });
+
+  res.json(contacts);
+});
+
+export default router;

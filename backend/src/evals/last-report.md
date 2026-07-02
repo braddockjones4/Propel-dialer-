@@ -1,5 +1,5 @@
 # Propel Agent — Reliability Report
-Generated 7/1/2026, 11:04:48 PM · brain: ANTHROPIC
+Generated 7/1/2026, 10:55:52 PM · brain: ANTHROPIC
 
 ## Overall: 92%  (23/25 scenarios passed)
 
