@@ -152,8 +152,48 @@ router.get('/verify-status', async (req: Request, res: Response) => {
   }
 });
 
+// ─── POST /api/dialer/upload-vm ──────────────────────────────────────────────
+// Receives a browser-recorded voicemail (base64 audio) and stores it in DB.
+// The public /vm-audio/:userId endpoint serves it so Twilio can <Play> it.
+router.post('/upload-vm', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
+  const { audioBase64, mimeType } = req.body;
+  if (!audioBase64) { res.status(400).json({ error: 'audioBase64 required' }); return; }
+
+  const voicemailData = `data:${mimeType || 'audio/webm'};base64,${audioBase64}`;
+  const voicemailUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}`;
+
+  try {
+    await prisma.dialerSettings.upsert({
+      where: { userId },
+      create: { userId, voicemailUrl, voicemailData },
+      update: { voicemailUrl, voicemailData },
+    });
+    io.emit('vm-recorded', { url: voicemailUrl, userId });
+    res.json({ url: voicemailUrl });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/dialer/vm-audio/:userId (public — called by Twilio to play VM) ──
+webhooks.get('/vm-audio/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const settings = await prisma.dialerSettings.findUnique({ where: { userId } }).catch(() => null);
+  if (!settings?.voicemailData) { res.status(404).send('Not found'); return; }
+
+  const [header, base64] = settings.voicemailData.split(',');
+  const mimeType = header.match(/data:([^;]+)/)?.[1] || 'audio/webm';
+  const buffer = Buffer.from(base64, 'base64');
+
+  res.setHeader('Content-Type', mimeType);
+  res.setHeader('Content-Length', buffer.length);
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(buffer);
+});
+
 // ─── POST /api/dialer/record-vm ───────────────────────────────────────────────
-// Calls agent's personal phone to record their voicemail greeting.
+// Legacy: Calls agent's personal phone to record their voicemail greeting.
 router.post('/record-vm', async (req: Request, res: Response) => {
   const userId = (req as any).user?.id as string;
   const { personalPhone } = req.body;

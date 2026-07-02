@@ -115,8 +115,14 @@ export default function Dialer() {
   const [verifyStatus, setVerifyStatus] = useState<'idle' | 'calling' | 'polling' | 'verified' | 'error'>('idle');
   const verifyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Voicemail recording
-  const [vmRecordStatus, setVmRecordStatus] = useState<'idle' | 'calling' | 'done'>('idle');
+  // Browser voicemail recording
+  const [recState, setRecState]     = useState<'idle' | 'requesting' | 'recording' | 'preview' | 'saving'>('idle');
+  const [recSeconds, setRecSeconds] = useState(0);
+  const [recBlob, setRecBlob]       = useState<Blob | null>(null);
+  const [recObjectUrl, setRecObjectUrl] = useState<string | null>(null);
+  const mediaRecRef  = useRef<MediaRecorder | null>(null);
+  const recChunksRef = useRef<Blob[]>([]);
+  const recTimerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Bridge mode
   const [bridgeSessionId, setBridgeSessionId] = useState<string | null>(null);
@@ -151,7 +157,6 @@ export default function Dialer() {
     });
 
     socket.on('vm-recorded', () => {
-      setVmRecordStatus('done');
       loadSettings();
     });
 
@@ -272,22 +277,77 @@ export default function Dialer() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.personalPhone]);
 
-  // ─── Record voicemail ───────────────────────────────────────────────────────
-  const recordVoicemail = async () => {
-    const phone = settings.personalPhone;
-    if (!phone) { alert('Enter your personal phone number first.'); return; }
-    setVmRecordStatus('calling');
+  // ─── Browser voicemail recording ────────────────────────────────────────────
+  const startRecording = async () => {
+    setRecState('requesting');
     try {
-      const r = await authFetch(`${API_BASE}/dialer/record-vm`, {
-        method: 'POST',
-        body: JSON.stringify({ personalPhone: phone }),
-      });
-      const d = await r.json();
-      if (d.error) { alert(d.error); setVmRecordStatus('idle'); }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Pick the best format Twilio can play: ogg > mp4 > webm
+      const mimeType = ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']
+        .find(t => MediaRecorder.isTypeSupported(t)) || '';
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecRef.current = rec;
+      recChunksRef.current = [];
+
+      rec.ondataavailable = e => { if (e.data.size > 0) recChunksRef.current.push(e.data); };
+      rec.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(recChunksRef.current, { type: rec.mimeType || 'audio/webm' });
+        const url = URL.createObjectURL(blob);
+        setRecBlob(blob);
+        setRecObjectUrl(url);
+        setRecState('preview');
+        if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
+      };
+
+      rec.start(250);
+      setRecSeconds(0);
+      setRecState('recording');
+      recTimerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
     } catch (e: any) {
-      alert('Failed to initiate call: ' + e.message);
-      setVmRecordStatus('idle');
+      setRecState('idle');
+      alert('Mic access denied — please allow microphone access in your browser.');
     }
+  };
+
+  const stopRecording = () => {
+    mediaRecRef.current?.stop();
+    if (recTimerRef.current) { clearInterval(recTimerRef.current); recTimerRef.current = null; }
+  };
+
+  const saveRecording = async () => {
+    if (!recBlob) return;
+    setRecState('saving');
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      const base64 = dataUrl.split(',')[1];
+      const mimeType = recBlob.type || 'audio/webm';
+      try {
+        const r = await authFetch(`${API_BASE}/dialer/upload-vm`, {
+          method: 'POST',
+          body: JSON.stringify({ audioBase64: base64, mimeType }),
+        });
+        const d = await r.json();
+        if (d.error) { alert(d.error); setRecState('preview'); return; }
+        setSettings(s => ({ ...s, voicemailUrl: d.url }));
+        if (recObjectUrl) URL.revokeObjectURL(recObjectUrl);
+        setRecBlob(null);
+        setRecObjectUrl(null);
+        setRecState('idle');
+      } catch (e: any) {
+        alert('Save failed: ' + e.message);
+        setRecState('preview');
+      }
+    };
+    reader.readAsDataURL(recBlob);
+  };
+
+  const discardRecording = () => {
+    if (recObjectUrl) URL.revokeObjectURL(recObjectUrl);
+    setRecBlob(null);
+    setRecObjectUrl(null);
+    setRecState('idle');
   };
 
   // ─── Start session ──────────────────────────────────────────────────────────
@@ -528,39 +588,75 @@ export default function Dialer() {
 
           {/* ── Voicemail drop ── */}
           <Card title="Voicemail drop" mb={24}>
-            {settings.voicemailUrl ? (
+            {/* Saved voicemail */}
+            {settings.voicemailUrl && recState === 'idle' && (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                   <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
-                  <span style={{ fontSize: 13, color: '#374151' }}>Voicemail recorded</span>
+                  <span style={{ fontSize: 13, color: '#374151' }}>Voicemail saved</span>
                 </div>
-                <audio controls src={settings.voicemailUrl} style={{ width: '100%', height: 36, borderRadius: 6, marginBottom: 10 }} />
-                <button onClick={recordVoicemail} disabled={vmRecordStatus === 'calling'}
+                <audio controls src={`${settings.voicemailUrl}?t=${Date.now()}`} style={{ width: '100%', height: 36, borderRadius: 6, marginBottom: 10 }} />
+                <button onClick={startRecording}
                   style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                  {vmRecordStatus === 'calling' ? 'Calling your phone…' : 'Re-record'}
+                  Re-record
                 </button>
               </>
-            ) : vmRecordStatus === 'calling' ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: '#fefce8', borderRadius: 10 }}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', background: GOLD }} />
-                <span style={{ fontSize: 13, color: '#92400e' }}>Pick up — record your message, then press #</span>
-              </div>
-            ) : (
+            )}
+
+            {/* Idle — no recording yet */}
+            {!settings.voicemailUrl && recState === 'idle' && (
               <>
                 <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 14px', lineHeight: 1.5 }}>
-                  Record a short message played automatically when a call hits voicemail.
-                  {settings.callMode === 'bridge' && !settings.personalPhone && ' Enter your phone number above first.'}
+                  Record a short message that plays automatically when a call goes to voicemail.
                 </p>
-                <button onClick={recordVoicemail}
-                  disabled={settings.callMode === 'bridge' && !settings.personalPhone}
-                  style={{
-                    padding: '10px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-                    background: DARK, color: '#fff', border: 'none', cursor: 'pointer',
-                    opacity: (settings.callMode === 'bridge' && !settings.personalPhone) ? 0.4 : 1,
-                  }}>
+                <button onClick={startRecording}
+                  style={{ padding: '10px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600, background: DARK, color: '#fff', border: 'none', cursor: 'pointer' }}>
                   Record Voicemail
                 </button>
               </>
+            )}
+
+            {/* Requesting mic */}
+            {recState === 'requesting' && (
+              <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>Requesting microphone access…</p>
+            )}
+
+            {/* Recording in progress */}
+            {recState === 'recording' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: '#fef2f2', borderRadius: 10 }}>
+                  <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+                  <span style={{ fontSize: 13, fontWeight: 500, color: '#991b1b' }}>
+                    Recording… {String(Math.floor(recSeconds / 60)).padStart(2, '0')}:{String(recSeconds % 60).padStart(2, '0')}
+                  </span>
+                </div>
+                <button onClick={stopRecording}
+                  style={{ padding: '10px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600, background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  Stop Recording
+                </button>
+              </div>
+            )}
+
+            {/* Preview recorded audio */}
+            {recState === 'preview' && recObjectUrl && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <audio controls src={recObjectUrl} style={{ width: '100%', height: 36, borderRadius: 6 }} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={saveRecording}
+                    style={{ flex: 1, padding: '10px', borderRadius: 10, fontSize: 13, fontWeight: 600, background: DARK, color: '#fff', border: 'none', cursor: 'pointer' }}>
+                    Save
+                  </button>
+                  <button onClick={discardRecording}
+                    style={{ padding: '10px 14px', borderRadius: 10, fontSize: 13, color: '#6b7280', background: 'transparent', border: '1px solid rgba(0,0,0,0.1)', cursor: 'pointer' }}>
+                    Re-record
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Saving */}
+            {recState === 'saving' && (
+              <p style={{ fontSize: 13, color: '#6b7280', margin: 0 }}>Saving voicemail…</p>
             )}
           </Card>
 

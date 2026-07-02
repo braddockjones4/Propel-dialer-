@@ -148,8 +148,9 @@ model DialerSettings {
   callMode      String   @default("webrtc") // webrtc | bridge
   personalPhone String   @default("")
   phoneVerified Boolean  @default(false)    // personalPhone is a Twilio Verified Caller ID
-  voicemailUrl  String?                     // Twilio recording URL played on VM drop
-  voicemailSid  String?                     // Twilio RecordingSid
+  voicemailUrl  String?                     // public URL Twilio uses to <Play> the voicemail
+  voicemailSid  String?                     // Twilio RecordingSid (legacy phone-recorded VMs)
+  voicemailData String?                     // base64 data URL of browser-recorded voicemail audio
   updatedAt     DateTime @updatedAt
 }
 
