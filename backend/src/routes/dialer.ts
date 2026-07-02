@@ -18,7 +18,7 @@
 //   POST /record-vm → Twilio calls agent's phone → agent speaks → presses #
 //   → /vm-done fires → saves Twilio recording URL to DialerSettings
 
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import twilio from 'twilio';
 import crypto from 'crypto';
 import prisma from '../db';
@@ -153,28 +153,35 @@ router.get('/verify-status', async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/dialer/upload-vm ──────────────────────────────────────────────
-// Receives a browser-recorded voicemail (base64 audio) and stores it in DB.
-// The public /vm-audio/:userId endpoint serves it so Twilio can <Play> it.
-router.post('/upload-vm', async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id as string;
-  const { audioBase64, mimeType } = req.body;
-  if (!audioBase64) { res.status(400).json({ error: 'audioBase64 required' }); return; }
+// Receives a browser-recorded voicemail as raw binary audio and stores in DB.
+// express.raw() handles the body — bypasses the JSON body-size limit entirely.
+router.post('/upload-vm',
+  express.raw({ type: '*/*', limit: '20mb' }),
+  async (req: Request, res: Response) => {
+    const userId = (req as any).user?.id as string;
+    const mimeType = (req.headers['content-type'] || 'audio/webm').split(';')[0];
+    const buffer = req.body as Buffer;
 
-  const voicemailData = `data:${mimeType || 'audio/webm'};base64,${audioBase64}`;
-  const voicemailUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}`;
+    if (!buffer || buffer.length === 0) {
+      res.status(400).json({ error: 'No audio data received' }); return;
+    }
 
-  try {
-    await prisma.dialerSettings.upsert({
-      where: { userId },
-      create: { userId, voicemailUrl, voicemailData },
-      update: { voicemailUrl, voicemailData },
-    });
-    io.emit('vm-recorded', { url: voicemailUrl, userId });
-    res.json({ url: voicemailUrl });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    const voicemailData = `data:${mimeType};base64,${buffer.toString('base64')}`;
+    const voicemailUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}`;
+
+    try {
+      await prisma.dialerSettings.upsert({
+        where: { userId },
+        create: { userId, voicemailUrl, voicemailData },
+        update: { voicemailUrl, voicemailData },
+      });
+      io.emit('vm-recorded', { url: voicemailUrl, userId });
+      res.json({ url: voicemailUrl });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   }
-});
+);
 
 // ─── GET /api/dialer/vm-audio/:userId (public — called by Twilio to play VM) ──
 webhooks.get('/vm-audio/:userId', async (req: Request, res: Response) => {

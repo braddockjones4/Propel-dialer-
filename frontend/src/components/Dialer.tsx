@@ -318,29 +318,24 @@ export default function Dialer() {
   const saveRecording = async () => {
     if (!recBlob) return;
     setRecState('saving');
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
-      const base64 = dataUrl.split(',')[1];
-      const mimeType = recBlob.type || 'audio/webm';
-      try {
-        const r = await authFetch(`${API_BASE}/dialer/upload-vm`, {
-          method: 'POST',
-          body: JSON.stringify({ audioBase64: base64, mimeType }),
-        });
-        const d = await r.json();
-        if (d.error) { alert(d.error); setRecState('preview'); return; }
-        setSettings(s => ({ ...s, voicemailUrl: d.url }));
-        if (recObjectUrl) URL.revokeObjectURL(recObjectUrl);
-        setRecBlob(null);
-        setRecObjectUrl(null);
-        setRecState('idle');
-      } catch (e: any) {
-        alert('Save failed: ' + e.message);
-        setRecState('preview');
-      }
-    };
-    reader.readAsDataURL(recBlob);
+    try {
+      // Send raw binary — bypasses JSON body size limits
+      const r = await authFetch(`${API_BASE}/dialer/upload-vm`, {
+        method: 'POST',
+        headers: { 'Content-Type': recBlob.type || 'audio/webm' },
+        body: recBlob,
+      });
+      const d = await r.json();
+      if (d.error) { alert(d.error); setRecState('preview'); return; }
+      setSettings(s => ({ ...s, voicemailUrl: d.url }));
+      if (recObjectUrl) URL.revokeObjectURL(recObjectUrl);
+      setRecBlob(null);
+      setRecObjectUrl(null);
+      setRecState('idle');
+    } catch (e: any) {
+      alert('Save failed: ' + e.message);
+      setRecState('preview');
+    }
   };
 
   const discardRecording = () => {
