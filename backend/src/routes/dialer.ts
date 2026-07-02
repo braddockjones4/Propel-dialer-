@@ -538,7 +538,7 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
 
   if (isMachine) {
     if (b) { b.status = 'vm-dropped'; }
-    io.emit('bridge-status', { sessionId, status: 'vm-dropped' });
+    io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b?.contactName });
 
     const fallbackText = process.env.VOICEMAIL_SCRIPT ||
       `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
@@ -696,6 +696,11 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
   const { CallStatus, CallSid } = req.body;
   const b = bridges.get(sessionId);
   console.log(`[bridge-b-status] session=${sessionId} | status=${CallStatus} | sid=${CallSid}`);
+
+  // Contact's phone was answered (human or VM) — notify frontend so it knows AMD is running
+  if (CallStatus === 'answered') {
+    io.emit('bridge-status', { sessionId, status: 'contact-answered' });
+  }
 
   if (b && (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed')) {
     b.status = 'no-answer';

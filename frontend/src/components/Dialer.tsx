@@ -170,6 +170,9 @@ export default function Dialer() {
   // Bridge mode
   const [bridgeSessionId, setBridgeSessionId] = useState<string | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('idle');
+  const [contactAnswered, setContactAnswered] = useState(false); // true once Twilio reports contact's phone answered
+  const [vmDropToast, setVmDropToast] = useState<string | null>(null); // contact name for the "VM dropped" toast
+  const vmToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Post-call
   const [disposition, setDisposition]   = useState<string | null>(null);
@@ -191,11 +194,29 @@ export default function Dialer() {
     const socket = io(SOCKET_URL, { transports: ['websocket'] });
     socketRef.current = socket;
 
-    socket.on('bridge-status', (data: { sessionId: string; status: string }) => {
+    socket.on('bridge-status', (data: { sessionId: string; status: string; contactName?: string }) => {
+      // vm-dropped: always show the toast (we may have already auto-advanced to the next contact),
+      // but only update bridgeStatus/disposition if this session is still the active one.
+      if (data.status === 'vm-dropped') {
+        const name = data.contactName || 'your contact';
+        setVmDropToast(name);
+        if (vmToastTimerRef.current) clearTimeout(vmToastTimerRef.current);
+        vmToastTimerRef.current = setTimeout(() => setVmDropToast(null), 4000);
+        if (data.sessionId === bridgeIdRef.current) {
+          setBridgeStatus('vm-dropped' as BridgeStatus);
+          setDisposition('left-voicemail');
+        }
+        return;
+      }
+
       if (!bridgeIdRef.current || data.sessionId === bridgeIdRef.current) {
+        // contact-answered: track that the contact's phone was picked up (human or VM greeting)
+        if (data.status === 'contact-answered') {
+          setContactAnswered(true);
+          return;
+        }
         setBridgeStatus(data.status as BridgeStatus);
-        if (data.status === 'vm-dropped')  setDisposition('left-voicemail');
-        if (data.status === 'no-answer')   setDisposition('no-answer');
+        if (data.status === 'no-answer') setDisposition('no-answer');
       }
     });
 
@@ -405,6 +426,7 @@ export default function Dialer() {
   const initiateCall = useCallback(async () => {
     const contact = contacts[index];
     if (!contact) return;
+    setContactAnswered(false); // reset for new call
     setDisposition(null);
     setNotes('');
 
@@ -446,20 +468,37 @@ export default function Dialer() {
 
   // ─── End call ───────────────────────────────────────────────────────────────
   const handleEndCall = useCallback(async () => {
-    // WebRTC and bridge modes both have a bridgeSessionId now — use bridge-hangup for both.
-    // bridge-hangup terminates the contact call AND the agent call SID.
-    // endCall() immediately disconnects the browser WebRTC call regardless.
-    endCall();
+    // If the contact answered and AMD is still running (not yet connected as human),
+    // voicemail is in progress. Don't kill the contact call — let AMD finish and drop the VM.
+    // Auto-advance immediately so the agent can move on.
+    const vmInProgress = bridgeStatus === 'calling-contact' && contactAnswered;
+
+    endCall(); // always disconnect browser WebRTC immediately
+
     if (bridgeSessionId) {
+      if (vmInProgress) {
+        // Clear the ref NOW (synchronously) so the vm-dropped socket event that fires later
+        // doesn't update the next contact's bridgeStatus — just the toast.
+        bridgeIdRef.current = null;
+      }
       setBridgeStatus('ended');
-      try {
-        await authFetch(`${API_BASE}/dialer/bridge-hangup`, {
-          method: 'POST',
-          body: JSON.stringify({ sessionId: bridgeSessionId }),
-        });
-      } catch {}
+      if (!vmInProgress) {
+        // Normal hang-up: kill both call legs via bridge-hangup
+        try {
+          await authFetch(`${API_BASE}/dialer/bridge-hangup`, {
+            method: 'POST',
+            body: JSON.stringify({ sessionId: bridgeSessionId }),
+          });
+        } catch {}
+      }
+      // If vmInProgress: leave contact call alive — AMD will play voicemail then hang up
     }
-  }, [bridgeSessionId, endCall]);
+
+    if (vmInProgress) {
+      // Log as voicemail and jump to next contact — VM drops silently in background
+      saveAndAdvance('left-voicemail');
+    }
+  }, [bridgeSessionId, bridgeStatus, contactAnswered, endCall, saveAndAdvance]);
 
   // ─── Save + advance ─────────────────────────────────────────────────────────
   const saveAndAdvance = useCallback(async (disp: string) => {
@@ -992,6 +1031,21 @@ export default function Dialer() {
           </button>
         )}
       </div>
+
+      {/* VM Dropped toast — floats over UI, shows even after auto-advancing to next contact */}
+      {vmDropToast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: '#16a34a', color: '#fff', padding: '10px 20px', borderRadius: 24,
+          fontSize: 13, fontWeight: 600, zIndex: 9999,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+          display: 'flex', alignItems: 'center', gap: 8,
+          whiteSpace: 'nowrap', pointerEvents: 'none',
+        }}>
+          <span>✓</span>
+          <span>Voicemail dropped for {vmDropToast}</span>
+        </div>
+      )}
     </div>
   );
 }
