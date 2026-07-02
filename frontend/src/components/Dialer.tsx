@@ -173,6 +173,7 @@ export default function Dialer() {
   const [contactAnswered, setContactAnswered] = useState(false); // true once Twilio reports contact's phone answered
   const [vmDropToast, setVmDropToast] = useState<string | null>(null); // contact name for the "VM dropped" toast
   const vmToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [vmModalOpen, setVmModalOpen] = useState(false); // voicemail re-record modal during session
 
   // Post-call
   const [disposition, setDisposition]   = useState<string | null>(null);
@@ -858,6 +859,10 @@ export default function Dialer() {
           <div style={{ height: '100%', width: `${pct}%`, background: GOLD, borderRadius: 99, transition: 'width 0.4s' }} />
         </div>
         <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>{index + 1} / {contacts.length}</span>
+        <button onClick={() => setVmModalOpen(true)} title="Re-record voicemail"
+          style={{ fontSize: 14, color: settings.voicemailReady === false ? '#f59e0b' : '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>
+          🎙
+        </button>
         <button onClick={() => setView('setup')}
           style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}>
           End
@@ -1031,6 +1036,117 @@ export default function Dialer() {
           </button>
         )}
       </div>
+
+      {/* Voicemail re-record modal */}
+      {vmModalOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9998,
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        }} onClick={(e) => { if (e.target === e.currentTarget && recState === 'idle') setVmModalOpen(false); }}>
+          <div style={{
+            background: '#fff', borderRadius: '20px 20px 0 0', padding: '24px 20px 36px',
+            width: '100%', maxWidth: 520, boxShadow: '0 -8px 40px rgba(0,0,0,0.18)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, marginBottom: 4 }}>Voicemail Drop</div>
+                <div style={{ fontSize: 17, fontWeight: 500, color: DARK }}>Record your message</div>
+              </div>
+              {recState === 'idle' && (
+                <button onClick={() => setVmModalOpen(false)}
+                  style={{ fontSize: 20, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '4px 8px' }}>
+                  ×
+                </button>
+              )}
+            </div>
+
+            {/* Saved — good format */}
+            {settings.voicemailUrl && settings.voicemailReady !== false && recState === 'idle' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
+                  <span style={{ fontSize: 13, color: '#374151' }}>Voicemail saved</span>
+                </div>
+                <audio controls src={`${settings.voicemailUrl}?t=${Date.now()}`} style={{ width: '100%', height: 36, borderRadius: 6, marginBottom: 14 }} />
+                <button onClick={startRecording}
+                  style={{ width: '100%', padding: '12px', borderRadius: 12, fontSize: 14, fontWeight: 600, background: DARK, color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  Re-record
+                </button>
+              </>
+            )}
+
+            {/* Re-record needed warning */}
+            {settings.voicemailReady === false && recState === 'idle' && (
+              <>
+                <div style={{ padding: '10px 14px', background: '#fef9c3', borderRadius: 10, marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#854d0e', marginBottom: 4 }}>⚠️ Re-record needed</div>
+                  <div style={{ fontSize: 12, color: '#713f12', lineHeight: 1.5 }}>Your saved voicemail is in a format Twilio can't play. Re-record it to enable automatic drops.</div>
+                </div>
+                <button onClick={startRecording}
+                  style={{ width: '100%', padding: '12px', borderRadius: 12, fontSize: 14, fontWeight: 600, background: '#ca8a04', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  Re-record Now
+                </button>
+              </>
+            )}
+
+            {/* No voicemail yet */}
+            {!settings.voicemailUrl && recState === 'idle' && (
+              <>
+                <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 16px', lineHeight: 1.5 }}>
+                  Record a short message that plays automatically when a call goes to voicemail.
+                </p>
+                <button onClick={startRecording}
+                  style={{ width: '100%', padding: '12px', borderRadius: 12, fontSize: 14, fontWeight: 600, background: DARK, color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  Record Voicemail
+                </button>
+              </>
+            )}
+
+            {/* Requesting mic */}
+            {recState === 'requesting' && (
+              <p style={{ fontSize: 13, color: '#6b7280', margin: 0, textAlign: 'center' }}>Requesting microphone access…</p>
+            )}
+
+            {/* Recording */}
+            {recState === 'recording' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px', background: '#fef2f2', borderRadius: 12 }}>
+                  <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#ef4444', animation: 'pulse 1s infinite' }} />
+                  <span style={{ fontSize: 14, fontWeight: 500, color: '#991b1b' }}>
+                    Recording… {String(Math.floor(recSeconds / 60)).padStart(2, '0')}:{String(recSeconds % 60).padStart(2, '0')}
+                  </span>
+                </div>
+                <button onClick={stopRecording}
+                  style={{ width: '100%', padding: '13px', borderRadius: 12, fontSize: 14, fontWeight: 600, background: '#ef4444', color: '#fff', border: 'none', cursor: 'pointer' }}>
+                  Stop Recording
+                </button>
+              </div>
+            )}
+
+            {/* Preview */}
+            {recState === 'preview' && recObjectUrl && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <audio controls src={recObjectUrl} style={{ width: '100%', height: 36, borderRadius: 6 }} />
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={async () => { await saveRecording(); setVmModalOpen(false); }}
+                    style={{ flex: 1, padding: '13px', borderRadius: 12, fontSize: 14, fontWeight: 600, background: DARK, color: '#fff', border: 'none', cursor: 'pointer' }}>
+                    Save
+                  </button>
+                  <button onClick={discardRecording}
+                    style={{ padding: '13px 18px', borderRadius: 12, fontSize: 14, color: '#6b7280', background: 'transparent', border: '1px solid rgba(0,0,0,0.1)', cursor: 'pointer' }}>
+                    Re-record
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Saving */}
+            {recState === 'saving' && (
+              <p style={{ fontSize: 13, color: '#6b7280', margin: 0, textAlign: 'center' }}>Saving voicemail…</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* VM Dropped toast — floats over UI, shows even after auto-advancing to next contact */}
       {vmDropToast && (
