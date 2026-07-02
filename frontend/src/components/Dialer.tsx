@@ -625,12 +625,13 @@ export default function Dialer() {
           {/* ── Who to call ── */}
           {(() => {
             const savedGroups: string[] = (() => { try { return JSON.parse(localStorage.getItem('propel_contact_groups') || '[]'); } catch { return []; } })();
-            const groupFilters = savedGroups.map(g => ({ value: `group:${g}`, label: g, isGroup: true }));
+            const allFilter = { value: 'all', label: 'All Contacts' };
+            const groupFilters = savedGroups.map(g => ({ value: `group:${g}`, label: g }));
+            const filters = [allFilter, ...groupFilters];
             return (
               <Card title="Who to call" mb={14}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {/* Static status filters */}
-                  {STATUS_FILTERS.map(f => (
+                  {filters.map(f => (
                     <button key={f.value} onClick={() => setSessionFilter(f.value)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
@@ -645,28 +646,10 @@ export default function Dialer() {
                       </span>
                     </button>
                   ))}
-                  {/* Custom contact groups */}
-                  {groupFilters.length > 0 && (
-                    <>
-                      <div style={{ fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9ca3af', padding: '6px 4px 2px', fontWeight: 700 }}>
-                        My Groups
-                      </div>
-                      {groupFilters.map(f => (
-                        <button key={f.value} onClick={() => setSessionFilter(f.value)}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                            borderRadius: 10, textAlign: 'left', cursor: 'pointer',
-                            background: sessionFilter === f.value ? DARK : 'transparent',
-                            border: `1px solid ${sessionFilter === f.value ? DARK : 'rgba(0,0,0,0.09)'}`,
-                            transition: 'all 0.15s',
-                          }}>
-                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: sessionFilter === f.value ? GOLD : GOLD + '66', flexShrink: 0 }} />
-                          <span style={{ fontSize: 14, color: sessionFilter === f.value ? '#fff' : '#374151', fontWeight: sessionFilter === f.value ? 500 : 400 }}>
-                            {f.label}
-                          </span>
-                        </button>
-                      ))}
-                    </>
+                  {savedGroups.length === 0 && (
+                    <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 2px 0', lineHeight: 1.5 }}>
+                      Create groups in the Contacts tab to dial specific lists.
+                    </p>
                   )}
                 </div>
               </Card>
