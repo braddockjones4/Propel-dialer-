@@ -32,31 +32,26 @@ import Inbox from './components/Inbox';
 import Analytics from './components/Analytics';
 import Settings from './components/Settings';
 import Pipeline from './components/Pipeline';
-import VoicemailBlast from './components/VoicemailBlast';
 import Appointments from './components/Appointments';
-import Email from './components/Email';
-import Reports from './components/Reports';
 import OnboardingChecklist from './components/OnboardingChecklist';
 import Dashboard from './components/Dashboard';
 import AgentConsole from './components/AgentConsole';
+import Voicemails from './components/Voicemails';
 
-type Page = 'dashboard' | 'agent' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'vmblast' | 'inbox' | 'sequences' | 'appointments' | 'email' | 'analytics' | 'reports' | 'settings' | 'billing';
+type Page = 'dashboard' | 'agent' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'voicemails' | 'inbox' | 'appointments' | 'analytics' | 'settings' | 'billing';
 
 const NAV: { id: Page; label: string; icon: string }[] = [
-  { id: 'dashboard',    label: 'Home',      icon: '' },
-  { id: 'agent',        label: 'AI Agent',  icon: '' },
-  { id: 'dialer',       label: 'Dialer',    icon: '' },
-  { id: 'contacts',     label: 'Contacts',  icon: '' },
-  { id: 'pipeline',     label: 'Pipeline',  icon: '' },
-  { id: 'appointments', label: 'Calendar',  icon: '' },
-  { id: 'blast',        label: 'SMS Blast', icon: '' },
-  { id: 'vmblast',      label: 'VM Blast',  icon: '' },
-  { id: 'email',        label: 'Email',     icon: '' },
-  { id: 'inbox',        label: 'Inbox',     icon: '' },
-  { id: 'sequences',    label: 'Follow-Up', icon: '' },
-  { id: 'analytics',    label: 'Analytics', icon: '' },
-  { id: 'reports',      label: 'Reports',   icon: '' },
-  { id: 'settings',     label: 'Settings',  icon: '' },
+  { id: 'dashboard',    label: 'Home',       icon: '' },
+  { id: 'agent',        label: 'AI Agent',   icon: '' },
+  { id: 'dialer',       label: 'Dialer',     icon: '' },
+  { id: 'contacts',     label: 'Contacts',   icon: '' },
+  { id: 'pipeline',     label: 'Pipeline',   icon: '' },
+  { id: 'appointments', label: 'Calendar',   icon: '' },
+  { id: 'blast',        label: 'SMS Blast',  icon: '' },
+  { id: 'voicemails',   label: 'Voicemails', icon: '' },
+  { id: 'inbox',        label: 'Inbox',      icon: '' },
+  { id: 'analytics',    label: 'Analytics',  icon: '' },
+  { id: 'settings',     label: 'Settings',   icon: '' },
 ];
 
 // ── Inner app (has auth context) ─────────────────────────────────────────────
@@ -312,14 +307,11 @@ function AppInner() {
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
         {page === 'contacts'     && <Contacts />}
         {page === 'blast'        && <Blast />}
-        {page === 'vmblast'      && <VoicemailBlast />}
-        {page === 'email'        && <Email />}
+        {page === 'voicemails'   && <Voicemails />}
         {page === 'inbox'        && <Inbox />}
-        {page === 'sequences'    && <Sequences />}
         {page === 'pipeline'     && <Pipeline />}
         {page === 'appointments' && <Appointments />}
         {page === 'analytics'    && <Analytics />}
-        {page === 'reports'      && <Reports />}
         {page === 'settings'     && <Settings />}
         {page === 'billing'      && <Billing />}
       </div>
