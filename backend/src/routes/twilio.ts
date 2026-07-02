@@ -93,14 +93,14 @@ router.post('/voice', async (req: Request, res: Response) => {
     // eliminating any separate callback URL dependency or timing race.
     const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
     const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const contactBTwimlUrl = `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}&userId=${encodeURIComponent(b.userId)}&confName=${encodeURIComponent(b.confName)}&agentCallSid=${encodeURIComponent(b.agentCallSid || '')}`;
+    console.log(`[WebRTC Bridge] Dialing ${b.contactPhone} | machineDetection=DetectMessageEnd | url=${contactBTwimlUrl}`);
     try {
       const contactCall = await client.calls.create({
         to:   b.contactPhone,
         from: contactFrom,
         machineDetection: 'DetectMessageEnd',
-        // Embed userId/confName/agentCallSid in URL so bridge-b-twiml works even
-        // if a rolling deploy routes the callback to a fresh server instance.
-        url: `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}&userId=${encodeURIComponent(b.userId)}&confName=${encodeURIComponent(b.confName)}&agentCallSid=${encodeURIComponent(b.agentCallSid || '')}`,
+        url:            contactBTwimlUrl,
         statusCallback: `${ngrokBase}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
         statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
         statusCallbackMethod: 'POST',

@@ -693,8 +693,9 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
 // Contact leg status — detect no-answer / busy.
 webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
   const { sessionId } = req.query as { sessionId: string };
-  const { CallStatus } = req.body;
+  const { CallStatus, CallSid } = req.body;
   const b = bridges.get(sessionId);
+  console.log(`[bridge-b-status] session=${sessionId} | status=${CallStatus} | sid=${CallSid}`);
 
   if (b && (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed')) {
     b.status = 'no-answer';
