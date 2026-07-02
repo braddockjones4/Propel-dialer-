@@ -31,10 +31,12 @@ import Settings from './components/Settings';
 import Pipeline from './components/Pipeline';
 import Appointments from './components/Appointments';
 import Voicemails from './components/Voicemails';
+import Dashboard from './components/Dashboard';
 
-type Page = 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'settings' | 'billing';
+type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'settings' | 'billing';
 
 const NAV: { id: Page; label: string }[] = [
+  { id: 'dashboard',    label: 'Home'       },
   { id: 'dialer',       label: 'Dialer'     },
   { id: 'contacts',     label: 'Contacts'   },
   { id: 'pipeline',     label: 'Pipeline'   },
@@ -47,7 +49,7 @@ const NAV: { id: Page; label: string }[] = [
 // ── Inner app (has auth context) ─────────────────────────────────────────────
 function AppInner() {
   const { user, loading, logout } = useAuth();
-  const [page, setPage]             = useState<Page>('dialer');
+  const [page, setPage]             = useState<Page>('dashboard');
   const [tripleMode, setTripleMode] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
@@ -249,10 +251,10 @@ function AppInner() {
       <div className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-white border-t"
            style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {[
+          { id: 'dashboard' as Page, label: 'Home' },
           { id: 'dialer'    as Page, label: 'Dial' },
           { id: 'contacts'  as Page, label: 'Contacts' },
           { id: 'pipeline'  as Page, label: 'Pipeline' },
-          { id: 'voicemails' as Page, label: 'VMs' },
           { id: 'settings'  as Page, label: 'Settings' },
         ].map(({ id, label }) => (
           <button
@@ -279,6 +281,7 @@ function AppInner() {
 
       {/* ── Page content ─────────────────────────────────────────────── */}
       <div className="pt-[49px] pb-[60px] md:pb-0">
+        {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
         {page === 'contacts'     && <Contacts onNavigate={(p) => setPage(p as Page)} />}
         {page === 'voicemails'   && <Voicemails />}
