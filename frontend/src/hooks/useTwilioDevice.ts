@@ -11,6 +11,7 @@ interface UseTwilioDeviceReturn {
   startCall: (phoneNumber: string, callerId?: string, sessionId?: string, confName?: string) => Promise<void>;
   endCall: () => void;
   muteCall: (muted: boolean) => void;
+  resetCallStatus: () => void;
   isMuted: boolean;
   errorMessage: string | null;
 }
@@ -195,6 +196,13 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
     activeCallRef.current?.disconnect();
   }, []);
 
+  // ─── Reset status ────────────────────────────────────────────────────────────
+  // Call this when advancing to the next contact so callStatus doesn't bleed over.
+  const resetCallStatus = useCallback(() => {
+    setCallStatus('idle');
+    setCallDuration(0);
+  }, []);
+
   // ─── Mute Call ──────────────────────────────────────────────────────────────
   const muteCall = useCallback((muted: boolean) => {
     activeCallRef.current?.mute(muted);
@@ -209,6 +217,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
     startCall,
     endCall,
     muteCall,
+    resetCallStatus,
     isMuted,
     errorMessage,
   };

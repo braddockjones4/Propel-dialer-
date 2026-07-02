@@ -141,7 +141,7 @@ function timeAgo(iso: string) {
 export default function Dialer() {
   const {
     deviceStatus, callStatus, callDuration, activeCall,
-    startCall, endCall, muteCall, isMuted,
+    startCall, endCall, muteCall, resetCallStatus, isMuted,
   } = useTwilioDevice();
 
   // Views & session
@@ -495,13 +495,14 @@ export default function Dialer() {
     setNotes('');
     setBridgeStatus('idle');
     setBridgeSessionId(null);
+    resetCallStatus(); // clear 'completed' so next contact shows the Call button
 
     if (index + 1 >= contacts.length) {
       setView('done');
     } else {
       setIndex(i => i + 1);
     }
-  }, [contacts, index, notes, callDuration, activeCall, settings.callMode]);
+  }, [contacts, index, notes, callDuration, activeCall, settings.callMode, resetCallStatus]);
 
   // ─── End call ───────────────────────────────────────────────────────────────
   const handleEndCall = useCallback(async () => {
@@ -551,6 +552,7 @@ export default function Dialer() {
     setBridgeSessionId(null);
     setDisposition(null);
     setNotes('');
+    resetCallStatus();
     if (index + 1 >= contacts.length) setView('done');
     else setIndex(i => i + 1);
   };
