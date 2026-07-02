@@ -62,16 +62,23 @@ router.post('/voice', async (req: Request, res: Response) => {
     return;
   }
 
-  // Store callSid → userId so AMD can play the user's recorded voicemail
-  if (callSid && personalCallerId) {
+  // Look up userId from verified personal phone so AMD can use their recorded voicemail.
+  // We embed userId in the AMD callback URL (query param) instead of using an in-memory map,
+  // because the AMD callback fires on the OUTBOUND call SID — a different SID from the
+  // inbound browser→Twilio SID stored here. URL param is reliable across any SID.
+  let amdUserId: string | null = null;
+  if (personalCallerId) {
     try {
       const s = await prisma.dialerSettings.findFirst({
         where: { personalPhone: personalCallerId },
         select: { userId: true },
       });
-      if (s?.userId) callToUser.set(callSid, s.userId);
+      amdUserId = s?.userId ?? null;
     } catch {}
   }
+  const amdCallbackUrl = amdUserId
+    ? `${ngrokBase}/api/twilio/amd-status?userId=${encodeURIComponent(amdUserId)}`
+    : `${ngrokBase}/api/twilio/amd-status`;
 
   // Use verified personal phone if provided, otherwise fall back to local presence matching
   const localCallerId = await pickCallerId(to).catch(() => TWILIO_CALLER_ID);
@@ -85,7 +92,7 @@ router.post('/voice', async (req: Request, res: Response) => {
     action: `${ngrokBase}/api/twilio/call-status`,
     // AMD: detect answering machine
     machineDetection: 'DetectMessageEnd',
-    asyncAmdStatusCallback: `${ngrokBase}/api/twilio/amd-status`,
+    asyncAmdStatusCallback: amdCallbackUrl,
     asyncAmdStatusCallbackMethod: 'POST',
   } as Parameters<typeof twiml.dial>[0]);
 
@@ -104,8 +111,11 @@ router.post('/amd-status', async (req: Request, res: Response) => {
   const { AnsweredBy, To, CallSid } = req.body;
   console.log(`[AMD] CallSid: ${CallSid} | AnsweredBy: ${AnsweredBy} | To: ${To}`);
 
-  const userId = callToUser.get(CallSid);
+  // Primary: userId embedded in callback URL at call-creation time (reliable — matches outbound SID)
+  // Fallback: in-memory map (keyed on inbound SID, only works if same SID, kept for compat)
+  const userId = (req.query.userId as string | undefined) || callToUser.get(CallSid) || null;
   callToUser.delete(CallSid); // cleanup
+  console.log(`[AMD] userId=${userId ?? 'unknown'} — will ${userId ? 'use recorded VM' : 'use TTS fallback'}`);
 
   const contact: ContactContext = {
     firstName: 'there',

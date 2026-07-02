@@ -46,7 +46,8 @@ interface BridgeSession {
   confName: string;
   agentCallSid: string | null;
   contactCallSid: string | null;
-  userId: string;   // owner of this session — used to look up per-user settings in webhooks
+  userId: string;         // owner — used to scope settings in webhooks
+  voicemailUrl: string | null; // pre-loaded so AMD never needs a DB round-trip
   status: 'waiting-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'ended';
   createdAt: number;
 }
@@ -289,6 +290,7 @@ router.post('/call', async (req: Request, res: Response) => {
       agentCallSid: null,
       contactCallSid: null,
       userId,
+      voicemailUrl: settings.voicemailUrl ?? null, // pre-loaded — no DB hit in AMD webhook
       status: 'waiting-agent',
       createdAt: Date.now(),
     });
@@ -448,14 +450,14 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
     b.status = 'vm-dropped';
     io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
 
-    // Play voicemail on contact leg
-    const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } }).catch(() => null);
-    const vmUrl = settings?.voicemailUrl;
+    // Play voicemail on contact leg — use pre-loaded URL (fast path, no DB hit)
+    const vmUrl = b.voicemailUrl;
     const fallbackText = `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling. Please call me back when you get a chance. Thank you!`;
     const vmTwiml = vmUrl
       ? `<Response><Play>${vmUrl}</Play><Hangup/></Response>`
       : `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
 
+    console.log(`[Bridge AMD] ${vmUrl ? `Playing recorded VM: ${vmUrl}` : 'No VM URL — using TTS fallback'}`);
     try { await twilioClient().calls(CallSid).update({ twiml: vmTwiml }); } catch (e: any) {
       console.error('[Bridge AMD] VM drop failed:', e.message);
     }
