@@ -33,6 +33,8 @@ interface DialerSettings {
   phoneVerified: boolean;
   voicemailUrl?: string;
   voicemailSid?: string;
+  /** true = WAV/MP3 (playable by Twilio), false = webm (re-record needed), null = no recording */
+  voicemailReady?: boolean | null;
 }
 
 type SessionView = 'setup' | 'session' | 'done';
@@ -628,15 +630,31 @@ export default function Dialer() {
             {/* Saved voicemail */}
             {settings.voicemailUrl && recState === 'idle' && (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
-                  <span style={{ fontSize: 13, color: '#374151' }}>Voicemail saved</span>
-                </div>
-                <audio controls src={`${settings.voicemailUrl}?t=${Date.now()}`} style={{ width: '100%', height: 36, borderRadius: 6, marginBottom: 10 }} />
-                <button onClick={startRecording}
-                  style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
-                  Re-record
-                </button>
+                {/* voicemailReady=false means stored as webm (pre-WAV fix) — Twilio can't play it */}
+                {settings.voicemailReady === false ? (
+                  <div style={{ padding: '10px 14px', background: '#fef9c3', borderRadius: 10, marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#854d0e' }}>⚠️ Re-record needed</span>
+                    <span style={{ fontSize: 12, color: '#713f12', lineHeight: 1.5 }}>
+                      Your saved voicemail is in a format that Twilio can't play. Please re-record it so automatic drops work correctly.
+                    </span>
+                    <button onClick={startRecording}
+                      style={{ marginTop: 4, padding: '8px 14px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: '#ca8a04', color: '#fff', border: 'none', cursor: 'pointer', alignSelf: 'flex-start' }}>
+                      Re-record Now
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e' }} />
+                      <span style={{ fontSize: 13, color: '#374151' }}>Voicemail saved</span>
+                    </div>
+                    <audio controls src={`${settings.voicemailUrl}?t=${Date.now()}`} style={{ width: '100%', height: 36, borderRadius: 6, marginBottom: 10 }} />
+                    <button onClick={startRecording}
+                      style={{ fontSize: 12, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                      Re-record
+                    </button>
+                  </>
+                )}
               </>
             )}
 

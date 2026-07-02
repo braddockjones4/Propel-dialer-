@@ -127,31 +127,27 @@ router.post('/amd-status', async (req: Request, res: Response) => {
   const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
 
   if (isMachine && CallSid) {
-    console.log(`[AMD] Machine detected — dropping voicemail for ${To}`);
+    console.log(`[AMD] Machine detected — dropping voicemail for ${To}, userId=${userId ?? 'unknown'}`);
     try {
-      const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+      const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, BACKEND_URL, NGROK_URL } = process.env;
       const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+      const backendBase = BACKEND_URL || NGROK_URL || 'https://propel-dialer-backend.onrender.com';
 
-      // Use user's recorded voicemail if available, fall back to TTS
-      let dropTwiml: string;
+      // Use format-aware TwiML endpoint if we have a userId.
+      // It checks audio format at play time: WAV/MP3 → <Play>, webm/none → TTS <Say>.
+      // Falls back to TTS-only TwiML if no userId (can't look up which user's recording to use).
       if (userId) {
-        const settings = await prisma.dialerSettings.findUnique({
-          where: { userId },
-          select: { voicemailUrl: true },
-        }).catch(() => null);
-        if (settings?.voicemailUrl) {
-          dropTwiml = `<Response><Play>${settings.voicemailUrl}</Play><Hangup/></Response>`;
-          console.log(`[AMD] Playing recorded voicemail from ${settings.voicemailUrl}`);
-        }
-      }
-      if (!dropTwiml!) {
+        const vmPlayUrl = `${backendBase}/api/dialer/vm-play-twiml/${encodeURIComponent(userId)}`;
+        console.log(`[AMD] Redirecting to vm-play-twiml: ${vmPlayUrl}`);
+        await client.calls(CallSid).update({ url: vmPlayUrl, method: 'POST' } as any);
+      } else {
         const vmScript = process.env.VOICEMAIL_SCRIPT ||
           `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
-          `I'd love to connect — please call me back when you get a chance. Thank you!`;
-        dropTwiml = `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`;
+          `Please call me back when you get a chance. Thank you!`;
+        await client.calls(CallSid).update({
+          twiml: `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`,
+        });
       }
-
-      await client.calls(CallSid).update({ twiml: dropTwiml });
     } catch (err) {
       console.error('[AMD] Failed to drop voicemail:', err);
     }

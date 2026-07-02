@@ -65,7 +65,23 @@ router.get('/settings', async (req: Request, res: Response) => {
     create: { userId },
     update: {},
   });
-  res.json(s);
+
+  // Derive voicemailReady without sending the (potentially multi-MB) voicemailData blob.
+  // true  = stored audio is WAV or MP3 → Twilio can play it
+  // false = stored audio is webm (pre-WAV-fix recording) → user should re-record
+  // null  = no browser recording stored (might have a legacy Twilio URL via voicemailUrl)
+  let voicemailReady: boolean | null = null;
+  if (s.voicemailData) {
+    const mimeType = s.voicemailData.match(/^data:([^;]+)/)?.[1] || '';
+    voicemailReady = mimeType === 'audio/wav' || mimeType.startsWith('audio/mp');
+  } else if (s.voicemailUrl) {
+    // Legacy Twilio recording — assume playable (mp3)
+    voicemailReady = true;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { voicemailData: _omit, ...rest } = s as any;
+  res.json({ ...rest, voicemailReady });
 });
 
 // ─── PUT /api/dialer/settings ─────────────────────────────────────────────────
@@ -198,6 +214,55 @@ webhooks.get('/vm-audio/:userId', async (req: Request, res: Response) => {
   res.setHeader('Content-Length', buffer.length);
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(buffer);
+});
+
+// ─── POST /api/dialer/vm-play-twiml/:userId (public — called by Twilio) ───────
+// Dynamic TwiML endpoint for voicemail drop. Checks audio format at play time:
+//   - audio/wav or audio/mpeg → <Play> the stored recording
+//   - audio/webm or missing   → <Say> TTS fallback (Twilio can't decode webm)
+// AMD handlers use calls(sid).update({ url: this }) so format issues never cause
+// a silent drop (agent stuck on machine with no message playing).
+webhooks.post('/vm-play-twiml/:userId', async (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const twiml = new twilio.twiml.VoiceResponse();
+  const fallbackText = process.env.VOICEMAIL_SCRIPT ||
+    `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+    `Please give me a call back when you get a chance. Thank you!`;
+
+  try {
+    const settings = await prisma.dialerSettings.findUnique({ where: { userId } }).catch(() => null);
+    const data = settings?.voicemailData;
+
+    if (data) {
+      const mimeType = data.match(/^data:([^;]+)/)?.[1] || '';
+      const isPlayable = mimeType === 'audio/wav' || mimeType.startsWith('audio/mp');
+
+      if (isPlayable) {
+        // Valid format — serve the binary via vm-audio and let Twilio play it
+        const audioUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}`;
+        console.log(`[vm-play-twiml] Playing recorded VM (${mimeType}) for userId=${userId}`);
+        twiml.play(audioUrl);
+      } else {
+        // Unplayable format (e.g. webm) — fall back to TTS
+        console.warn(`[vm-play-twiml] Stored VM is ${mimeType || 'unknown'} — not playable by Twilio, using TTS. User should re-record.`);
+        twiml.say({ voice: 'Polly.Joanna' }, fallbackText);
+      }
+    } else if (settings?.voicemailUrl && !settings.voicemailData) {
+      // Legacy Twilio recording URL (stored before browser-recording was added) — still playable
+      console.log(`[vm-play-twiml] Playing legacy Twilio recording URL for userId=${userId}`);
+      twiml.play(settings.voicemailUrl);
+    } else {
+      // No recording at all
+      console.warn(`[vm-play-twiml] No voicemail configured for userId=${userId}, using TTS`);
+      twiml.say({ voice: 'Polly.Joanna' }, fallbackText);
+    }
+  } catch (e: any) {
+    console.error('[vm-play-twiml] Error:', e.message);
+    twiml.say({ voice: 'Polly.Joanna' }, fallbackText);
+  }
+
+  twiml.hangup();
+  res.type('text/xml').send(twiml.toString());
 });
 
 // ─── POST /api/dialer/record-vm ───────────────────────────────────────────────
@@ -450,15 +515,13 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
     b.status = 'vm-dropped';
     io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
 
-    // Play voicemail on contact leg — use pre-loaded URL (fast path, no DB hit)
-    const vmUrl = b.voicemailUrl;
-    const fallbackText = `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling. Please call me back when you get a chance. Thank you!`;
-    const vmTwiml = vmUrl
-      ? `<Response><Play>${vmUrl}</Play><Hangup/></Response>`
-      : `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
-
-    console.log(`[Bridge AMD] ${vmUrl ? `Playing recorded VM: ${vmUrl}` : 'No VM URL — using TTS fallback'}`);
-    try { await twilioClient().calls(CallSid).update({ twiml: vmTwiml }); } catch (e: any) {
+    // Redirect contact leg to the format-aware TwiML endpoint.
+    // vm-play-twiml checks the stored audio format at play time:
+    //   WAV/MP3 → <Play> the recording; webm/none → <Say> TTS fallback.
+    // This guarantees something ALWAYS plays regardless of audio format.
+    const vmPlayUrl = `${BACKEND()}/api/dialer/vm-play-twiml/${b.userId}`;
+    console.log(`[Bridge AMD] Redirecting contact leg to vm-play-twiml for userId=${b.userId}`);
+    try { await twilioClient().calls(CallSid).update({ url: vmPlayUrl, method: 'POST' } as any); } catch (e: any) {
       console.error('[Bridge AMD] VM drop failed:', e.message);
     }
 
