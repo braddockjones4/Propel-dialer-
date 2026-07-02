@@ -8,7 +8,7 @@ interface UseTwilioDeviceReturn {
   callStatus: CallStatus;
   activeCall: Call | null;
   callDuration: number;
-  startCall: (phoneNumber: string) => Promise<void>;
+  startCall: (phoneNumber: string, callerId?: string) => Promise<void>;
   endCall: () => void;
   muteCall: (muted: boolean) => void;
   isMuted: boolean;
@@ -151,7 +151,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
   }, []);
 
   // ─── Start Call ─────────────────────────────────────────────────────────────
-  const startCall = useCallback(async (phoneNumber: string) => {
+  const startCall = useCallback(async (phoneNumber: string, callerId?: string) => {
     if (!deviceRef.current || deviceStatus !== 'ready') {
       setErrorMessage('Dialer not ready. Please wait or refresh.');
       return;
@@ -163,9 +163,12 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
     setErrorMessage(null);
 
     try {
-      const call = await deviceRef.current.connect({
-        params: { To: phoneNumber },
-      });
+      const params: Record<string, string> = { To: phoneNumber };
+      // If a verified personal phone is provided, send it so the /voice webhook
+      // can use it as the outbound caller ID instead of the Twilio number.
+      if (callerId) params.CallerId = callerId;
+
+      const call = await deviceRef.current.connect({ params });
       bindCallEvents(call);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to place call.';

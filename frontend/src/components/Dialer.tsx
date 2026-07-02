@@ -324,9 +324,11 @@ export default function Dialer() {
         setBridgeStatus('idle');
       }
     } else {
-      await startCall(contact.phone);
+      // WebRTC: pass verified personal phone so contact sees it as caller ID
+      const callerId = settings.phoneVerified && settings.personalPhone ? settings.personalPhone : undefined;
+      await startCall(contact.phone, callerId);
     }
-  }, [contacts, index, settings.callMode, startCall]);
+  }, [contacts, index, settings.callMode, settings.personalPhone, settings.phoneVerified, startCall]);
 
   // ─── End call ───────────────────────────────────────────────────────────────
   const handleEndCall = useCallback(async () => {

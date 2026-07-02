@@ -45,6 +45,7 @@ router.post('/token', (req: Request, res: Response) => {
 // TwiML webhook — returns dial instructions with AMD enabled.
 router.post('/voice', async (req: Request, res: Response) => {
   const to = req.body.To as string;
+  const personalCallerId = req.body.CallerId as string | undefined; // set by browser when user has verified personal phone
   const { TWILIO_CALLER_ID } = process.env;
   const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
 
@@ -57,11 +58,12 @@ router.post('/voice', async (req: Request, res: Response) => {
     return;
   }
 
-  // Local presence: pick best matching area code number
+  // Use verified personal phone if provided, otherwise fall back to local presence matching
   const localCallerId = await pickCallerId(to).catch(() => TWILIO_CALLER_ID);
+  const effectiveCallerId = personalCallerId || localCallerId;
 
   const dial = twiml.dial({
-    callerId: localCallerId,
+    callerId: effectiveCallerId,
     record: 'record-from-answer-dual',
     recordingStatusCallback: `${ngrokBase}/api/twilio/recording-status`,
     recordingStatusCallbackMethod: 'POST',
