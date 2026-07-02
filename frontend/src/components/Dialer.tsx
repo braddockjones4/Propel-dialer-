@@ -252,7 +252,9 @@ export default function Dialer() {
     if (!stored) return;
     try {
       const gf = JSON.parse(stored);
-      if (gf.type === 'source' && gf.value) {
+      if (gf.type === 'group' && gf.value) {
+        setSessionFilter(`group:${gf.value}`);
+      } else if (gf.type === 'source' && gf.value) {
         setSessionFilter(`source:${gf.value}`);
       } else if (gf.type === 'status' && gf.value) {
         setSessionFilter(gf.value);
@@ -267,8 +269,9 @@ export default function Dialer() {
     setLoadingContacts(true);
     try {
       const isSourceFilter = filter.startsWith('source:');
+      const isGroupFilter  = filter.startsWith('group:');
       let statusParam = filter;
-      if (filter === 'past-client' || isSourceFilter) statusParam = 'all';
+      if (filter === 'past-client' || isSourceFilter || isGroupFilter) statusParam = 'all';
       const r = await authFetch(
         `${API_BASE}/dialer/contacts?status=${statusParam === 'all' ? 'all' : statusParam}&limit=200`
       );
@@ -280,6 +283,9 @@ export default function Dialer() {
       } else if (isSourceFilter) {
         const sourceVal = filter.replace('source:', '');
         data = data.filter(c => c.source === sourceVal);
+      } else if (isGroupFilter) {
+        const groupVal = filter.replace('group:', '');
+        data = data.filter(c => (c as any).contactGroup === groupVal);
       }
 
       // Pin Braddock Jones first for demo
@@ -617,25 +623,55 @@ export default function Dialer() {
           </div>
 
           {/* ── Who to call ── */}
-          <Card title="Who to call" mb={14}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {STATUS_FILTERS.map(f => (
-                <button key={f.value} onClick={() => setSessionFilter(f.value)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                    borderRadius: 10, textAlign: 'left', cursor: 'pointer',
-                    background: sessionFilter === f.value ? DARK : 'transparent',
-                    border: `1px solid ${sessionFilter === f.value ? DARK : 'rgba(0,0,0,0.09)'}`,
-                    transition: 'all 0.15s',
-                  }}>
-                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: sessionFilter === f.value ? GOLD : '#d1d5db', flexShrink: 0 }} />
-                  <span style={{ fontSize: 14, color: sessionFilter === f.value ? '#fff' : '#374151', fontWeight: sessionFilter === f.value ? 500 : 400 }}>
-                    {f.label}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </Card>
+          {(() => {
+            const savedGroups: string[] = (() => { try { return JSON.parse(localStorage.getItem('propel_contact_groups') || '[]'); } catch { return []; } })();
+            const groupFilters = savedGroups.map(g => ({ value: `group:${g}`, label: g, isGroup: true }));
+            return (
+              <Card title="Who to call" mb={14}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {/* Static status filters */}
+                  {STATUS_FILTERS.map(f => (
+                    <button key={f.value} onClick={() => setSessionFilter(f.value)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                        borderRadius: 10, textAlign: 'left', cursor: 'pointer',
+                        background: sessionFilter === f.value ? DARK : 'transparent',
+                        border: `1px solid ${sessionFilter === f.value ? DARK : 'rgba(0,0,0,0.09)'}`,
+                        transition: 'all 0.15s',
+                      }}>
+                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: sessionFilter === f.value ? GOLD : '#d1d5db', flexShrink: 0 }} />
+                      <span style={{ fontSize: 14, color: sessionFilter === f.value ? '#fff' : '#374151', fontWeight: sessionFilter === f.value ? 500 : 400 }}>
+                        {f.label}
+                      </span>
+                    </button>
+                  ))}
+                  {/* Custom contact groups */}
+                  {groupFilters.length > 0 && (
+                    <>
+                      <div style={{ fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9ca3af', padding: '6px 4px 2px', fontWeight: 700 }}>
+                        My Groups
+                      </div>
+                      {groupFilters.map(f => (
+                        <button key={f.value} onClick={() => setSessionFilter(f.value)}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                            borderRadius: 10, textAlign: 'left', cursor: 'pointer',
+                            background: sessionFilter === f.value ? DARK : 'transparent',
+                            border: `1px solid ${sessionFilter === f.value ? DARK : 'rgba(0,0,0,0.09)'}`,
+                            transition: 'all 0.15s',
+                          }}>
+                          <div style={{ width: 7, height: 7, borderRadius: '50%', background: sessionFilter === f.value ? GOLD : GOLD + '66', flexShrink: 0 }} />
+                          <span style={{ fontSize: 14, color: sessionFilter === f.value ? '#fff' : '#374151', fontWeight: sessionFilter === f.value ? 500 : 400 }}>
+                            {f.label}
+                          </span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </Card>
+            );
+          })()}
 
           {/* ── Call mode ── */}
           <Card title="Call mode" mb={14}>

@@ -19,7 +19,8 @@ model Contact {
   email       String?
   source      String    @default("manual") // expired, fsbo, circle, past-client, manual
   status      String    @default("new")    // new, contacted, callback, hot, appointment, closed, dnc
-  notes       String?
+  notes          String?
+  contactGroup   String?   // user-defined group name e.g. "AYC Group"
   leadScore   Int?      // 0-100 AI-computed priority score
   timezone    String?   // e.g. "America/New_York" derived from area code
   lastReplyAt DateTime? // last inbound SMS — boosts lead score

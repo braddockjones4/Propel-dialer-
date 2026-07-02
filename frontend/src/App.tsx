@@ -25,39 +25,29 @@ import Billing from './components/Billing';
 import NotificationBell from './components/NotificationBell';
 import Dialer from './components/Dialer';
 import TripleDialer from './components/TripleDialer';
-import Sequences from './components/Sequences';
 import Contacts from './components/Contacts';
-import Blast from './components/Blast';
-import Inbox from './components/Inbox';
 import Analytics from './components/Analytics';
 import Settings from './components/Settings';
 import Pipeline from './components/Pipeline';
 import Appointments from './components/Appointments';
-import OnboardingChecklist from './components/OnboardingChecklist';
-import Dashboard from './components/Dashboard';
-import AgentConsole from './components/AgentConsole';
 import Voicemails from './components/Voicemails';
 
-type Page = 'dashboard' | 'agent' | 'dialer' | 'contacts' | 'pipeline' | 'blast' | 'voicemails' | 'inbox' | 'appointments' | 'analytics' | 'settings' | 'billing';
+type Page = 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'settings' | 'billing';
 
-const NAV: { id: Page; label: string; icon: string }[] = [
-  { id: 'dashboard',    label: 'Home',       icon: '' },
-  { id: 'agent',        label: 'AI Agent',   icon: '' },
-  { id: 'dialer',       label: 'Dialer',     icon: '' },
-  { id: 'contacts',     label: 'Contacts',   icon: '' },
-  { id: 'pipeline',     label: 'Pipeline',   icon: '' },
-  { id: 'appointments', label: 'Calendar',   icon: '' },
-  { id: 'blast',        label: 'SMS Blast',  icon: '' },
-  { id: 'voicemails',   label: 'Voicemails', icon: '' },
-  { id: 'inbox',        label: 'Inbox',      icon: '' },
-  { id: 'analytics',    label: 'Analytics',  icon: '' },
-  { id: 'settings',     label: 'Settings',   icon: '' },
+const NAV: { id: Page; label: string }[] = [
+  { id: 'dialer',       label: 'Dialer'     },
+  { id: 'contacts',     label: 'Contacts'   },
+  { id: 'pipeline',     label: 'Pipeline'   },
+  { id: 'appointments', label: 'Calendar'   },
+  { id: 'voicemails',   label: 'Voicemails' },
+  { id: 'analytics',    label: 'Analytics'  },
+  { id: 'settings',     label: 'Settings'   },
 ];
 
 // ── Inner app (has auth context) ─────────────────────────────────────────────
 function AppInner() {
   const { user, loading, logout } = useAuth();
-  const [page, setPage]             = useState<Page>('dashboard');
+  const [page, setPage]             = useState<Page>('dialer');
   const [tripleMode, setTripleMode] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
@@ -107,7 +97,7 @@ function AppInner() {
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b hidden md:flex items-center px-6"
            style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 28, cursor: 'pointer' }} onClick={() => setPage('dashboard')}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 28, cursor: 'pointer' }} onClick={() => setPage('dialer')}>
           <svg width="16" height="22" viewBox="0 0 52 72" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="bolt-nav-app" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
@@ -123,35 +113,26 @@ function AppInner() {
         <div className="w-px h-4 mr-6" style={{ background: 'rgba(201,168,76,0.3)' }} />
 
         <div className="flex items-center overflow-x-auto hide-scrollbar flex-1">
-          {NAV.map(({ id, label, icon }) => (
+          {NAV.map(({ id, label }) => (
             <button
               key={id}
               onClick={() => setPage(id)}
               className="relative whitespace-nowrap transition-all duration-200"
               style={{
-                padding: '6px 10px',
-                borderRadius: 7,
+                padding: '5px 12px',
+                borderRadius: 6,
                 margin: '0 1px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 2,
                 background: page === id ? 'rgba(201,168,76,0.1)' : 'transparent',
                 border: page === id ? '1px solid rgba(201,168,76,0.25)' : '1px solid transparent',
                 cursor: 'pointer',
-              }}
-            >
-              <span style={{ fontSize: 13, lineHeight: 1 }}>{icon}</span>
-              <span style={{
-                fontSize: 8,
-                fontWeight: 700,
-                letterSpacing: '0.1em',
+                fontSize: 11,
+                fontWeight: page === id ? 700 : 500,
+                letterSpacing: '0.06em',
                 textTransform: 'uppercase',
                 color: page === id ? '#9A7A2E' : '#9ca3af',
-                lineHeight: 1,
-              }}>
-                {label}
-              </span>
+              }}
+            >
+              {label}
             </button>
           ))}
         </div>
@@ -203,7 +184,7 @@ function AppInner() {
       {/* ── Mobile nav ──────────────────────────────────────────────── */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white border-b flex md:hidden items-center justify-between px-4"
            style={{ borderBottomColor: 'rgba(201,168,76,0.2)', height: 49 }}>
-        <button onClick={() => setPage('dashboard')} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+        <button onClick={() => setPage('dialer')} style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
           <svg width="13" height="18" viewBox="0 0 52 72" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="bolt-mob" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
@@ -214,7 +195,7 @@ function AppInner() {
             <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-mob)"/>
           </svg>
           <span className="text-sm font-semibold text-gray-800" style={{ letterSpacing: '0.03em' }}>
-            {page === 'dashboard' ? 'Propel' : (NAV.find(n => n.id === page)?.label || 'Propel')}
+            {NAV.find(n => n.id === page)?.label || 'Propel'}
           </span>
         </button>
         <div className="flex items-center gap-2">
@@ -268,11 +249,11 @@ function AppInner() {
       <div className="fixed bottom-0 left-0 right-0 z-50 flex md:hidden bg-white border-t"
            style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
         {[
-          { id: 'dashboard' as Page, label: 'Home' },
           { id: 'dialer'    as Page, label: 'Dial' },
           { id: 'contacts'  as Page, label: 'Contacts' },
-          { id: 'inbox'     as Page, label: 'Inbox' },
           { id: 'pipeline'  as Page, label: 'Pipeline' },
+          { id: 'voicemails' as Page, label: 'VMs' },
+          { id: 'settings'  as Page, label: 'Settings' },
         ].map(({ id, label }) => (
           <button
             key={id}
@@ -298,17 +279,9 @@ function AppInner() {
 
       {/* ── Page content ─────────────────────────────────────────────── */}
       <div className="pt-[49px] pb-[60px] md:pb-0">
-        {/* Onboarding checklist — shown to trial users on dialer/contacts pages */}
-        {(user.plan === 'trial') && (page === 'dialer' || page === 'contacts') && (
-          <OnboardingChecklist onNavigate={(p) => setPage(p as Page)} />
-        )}
-        {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
-        {page === 'agent'        && <AgentConsole />}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
         {page === 'contacts'     && <Contacts onNavigate={(p) => setPage(p as Page)} />}
-        {page === 'blast'        && <Blast />}
         {page === 'voicemails'   && <Voicemails />}
-        {page === 'inbox'        && <Inbox />}
         {page === 'pipeline'     && <Pipeline />}
         {page === 'appointments' && <Appointments />}
         {page === 'analytics'    && <Analytics />}
