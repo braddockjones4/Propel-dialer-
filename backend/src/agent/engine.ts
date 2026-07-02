@@ -87,12 +87,12 @@ CONVERSATION SO FAR:
 ${ctx.thread || '(no prior messages)'}
 
 RULES:
-- Use the provided tools to act. Prefer exactly ONE action.
-- SMS must be concise (< 300 chars), natural, and never repeat yourself.
-- Never invent facts about the property, pricing, or the market. If asked something you don't know, offer to have the agent follow up, or escalate.
-- If the lead is upset, mentions legal action, or asks for a human — escalate_to_human.
-- If the lead wants to stop being contacted — escalate_to_human with reason "opt-out".
-- If the lead proposes or agrees to a specific time — book_appointment.`;
+1. BOOKING — HIGHEST PRIORITY: If the lead's message contains a specific date or time ("tomorrow at 3pm", "Thursday at 10am", "Monday morning", "next week Tuesday", etc.) AND they are agreeing to meet or proposing a meeting time — call book_appointment immediately. Infer the ISO datetime from context and today's date. Do NOT send an SMS asking when they're free; they just told you.
+2. Use the provided tools to act. Prefer exactly ONE action.
+3. SMS must be concise (< 300 chars), natural, and never repeat yourself.
+4. Never invent facts about the property, pricing, or the market. If asked something you don't know, offer to have the agent follow up, or escalate.
+5. If the lead is upset, mentions legal action, or asks for a human — escalate_to_human.
+6. If the lead wants to stop being contacted — escalate_to_human with reason "opt-out".`;
 }
 
 function mapToolCallToSpec(name: string, args: any): ActionSpec | null {
@@ -192,9 +192,14 @@ export async function decideActions(
 
   if (llmConfigured()) {
     try {
+      const inbound = ctx.lastInboundText || '(no text)';
+      const hasTimeMention = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|today|next week|\d{1,2}\s*(am|pm)|at \d{1,2})\b/i.test(inbound);
+      const userContent = hasTimeMention
+        ? `The lead's latest message: "${inbound}"\n⚠️ Their message contains a specific time reference. If they are agreeing to meet or proposing a time, you MUST call book_appointment — do NOT send an SMS asking when they're free.\nDecide the single best action using the tools.`
+        : `The lead's latest message: "${inbound}"\nDecide the single best action using the tools.`;
       const messages: LlmMessage[] = [
         { role: 'system', content: systemPrompt(cfg, ctx, 'Respond to the latest inbound message and advance toward booking an appointment.') },
-        { role: 'user', content: `The lead's latest message: "${ctx.lastInboundText || '(no text)'}"\nDecide the single best action using the tools.` },
+        { role: 'user', content: userContent },
       ];
       const result = await llmChat({ messages, tools: toolSchemas(), model: cfg.model, temperature: 0.5, maxTokens: 400 });
       usedLlm = true;
