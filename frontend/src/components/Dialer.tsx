@@ -77,6 +77,47 @@ const DISPOSITIONS = [
   { key: 'dnc',            label: 'DNC',                color: '#ef4444' },
 ];
 
+// ─── Convert any recorded audio blob to WAV (Twilio-compatible) ──────────────
+// Twilio <Play> supports WAV (PCM). We decode via Web Audio API then re-encode.
+async function blobToWav(blob: Blob): Promise<Blob> {
+  const arrayBuffer = await blob.arrayBuffer();
+  const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+  await audioCtx.close();
+
+  // Render as mono 8 kHz — telephone quality, sufficient for voicemail
+  const sampleRate = 8000;
+  const offlineCtx = new OfflineAudioContext(1, Math.ceil(decoded.duration * sampleRate), sampleRate);
+  const src = offlineCtx.createBufferSource();
+  src.buffer = decoded;
+  src.connect(offlineCtx.destination);
+  src.start(0);
+  const rendered = await offlineCtx.startRendering();
+
+  const pcm = rendered.getChannelData(0);
+  const wavBuf = new ArrayBuffer(44 + pcm.length * 2);
+  const view = new DataView(wavBuf);
+  const w = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+
+  w(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true);
+  w(8, 'WAVE'); w(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);        // PCM
+  view.setUint16(22, 1, true);        // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  w(36, 'data'); view.setUint32(40, pcm.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < pcm.length; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    off += 2;
+  }
+  return new Blob([wavBuf], { type: 'audio/wav' });
+}
+
 function formatPhone(p: string) {
   const d = p.replace(/\D/g, '');
   if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
@@ -319,11 +360,12 @@ export default function Dialer() {
     if (!recBlob) return;
     setRecState('saving');
     try {
-      // Send raw binary — bypasses JSON body size limits
+      // Convert to WAV so Twilio can <Play> it (webm/opus not supported by Twilio)
+      const wavBlob = await blobToWav(recBlob);
       const r = await authFetch(`${API_BASE}/dialer/upload-vm`, {
         method: 'POST',
-        headers: { 'Content-Type': recBlob.type || 'audio/webm' },
-        body: recBlob,
+        headers: { 'Content-Type': 'audio/wav' },
+        body: wavBlob,
       });
       const d = await r.json();
       if (d.error) { alert(d.error); setRecState('preview'); return; }

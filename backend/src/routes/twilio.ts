@@ -8,6 +8,9 @@ import { transcribeAndScoreCall } from './transcription';
 
 const router = Router();
 
+// Track callSid → userId so AMD can use the user's recorded voicemail
+const callToUser = new Map<string, string>();
+
 // ─── POST /api/twilio/token ───────────────────────────────────────────────────
 router.post('/token', (req: Request, res: Response) => {
   try {
@@ -45,6 +48,7 @@ router.post('/token', (req: Request, res: Response) => {
 // TwiML webhook — returns dial instructions with AMD enabled.
 router.post('/voice', async (req: Request, res: Response) => {
   const to = req.body.To as string;
+  const callSid = req.body.CallSid as string;
   const personalCallerId = req.body.CallerId as string | undefined; // set by browser when user has verified personal phone
   const { TWILIO_CALLER_ID } = process.env;
   const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
@@ -56,6 +60,17 @@ router.post('/voice', async (req: Request, res: Response) => {
     res.type('text/xml');
     res.send(twiml.toString());
     return;
+  }
+
+  // Store callSid → userId so AMD can play the user's recorded voicemail
+  if (callSid && personalCallerId) {
+    try {
+      const s = await prisma.dialerSettings.findFirst({
+        where: { personalPhone: personalCallerId },
+        select: { userId: true },
+      });
+      if (s?.userId) callToUser.set(callSid, s.userId);
+    } catch {}
   }
 
   // Use verified personal phone if provided, otherwise fall back to local presence matching
@@ -89,6 +104,9 @@ router.post('/amd-status', async (req: Request, res: Response) => {
   const { AnsweredBy, To, CallSid } = req.body;
   console.log(`[AMD] CallSid: ${CallSid} | AnsweredBy: ${AnsweredBy} | To: ${To}`);
 
+  const userId = callToUser.get(CallSid);
+  callToUser.delete(CallSid); // cleanup
+
   const contact: ContactContext = {
     firstName: 'there',
     fullName: To,
@@ -100,14 +118,29 @@ router.post('/amd-status', async (req: Request, res: Response) => {
 
   if (isMachine && CallSid) {
     console.log(`[AMD] Machine detected — dropping voicemail for ${To}`);
-    // Auto-drop voicemail via REST API
     try {
       const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-      const vmScript = process.env.VOICEMAIL_SCRIPT ||
-        `Hi, this is ${process.env.AGENT_NAME || 'Braddock'} calling about your property. ` +
-        `I'd love to connect — please call me back at ${process.env.AGENT_PHONE || 'my office'}. Thank you and have a great day!`;
       const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-      const dropTwiml = `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`;
+
+      // Use user's recorded voicemail if available, fall back to TTS
+      let dropTwiml: string;
+      if (userId) {
+        const settings = await prisma.dialerSettings.findUnique({
+          where: { userId },
+          select: { voicemailUrl: true },
+        }).catch(() => null);
+        if (settings?.voicemailUrl) {
+          dropTwiml = `<Response><Play>${settings.voicemailUrl}</Play><Hangup/></Response>`;
+          console.log(`[AMD] Playing recorded voicemail from ${settings.voicemailUrl}`);
+        }
+      }
+      if (!dropTwiml!) {
+        const vmScript = process.env.VOICEMAIL_SCRIPT ||
+          `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+          `I'd love to connect — please call me back when you get a chance. Thank you!`;
+        dropTwiml = `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`;
+      }
+
       await client.calls(CallSid).update({ twiml: dropTwiml });
     } catch (err) {
       console.error('[AMD] Failed to drop voicemail:', err);
