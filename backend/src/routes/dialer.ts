@@ -237,13 +237,16 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
     io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
     // Dial the contact (Leg B) with AMD
+    // Use agent's personal phone as caller ID (must be a Twilio Verified Caller ID).
+    // Falls back to local presence number if personal phone isn't set/verified.
     const settings = await prisma.dialerSettings.findUnique({ where: { id: 'singleton' } });
     const localFrom = await pickCallerId(b.contactPhone).catch(() => process.env.TWILIO_CALLER_ID || '');
+    const contactFrom = settings?.personalPhone || localFrom;
 
     try {
       const contactCall = await twilioClient().calls.create({
         to: b.contactPhone,
-        from: localFrom,
+        from: contactFrom,
         machineDetection: 'DetectMessageEnd',
         asyncAmdStatusCallback: `${BACKEND()}/api/dialer/bridge-amd?sessionId=${sessionId}`,
         asyncAmdStatusCallbackMethod: 'POST',
