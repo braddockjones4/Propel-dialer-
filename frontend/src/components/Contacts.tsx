@@ -1,8 +1,12 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import CsvImportModal from './CsvImportModal';
 import { useToast } from './Toast';
 import { ContactListSkeleton } from './Skeleton';
 import { API_BASE, authFetch } from '../config';
+
+interface ContactsProps {
+  onNavigate?: (page: string) => void;
+}
 
 
 interface Contact {
@@ -41,11 +45,28 @@ const SOURCE_LABELS: Record<string, string> = {
 
 const STATUSES = ['all', 'new', 'contacted', 'callback', 'hot'] as const;
 
-export default function Contacts() {
+type GroupFilter = { type: 'all' } | { type: 'source'; value: string } | { type: 'status'; value: string };
+
+const SOURCE_GROUPS = [
+  { value: 'expired',     label: 'Expired Listings',    dot: '#ef4444' },
+  { value: 'fsbo',        label: 'FSBO',                dot: '#3b82f6' },
+  { value: 'circle',      label: 'Circle Prospecting',  dot: '#8b5cf6' },
+  { value: 'past-client', label: 'Past Clients',        dot: '#10b981' },
+  { value: 'manual',      label: 'Manual',              dot: '#9ca3af' },
+];
+
+const STATUS_GROUPS = [
+  { value: 'hot',      label: 'Hot Leads',  icon: '🔥' },
+  { value: 'callback', label: 'Callbacks',  icon: '📞' },
+  { value: 'new',      label: 'New Leads',  icon: '✨' },
+];
+
+export default function Contacts({ onNavigate }: ContactsProps) {
   const toast = useToast();
   const [contacts, setContacts]   = useState<Contact[]>([]);
   const [loading, setLoading]     = useState(true);
   const [filter, setFilter]       = useState('all');
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>({ type: 'all' });
   const [search, setSearch]       = useState('');
   const [selected, setSelected]   = useState<Contact | null>(null);
   const [editNotes, setEditNotes] = useState('');
@@ -140,15 +161,40 @@ export default function Contacts() {
     loadContacts();
   };
 
-  const filtered = contacts.filter(c => {
-    const matchStatus = filter === 'all' || c.status === filter;
+  const filtered = useMemo(() => contacts.filter(c => {
+    const matchGroup =
+      groupFilter.type === 'all' ||
+      (groupFilter.type === 'source' && c.source === groupFilter.value) ||
+      (groupFilter.type === 'status' && c.status === groupFilter.value);
     const q = search.toLowerCase();
     const matchSearch = !q ||
       `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) ||
       c.phone.includes(q) ||
       (c.address || '').toLowerCase().includes(q);
-    return matchStatus && matchSearch;
-  });
+    return matchGroup && matchSearch;
+  }), [contacts, groupFilter, search]);
+
+  // Count contacts per group
+  const groupCount = useCallback((type: 'source' | 'status', value: string) =>
+    contacts.filter(c => type === 'source' ? c.source === value : c.status === value).length
+  , [contacts]);
+
+  // Save group to localStorage and navigate to Dialer
+  const dialGroup = useCallback((gf: GroupFilter, label: string) => {
+    const count = gf.type === 'all' ? contacts.length
+      : gf.type === 'source' ? groupCount('source', (gf as any).value)
+      : groupCount('status', (gf as any).value);
+    localStorage.setItem('dialerGroupFilter', JSON.stringify({
+      ...gf, label, count,
+    }));
+    onNavigate?.('dialer');
+  }, [contacts.length, groupCount, onNavigate]);
+
+  // Active group label
+  const activeGroupLabel = groupFilter.type === 'all' ? 'All Contacts'
+    : groupFilter.type === 'source'
+      ? SOURCE_GROUPS.find(g => g.value === (groupFilter as any).value)?.label || (groupFilter as any).value
+      : STATUS_GROUPS.find(g => g.value === (groupFilter as any).value)?.label || (groupFilter as any).value;
 
   const openContact = (c: Contact) => { setSelected(c); setEditNotes(c.notes || ''); setMobileView('detail'); };
 
@@ -243,27 +289,80 @@ export default function Contacts() {
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-300 tracking-widest">{filtered.length} contacts</span>
+              <span className="text-[10px] tracking-widest" style={{ color: groupFilter.type !== 'all' ? '#9A7A2E' : '#d1d5db' }}>
+              {groupFilter.type !== 'all' ? `${activeGroupLabel} · ` : ''}{filtered.length} contacts
+              {groupFilter.type !== 'all' && (
+                <button onClick={() => setGroupFilter({ type: 'all' })} style={{ marginLeft: 6, fontSize: 9, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer' }}>✕</button>
+              )}
+            </span>
               <button onClick={rescoreAll} className="text-[9px] tracking-widest uppercase hover:underline" style={{ color: '#C9A84C' }}>
                 {scoreMsg || '↺ Score'}
               </button>
             </div>
           )}
 
-          {/* Filter pills — horizontal scroll on mobile */}
-          <div className="flex gap-1.5 overflow-x-auto hide-scrollbar pb-0.5">
-            {STATUSES.map(s => (
-              <button
-                key={s}
-                onClick={() => setFilter(s)}
-                className="px-2.5 py-1 rounded text-[9px] font-semibold tracking-widest uppercase transition-colors border whitespace-nowrap flex-shrink-0"
-                style={filter === s
-                  ? { background: '#C9A84C', borderColor: '#C9A84C', color: '#0A0A0A' }
-                  : { borderColor: '#E0E0E0', color: '#999' }}
+        </div>
+
+        {/* ── Groups panel ─────────────────────────────────── */}
+        <div style={{ borderBottom: '1px solid #f3f4f6', overflowY: 'auto', maxHeight: 230 }}>
+          <div style={{ padding: '10px 12px 8px' }}>
+            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.25em', textTransform: 'uppercase', color: '#d1d5db', marginBottom: 4 }}>
+              By Source
+            </div>
+            {SOURCE_GROUPS.map(g => {
+              const cnt = groupCount('source', g.value);
+              if (cnt === 0) return null;
+              const isActive = groupFilter.type === 'source' && (groupFilter as { type: 'source'; value: string }).value === g.value;
+              return (
+                <div key={g.value}
+                  onClick={() => setGroupFilter({ type: 'source', value: g.value })}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 6, cursor: 'pointer', background: isActive ? 'rgba(201,168,76,0.08)' : 'transparent', marginBottom: 1 }}
+                >
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', background: g.dot, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 11, color: isActive ? '#9A7A2E' : '#374151', fontWeight: isActive ? 600 : 400 }}>{g.label}</span>
+                  <span style={{ fontSize: 10, color: '#9ca3af', minWidth: 18, textAlign: 'right' }}>{cnt}</span>
+                  <button
+                    onClick={e => { e.stopPropagation(); dialGroup({ type: 'source', value: g.value }, g.label); }}
+                    style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: '#0A0A0A', color: '#fff', border: 'none', cursor: 'pointer', letterSpacing: '0.06em', fontWeight: 700, flexShrink: 0 }}
+                  >DIAL</button>
+                </div>
+              );
+            })}
+            <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.25em', textTransform: 'uppercase', color: '#d1d5db', marginTop: 10, marginBottom: 4 }}>
+              By Status
+            </div>
+            {STATUS_GROUPS.map(g => {
+              const cnt = groupCount('status', g.value);
+              if (cnt === 0) return null;
+              const isActive = groupFilter.type === 'status' && (groupFilter as { type: 'status'; value: string }).value === g.value;
+              return (
+                <div key={g.value}
+                  onClick={() => setGroupFilter({ type: 'status', value: g.value })}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 6, cursor: 'pointer', background: isActive ? 'rgba(201,168,76,0.08)' : 'transparent', marginBottom: 1 }}
+                >
+                  <span style={{ fontSize: 11, flexShrink: 0 }}>{g.icon}</span>
+                  <span style={{ flex: 1, fontSize: 11, color: isActive ? '#9A7A2E' : '#374151', fontWeight: isActive ? 600 : 400 }}>{g.label}</span>
+                  <span style={{ fontSize: 10, color: '#9ca3af', minWidth: 18, textAlign: 'right' }}>{cnt}</span>
+                  <button
+                    onClick={e => { e.stopPropagation(); dialGroup({ type: 'status', value: g.value }, g.label); }}
+                    style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: '#0A0A0A', color: '#fff', border: 'none', cursor: 'pointer', letterSpacing: '0.06em', fontWeight: 700, flexShrink: 0 }}
+                  >DIAL</button>
+                </div>
+              );
+            })}
+            <div style={{ marginTop: 8, borderTop: '1px solid #f3f4f6', paddingTop: 8 }}>
+              <div
+                onClick={() => setGroupFilter({ type: 'all' })}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 6px', borderRadius: 6, cursor: 'pointer', background: groupFilter.type === 'all' ? 'rgba(201,168,76,0.08)' : 'transparent' }}
               >
-                {s} <span style={{ opacity: 0.5 }}>({counts[s] ?? 0})</span>
-              </button>
-            ))}
+                <span style={{ flex: 1, fontSize: 11, color: groupFilter.type === 'all' ? '#9A7A2E' : '#374151', fontWeight: groupFilter.type === 'all' ? 600 : 400 }}>All Contacts</span>
+                <span style={{ fontSize: 10, color: '#9ca3af', minWidth: 18, textAlign: 'right' }}>{contacts.length}</span>
+                <button
+                  onClick={e => { e.stopPropagation(); dialGroup({ type: 'all' }, 'All Contacts'); }}
+                  style={{ fontSize: 9, padding: '2px 7px', borderRadius: 4, background: '#0A0A0A', color: '#fff', border: 'none', cursor: 'pointer', letterSpacing: '0.06em', fontWeight: 700, flexShrink: 0 }}
+                >DIAL</button>
+              </div>
+            </div>
           </div>
         </div>
 

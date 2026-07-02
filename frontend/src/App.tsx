@@ -305,7 +305,7 @@ function AppInner() {
         {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
         {page === 'agent'        && <AgentConsole />}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
-        {page === 'contacts'     && <Contacts />}
+        {page === 'contacts'     && <Contacts onNavigate={(p) => setPage(p as Page)} />}
         {page === 'blast'        && <Blast />}
         {page === 'voicemails'   && <Voicemails />}
         {page === 'inbox'        && <Inbox />}

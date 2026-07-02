@@ -60,12 +60,15 @@ const SOURCE_COLORS: Record<string, string> = {
 };
 
 const STATUS_FILTERS = [
-  { value: 'all',         label: 'All Contacts' },
-  { value: 'new',         label: 'New Leads' },
-  { value: 'hot',         label: 'Hot Leads' },
-  { value: 'callback',    label: 'Callbacks' },
-  { value: 'contacted',   label: 'Previously Contacted' },
-  { value: 'past-client', label: 'Past Clients (by source)' },
+  { value: 'all',                 label: 'All Contacts' },
+  { value: 'new',                 label: 'New Leads' },
+  { value: 'hot',                 label: 'Hot Leads' },
+  { value: 'callback',            label: 'Callbacks' },
+  { value: 'contacted',           label: 'Previously Contacted' },
+  { value: 'source:expired',      label: 'Expired Listings' },
+  { value: 'source:fsbo',         label: 'FSBO' },
+  { value: 'source:circle',       label: 'Circle Prospecting' },
+  { value: 'source:past-client',  label: 'Past Clients' },
 ];
 
 const DISPOSITIONS = [
@@ -243,12 +246,29 @@ export default function Dialer() {
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
 
+  // ─── Pre-select group filter from Contacts book ──────────────────────────────
+  useEffect(() => {
+    const stored = localStorage.getItem('dialerGroupFilter');
+    if (!stored) return;
+    try {
+      const gf = JSON.parse(stored);
+      if (gf.type === 'source' && gf.value) {
+        setSessionFilter(`source:${gf.value}`);
+      } else if (gf.type === 'status' && gf.value) {
+        setSessionFilter(gf.value);
+      }
+      // type === 'all' → leave as 'all'
+    } catch {}
+    localStorage.removeItem('dialerGroupFilter');
+  }, []);
+
   // ─── Load contacts ──────────────────────────────────────────────────────────
   const loadContacts = useCallback(async (filter: string) => {
     setLoadingContacts(true);
     try {
+      const isSourceFilter = filter.startsWith('source:');
       let statusParam = filter;
-      if (filter === 'past-client') statusParam = 'all';
+      if (filter === 'past-client' || isSourceFilter) statusParam = 'all';
       const r = await authFetch(
         `${API_BASE}/dialer/contacts?status=${statusParam === 'all' ? 'all' : statusParam}&limit=200`
       );
@@ -257,6 +277,9 @@ export default function Dialer() {
 
       if (filter === 'past-client') {
         data = data.filter(c => c.source === 'past-client');
+      } else if (isSourceFilter) {
+        const sourceVal = filter.replace('source:', '');
+        data = data.filter(c => c.source === sourceVal);
       }
 
       // Pin Braddock Jones first for demo
