@@ -113,7 +113,7 @@ export default function Landing({ onSignIn }: Props) {
       {/* ── HERO ────────────────────────────────────────────────────────────── */}
       <section style={{ position: 'relative', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: BLACK, overflow: 'hidden' }}>
         <div style={{ position: 'absolute', inset: 0 }}>
-          <img src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=1600&q=80" alt=""
+          <img src="https://images.unsplash.com/photo-1762979790868-3bf9153b84cc?auto=format&fit=crop&w=1600&q=80" alt=""
             style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', opacity: 0.35 }} />
         </div>
         <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '140px 24px 120px', maxWidth: 700, margin: '0 auto' }}>
