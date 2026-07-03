@@ -36,6 +36,7 @@ import teamRoutes from './routes/team';
 import dialerRoutes, { webhooks as dialerWebhooks } from './routes/dialer';
 import settingsRoutes from './routes/settings';
 import agentRoutes from './routes/agent';
+import agentChatRoutes from './routes/agentChat';
 import contactGroupRoutes from './routes/contactGroups';
 import { initAgentScheduler } from './agent/scheduler';
 import { ensureAgentSchema } from './agent/ensureSchema';
@@ -70,6 +71,7 @@ app.use('/api/local-presence', requireAuth, localPresenceRoutes);
 app.use('/api/analytics',      requireAuth, analyticsRoutes);
 app.use('/api/settings',       requireAuth, settingsRoutes);
 app.use('/api/agent',          requireAuth, agentRoutes);
+app.use('/api/agent',          requireAuth, agentChatRoutes);
 app.use('/api/contact-groups', requireAuth, contactGroupRoutes);
 app.use('/api/dialer',         dialerWebhooks);        // public Twilio webhooks (no auth)
 app.use('/api/dialer',         requireAuth, dialerRoutes); // authenticated dialer endpoints

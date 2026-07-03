@@ -32,8 +32,9 @@ import Pipeline from './components/Pipeline';
 import Appointments from './components/Appointments';
 import Voicemails from './components/Voicemails';
 import Dashboard from './components/Dashboard';
+import AgentChat from './components/AgentChat';
 
-type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'settings' | 'billing';
+type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'settings' | 'billing';
 
 const NAV: { id: Page; label: string }[] = [
   { id: 'dashboard',    label: 'Home'       },
@@ -43,6 +44,7 @@ const NAV: { id: Page; label: string }[] = [
   { id: 'appointments', label: 'Calendar'   },
   { id: 'voicemails',   label: 'Voicemails' },
   { id: 'analytics',    label: 'Analytics'  },
+  { id: 'agent',        label: 'AI Agent'   },
   { id: 'settings',     label: 'Settings'   },
 ];
 
@@ -254,7 +256,7 @@ function AppInner() {
           { id: 'dashboard' as Page, label: 'Home' },
           { id: 'dialer'    as Page, label: 'Dial' },
           { id: 'contacts'  as Page, label: 'Contacts' },
-          { id: 'pipeline'  as Page, label: 'Pipeline' },
+          { id: 'agent'     as Page, label: 'AI' },
           { id: 'settings'  as Page, label: 'Settings' },
         ].map(({ id, label }) => (
           <button
@@ -288,6 +290,7 @@ function AppInner() {
         {page === 'pipeline'     && <Pipeline />}
         {page === 'appointments' && <Appointments />}
         {page === 'analytics'    && <Analytics />}
+        {page === 'agent'        && <AgentChat />}
         {page === 'settings'     && <Settings />}
         {page === 'billing'      && <Billing />}
       </div>
