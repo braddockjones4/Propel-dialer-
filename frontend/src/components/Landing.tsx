@@ -209,7 +209,7 @@ export default function Landing({ onSignIn }: Props) {
           <div style={{ marginBottom: 56 }}>
             <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.4em', textTransform: 'uppercase', color: GOLD, marginBottom: 14 }}>Live Work</div>
             <h2 className="serif" style={{ fontSize: 'clamp(28px, 4vw, 46px)', fontWeight: 300, color: BLACK, margin: '0 0 16px', lineHeight: 1.1 }}>
-              Propel — AI Dialing System<br /><em style={{ fontStyle: 'italic', color: GOLDDARK }}>for Real Estate</em>
+              Real Estate AI<br /><em style={{ fontStyle: 'italic', color: GOLDDARK }}>Custom AI Dialing System</em>
             </h2>
             <p style={{ fontSize: 14, color: GRAY, maxWidth: 480, lineHeight: 1.85, margin: 0 }}>
               A fully operational system built for a real estate agent — power dialing with automatic voicemail drop, AI-generated call scripts, full contact management, and an AI agent that works your pipeline on command.
@@ -239,7 +239,7 @@ export default function Landing({ onSignIn }: Props) {
             <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 24px 64px rgba(0,0,0,0.1)' }}>
               <div style={{ background: '#1a1a1a', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {['#ff5f57','#febc2e','#28c840'].map(c => <div key={c} style={{ width: 8, height: 8, borderRadius: '50%', background: c }} />)}
-                <div style={{ flex: 1, background: '#2a2a2a', borderRadius: 3, padding: '3px 10px', marginLeft: 6, fontSize: 9.5, color: '#444' }}>propelsolutions.com</div>
+                <div style={{ flex: 1, background: '#2a2a2a', borderRadius: 3, padding: '3px 10px', marginLeft: 6, fontSize: 9.5, color: '#444' }}>realestateai.app</div>
               </div>
               <div style={{ background: '#fafafa', display: 'flex', height: 340 }}>
                 <div style={{ width: 140, background: '#fff', borderRight: '1px solid #f0f0f0', padding: '12px 0', flexShrink: 0 }}>
