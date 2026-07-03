@@ -4,28 +4,8 @@ import { computeLeadScore, scoreAllContacts } from '../leadScore';
 
 const router = Router();
 
-// Plan → contact limit (-1 = unlimited)
-const CONTACT_LIMITS: Record<string, number> = {
-  trial:   1000,
-  starter: 1000,
-  pro:     2500,
-  elite:   -1,
-};
-
-async function checkContactLimit(req: any, res: Response): Promise<boolean> {
-  const plan  = req.user?.plan || 'trial';
-  const role  = req.user?.role;
-  const limit = role === 'admin' ? -1 : (CONTACT_LIMITS[plan] ?? 1000);
-  if (limit === -1) return true;
-  const count = await prisma.contact.count();
-  if (count >= limit) {
-    res.status(403).json({
-      error: `Contact limit reached (${limit} on ${plan} plan). Upgrade to add more.`,
-      limit,
-      count,
-    });
-    return false;
-  }
+// No plan-based contact limits — single-client deployment
+async function checkContactLimit(_req: any, _res: Response): Promise<boolean> {
   return true;
 }
 
@@ -80,10 +60,16 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // POST /api/contacts/import
+// Accepts either a raw array [ {...}, ... ] or { contacts: [ {...}, ... ] }
 router.post('/import', async (req: Request, res: Response) => {
   if (!await checkContactLimit(req, res)) return;
-  const rows = req.body as Array<Record<string, string>>;
-  if (!Array.isArray(rows)) { res.status(400).json({ error: 'Body must be an array' }); return; }
+  const body = req.body;
+  const rows: Array<Record<string, string>> = Array.isArray(body)
+    ? body
+    : Array.isArray(body?.contacts)
+      ? body.contacts
+      : [];
+  if (!rows.length) { res.status(400).json({ error: 'No contacts provided' }); return; }
 
   const data = rows.map(r => ({
     firstName: r.firstName || r.first_name || r['First Name'] || '',

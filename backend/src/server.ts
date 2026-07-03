@@ -29,7 +29,7 @@ import appointmentRoutes from './routes/appointments';
 import emailRoutes from './routes/email';
 import nextActionRoutes from './routes/nextAction';
 import reportsRoutes from './routes/reports';
-import authRoutes, { requireAuth, requirePlan } from './routes/auth';
+import authRoutes, { requireAuth } from './routes/auth';
 import promoRoutes from './routes/promo';
 import billingRoutes from './routes/billing';
 import teamRoutes from './routes/team';
@@ -63,39 +63,34 @@ app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 app.use('/api/twilio',         twilioRoutes);
 app.post('/api/twilio/sms-inbound', handleInboundSms);
 
-// Starter+ (requireAuth covers starter, pro, elite, trial, admin)
-app.use('/api/contacts',       requireAuth, contactRoutes);
-app.use('/api/blast',          requireAuth, blastRoutes);
-app.use('/api/inbox',          requireAuth, inboxRoutes);
-app.use('/api/local-presence', requireAuth, localPresenceRoutes);
-app.use('/api/analytics',      requireAuth, analyticsRoutes);
-app.use('/api/settings',       requireAuth, settingsRoutes);
-app.use('/api/agent',          requireAuth, agentRoutes);
-app.use('/api/agent',          requireAuth, agentChatRoutes);
-app.use('/api/contact-groups', requireAuth, contactGroupRoutes);
-app.use('/api/dialer',         dialerWebhooks);        // public Twilio webhooks (no auth)
-app.use('/api/dialer',         requireAuth, dialerRoutes); // authenticated dialer endpoints
+// All features available to any authenticated user (no plan gating)
+app.use('/api/contacts',        requireAuth, contactRoutes);
+app.use('/api/blast',           requireAuth, blastRoutes);
+app.use('/api/inbox',           requireAuth, inboxRoutes);
+app.use('/api/local-presence',  requireAuth, localPresenceRoutes);
+app.use('/api/analytics',       requireAuth, analyticsRoutes);
+app.use('/api/settings',        requireAuth, settingsRoutes);
+app.use('/api/agent',           requireAuth, agentRoutes);
+app.use('/api/agent',           requireAuth, agentChatRoutes);
+app.use('/api/contact-groups',  requireAuth, contactGroupRoutes);
+app.use('/api/dialer',          dialerWebhooks);       // public Twilio webhooks (no auth)
+app.use('/api/dialer',          requireAuth, dialerRoutes);
+app.use('/api/sequences',       requireAuth, sequenceRoutes);
+app.use('/api/triple-dial',     requireAuth, tripleDialRoutes);
+app.use('/api/blast/scheduled', requireAuth, scheduledBlastRoutes);
+app.use('/api/voicemail-blast', requireAuth, voicemailBlastRoutes);
+app.use('/api/ai-script',       requireAuth, aiScriptRoutes);
+app.use('/api/dnc',             requireAuth, dncRoutes);
+app.use('/api/appointments',    requireAuth, appointmentRoutes);
+app.use('/api/email',           requireAuth, emailRoutes);
+app.use('/api/reports',         requireAuth, reportsRoutes);
+app.use('/api/next-action',     requireAuth, nextActionRoutes);
+app.use('/api/transcription',   requireAuth, transcriptionRoutes);
 
-// Pro+ features
-app.use('/api/sequences',      requireAuth, requirePlan('pro', 'elite'), sequenceRoutes);
-app.use('/api/triple-dial',    requireAuth, requirePlan('pro', 'elite'), tripleDialRoutes);
-app.use('/api/blast/scheduled',requireAuth, requirePlan('pro', 'elite'), scheduledBlastRoutes);
-app.use('/api/voicemail-blast',requireAuth, requirePlan('pro', 'elite'), voicemailBlastRoutes);
-app.use('/api/ai-script',      requireAuth, requirePlan('pro', 'elite'), aiScriptRoutes);
-app.use('/api/dnc',            requireAuth, requirePlan('pro', 'elite'), dncRoutes);
-app.use('/api/appointments',   requireAuth, requirePlan('pro', 'elite'), appointmentRoutes);
-app.use('/api/email',          requireAuth, requirePlan('pro', 'elite'), emailRoutes);
-app.use('/api/reports',        requireAuth, requirePlan('pro', 'elite'), reportsRoutes);
-
-// Elite-only features
-app.use('/api/next-action',    requireAuth, requirePlan('elite'), nextActionRoutes);
-app.use('/api/transcription',  requireAuth, requirePlan('elite'), transcriptionRoutes);
-
-// Auth & billing (public or self-gated)
-app.use('/api/auth',           authRoutes);
-app.use('/api/billing',        billingRoutes);
-app.use('/api/promo',          promoRoutes);
-app.use('/api/team',           requireAuth, teamRoutes);
+// Auth & team (billing routes kept but unused)
+app.use('/api/auth',            authRoutes);
+app.use('/api/promo',           promoRoutes);
+app.use('/api/team',            requireAuth, teamRoutes);
 
 // Health check
 app.get('/health', (_req, res) => {

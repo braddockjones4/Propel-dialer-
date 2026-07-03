@@ -21,7 +21,6 @@ import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import Landing from './components/Landing';
-import Billing from './components/Billing';
 import NotificationBell from './components/NotificationBell';
 import Dialer from './components/Dialer';
 import TripleDialer from './components/TripleDialer';
@@ -34,7 +33,7 @@ import Voicemails from './components/Voicemails';
 import Dashboard from './components/Dashboard';
 import AgentChat from './components/AgentChat';
 
-type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'settings' | 'billing';
+type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'settings';
 
 const NAV: { id: Page; label: string }[] = [
   { id: 'dashboard',    label: 'Home'       },
@@ -55,12 +54,6 @@ function AppInner() {
   const [tripleMode, setTripleMode] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
-
-  // Check URL param for post-Stripe redirect
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('billing') === 'success' && page !== 'settings') {
-    window.history.replaceState({}, '', '/');
-  }
 
   if (loading) {
     return (
@@ -87,13 +80,6 @@ function AppInner() {
     if (showLogin) return <Login onBack={() => setShowLogin(false)} />;
     return <Landing onSignIn={() => setShowLogin(true)} />;
   }
-
-  const PLAN_BADGE: Record<string, string> = {
-    trial:   '7-day Trial',
-    starter: 'Starter',
-    pro:     'Pro',
-    elite:   'Elite',
-  };
 
   return (
     <>
@@ -160,19 +146,7 @@ function AppInner() {
 
           <NotificationBell onNavigate={(p) => setPage(p as any)} />
 
-          <button
-            onClick={() => setPage('billing')}
-            style={{
-              fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
-              padding: '3px 8px', borderRadius: 10,
-              border: '1px solid rgba(201,168,76,0.4)', color: '#9A7A2E',
-              background: 'rgba(201,168,76,0.07)', cursor: 'pointer',
-            }}
-          >
-            {PLAN_BADGE[user.plan] || user.plan}
-          </button>
-
-          <div style={{ fontSize: 10, color: '#9ca3af', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 10, color: '#9ca3af', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {user.name || user.email}
           </div>
 
@@ -216,15 +190,9 @@ function AppInner() {
         <div className="fixed inset-0 z-40 md:hidden" style={{ top: 49 }}>
           <div className="absolute inset-0 bg-black/30" onClick={() => setMobileNavOpen(false)} />
           <div className="absolute top-0 left-0 right-0 bg-white shadow-xl overflow-y-auto" style={{ maxHeight: '80vh' }}>
-            {/* User + plan row */}
+            {/* User row */}
             <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: '#f3f4f6', background: '#fafafa' }}>
-              <div>
-                <div className="text-xs font-semibold text-gray-700 truncate" style={{ maxWidth: 180 }}>{user.name || user.email}</div>
-                <button onClick={() => { setPage('billing'); setMobileNavOpen(false); }}
-                  style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', padding: '2px 7px', borderRadius: 8, border: '1px solid rgba(201,168,76,0.4)', color: '#9A7A2E', background: 'rgba(201,168,76,0.07)', cursor: 'pointer', marginTop: 3 }}>
-                  {PLAN_BADGE[user.plan] || user.plan}
-                </button>
-              </div>
+              <div className="text-xs font-semibold text-gray-700 truncate" style={{ maxWidth: 200 }}>{user.name || user.email}</div>
               <button onClick={logout} style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.05em' }}>
                 Sign out
               </button>
@@ -292,7 +260,6 @@ function AppInner() {
         {page === 'analytics'    && <Analytics />}
         {page === 'agent'        && <AgentChat />}
         {page === 'settings'     && <Settings />}
-        {page === 'billing'      && <Billing />}
       </div>
 
       <style>{`

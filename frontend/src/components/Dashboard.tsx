@@ -52,7 +52,6 @@ export default function Dashboard({ onNavigate }: Props) {
     { label: 'Start Dialing', sub: 'Work your contact queue', page: 'dialer', gold: true },
     { label: 'Contacts',      sub: 'Browse & manage your CRM', page: 'contacts', gold: false },
     { label: 'Pipeline',      sub: 'Track deals by stage',     page: 'pipeline', gold: false },
-    { label: 'Inbox',         sub: 'Check inbound messages',   page: 'inbox',    gold: false },
   ];
 
   const pipelineStages = [
@@ -128,38 +127,6 @@ export default function Dashboard({ onNavigate }: Props) {
                   </div>
                 </div>
                 <span style={{ fontSize: 14, color: a.gold ? '#C9A84C' : '#d1d5db' }}>→</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Pipeline snapshot */}
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af' }}>
-              Pipeline
-            </div>
-            <button onClick={() => onNavigate('pipeline')} style={{ fontSize: 10, color: '#C9A84C', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.05em' }}>
-              View all →
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {pipelineStages.map(s => (
-              <button
-                key={s.key}
-                onClick={() => onNavigate('pipeline')}
-                style={{
-                  flex: 1, padding: '14px 10px', borderRadius: 10, textAlign: 'center',
-                  background: '#fff', border: `1px solid ${STAGE_COLORS[s.key]}25`,
-                  cursor: 'pointer', transition: 'all 0.15s',
-                }}
-              >
-                <div style={{ fontSize: 26, fontWeight: 300, color: STAGE_COLORS[s.key], lineHeight: 1 }}>
-                  {loading ? '—' : s.count}
-                </div>
-                <div style={{ fontSize: 9, color: '#9ca3af', letterSpacing: '0.1em', textTransform: 'uppercase', marginTop: 4 }}>
-                  {s.label}
-                </div>
               </button>
             ))}
           </div>
