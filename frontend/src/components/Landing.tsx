@@ -220,16 +220,16 @@ export default function Landing({ onSignIn }: Props) {
             {/* Feature list */}
             <div>
               {[
-                { icon: '📞', title: 'Triple-Line Power Dialer',   desc: 'Calls three leads at once. Connects the moment someone picks up. Drops voicemail automatically.' },
-                { icon: '🤖', title: 'AI Script Generation',       desc: 'Personalized opener, objection handlers, and close — generated before the dial.' },
-                { icon: '💬', title: 'Automated SMS Sequences',    desc: 'Follow-up texts go out automatically after every call, for weeks.' },
-                { icon: '🧠', title: '24/7 Autonomous Agent',      desc: 'Responds to inbound texts, qualifies leads, and books appointments overnight.' },
-              ].map(({ icon, title, desc }) => (
-                <div key={title} style={{ display: 'flex', gap: 16, marginBottom: 28 }}>
-                  <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>{icon}</span>
+                { title: 'Triple-Line Power Dialer',   desc: 'Dials three contacts simultaneously. The moment someone picks up, it connects you instantly and drops a pre-recorded voicemail on every no-answer.' },
+                { title: 'AI-Generated Call Scripts',  desc: 'Before every dial, the system generates a personalized script based on the contact — opener, objection responses, and close.' },
+                { title: 'Contact Management',         desc: 'A full CRM built into the system. Contacts organized by group, status, and lead score. Every call logged automatically.' },
+                { title: 'AI Agent',                   desc: 'A built-in AI that can manage contacts, update statuses, answer questions about your pipeline, and take action on your behalf.' },
+              ].map(({ title, desc }) => (
+                <div key={title} style={{ display: 'flex', gap: 16, marginBottom: 32 }}>
+                  <div style={{ width: 3, borderRadius: 2, background: 'rgba(201,168,76,0.25)', flexShrink: 0, marginTop: 3 }} />
                   <div>
-                    <div style={{ fontSize: 12.5, fontWeight: 700, color: BLACK, marginBottom: 5 }}>{title}</div>
-                    <div style={{ fontSize: 12, color: GRAY, lineHeight: 1.7 }}>{desc}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: BLACK, marginBottom: 6, letterSpacing: '0.01em' }}>{title}</div>
+                    <div style={{ fontSize: 12.5, color: GRAY, lineHeight: 1.75 }}>{desc}</div>
                   </div>
                 </div>
               ))}
