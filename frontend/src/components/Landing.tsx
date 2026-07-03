@@ -212,7 +212,7 @@ export default function Landing({ onSignIn }: Props) {
               Propel — AI Dialing System<br /><em style={{ fontStyle: 'italic', color: GOLDDARK }}>for Real Estate</em>
             </h2>
             <p style={{ fontSize: 14, color: GRAY, maxWidth: 480, lineHeight: 1.85, margin: 0 }}>
-              A fully operational system built for a real estate agent — triple-line power dialing, AI-generated scripts, automated SMS follow-up, and an autonomous agent that qualifies leads and books appointments around the clock.
+              A fully operational system built for a real estate agent — power dialing with automatic voicemail drop, AI-generated call scripts, full contact management, and an AI agent that works your pipeline on command.
             </p>
           </div>
 
@@ -220,7 +220,7 @@ export default function Landing({ onSignIn }: Props) {
             {/* Feature list */}
             <div>
               {[
-                { title: 'Triple-Line Power Dialer',   desc: 'Dials three contacts simultaneously. The moment someone picks up, it connects you instantly and drops a pre-recorded voicemail on every no-answer.' },
+                { title: 'Power Dialer',   desc: 'Work through your contact list efficiently. On every no-answer, the system drops your pre-recorded voicemail automatically so you never have to leave one manually.' },
                 { title: 'AI-Generated Call Scripts',  desc: 'Before every dial, the system generates a personalized script based on the contact — opener, objection responses, and close.' },
                 { title: 'Contact Management',         desc: 'A full CRM built into the system. Contacts organized by group, status, and lead score. Every call logged automatically.' },
                 { title: 'AI Agent',                   desc: 'A built-in AI that can manage contacts, update statuses, answer questions about your pipeline, and take action on your behalf.' },
