@@ -391,7 +391,7 @@ export default function Contacts({ onNavigate }: ContactsProps) {
           onClick={() => setShowImport(true)}
           style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', background: 'transparent', color: '#6b7280', cursor: 'pointer' }}
         >
-          Import CSV
+          Import Contacts
         </button>
         <button
           onClick={() => { setCreatingGroup(true); setNewGroupName(''); setNewGroupColor(GROUP_COLORS[0]); }}
@@ -698,7 +698,7 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                     Create a Group
                   </button>
                   <button onClick={() => setShowImport(true)} style={{ padding: '9px 20px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 12, cursor: 'pointer' }}>
-                    Import CSV
+                    Import Contacts
                   </button>
                 </div>
               </div>
