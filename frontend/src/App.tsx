@@ -69,8 +69,8 @@ function AppInner() {
             <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-load)"/>
           </svg>
         </div>
-        <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 22, fontWeight: 300, letterSpacing: '0.5em', color: '#C9A84C' }}>
-          PROPEL
+        <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 18, fontWeight: 300, letterSpacing: '0.3em', color: '#C9A84C' }}>
+          Real Estate AI
         </div>
       </div>
     );
@@ -97,7 +97,7 @@ function AppInner() {
             </defs>
             <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-nav-app)"/>
           </svg>
-          <span className="font-serif font-light text-xl text-black" style={{ letterSpacing: '0.4em' }}>PROPEL</span>
+          <span className="font-serif font-light text-xl text-black" style={{ letterSpacing: '0.2em' }}>Real Estate AI</span>
         </div>
 
         <div className="w-px h-4 mr-6" style={{ background: 'rgba(201,168,76,0.3)' }} />

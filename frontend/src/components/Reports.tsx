@@ -74,7 +74,7 @@ export default function Reports() {
             {/* Print header */}
             <div className="hidden print:flex items-center justify-between mb-8 pb-4 border-b-2" style={{ borderColor: '#C9A84C' }}>
               <div>
-                <div className="text-2xl font-light tracking-widest" style={{ color: '#C9A84C' }}>PROPEL</div>
+                <div className="text-2xl font-light tracking-widest" style={{ color: '#C9A84C' }}>Real Estate AI</div>
                 <div className="text-sm text-gray-500">Daily Activity Report</div>
               </div>
               <div className="text-right">

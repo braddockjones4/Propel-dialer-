@@ -243,7 +243,7 @@ export default function Landing({ onSignIn }: Props) {
               </div>
               <div style={{ background: '#fafafa', display: 'flex', height: 340 }}>
                 <div style={{ width: 140, background: '#fff', borderRight: '1px solid #f0f0f0', padding: '12px 0', flexShrink: 0 }}>
-                  <div style={{ padding: '0 12px 14px', fontFamily: "'Cormorant Garamond', serif", fontSize: 11, fontWeight: 300, letterSpacing: '0.4em', color: GOLD }}>PROPEL</div>
+                  <div style={{ padding: '0 12px 14px', fontFamily: "'Cormorant Garamond', serif", fontSize: 10, fontWeight: 300, letterSpacing: '0.18em', color: GOLD }}>Real Estate AI</div>
                   {['Dialer','Contacts','AI Agent','Calendar','Analytics'].map((item, i) => (
                     <div key={item} style={{ padding: '7px 12px', fontSize: 8.5, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: i === 0 ? GOLD : '#ccc', background: i === 0 ? 'rgba(201,168,76,0.05)' : 'transparent', borderLeft: i === 0 ? `2px solid ${GOLD}` : '2px solid transparent' }}>
                       {item}
