@@ -320,7 +320,7 @@ export default function Settings() {
               </div>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={openPortal} style={btnOutline}>Manage / Cancel →</button>
-                <button onClick={() => window.open('https://propeldialer.com/pricing', '_blank')} style={btnPrimary}>Upgrade Plan</button>
+                <button onClick={() => window.open('https://propelsolutions.com', '_blank')} style={btnPrimary}>Upgrade Plan</button>
               </div>
             </div>
           </Section>

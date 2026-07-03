@@ -239,7 +239,7 @@ export default function Landing({ onSignIn }: Props) {
             <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.08)', boxShadow: '0 24px 64px rgba(0,0,0,0.1)' }}>
               <div style={{ background: '#1a1a1a', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
                 {['#ff5f57','#febc2e','#28c840'].map(c => <div key={c} style={{ width: 8, height: 8, borderRadius: '50%', background: c }} />)}
-                <div style={{ flex: 1, background: '#2a2a2a', borderRadius: 3, padding: '3px 10px', marginLeft: 6, fontSize: 9.5, color: '#444' }}>propeldialer.com</div>
+                <div style={{ flex: 1, background: '#2a2a2a', borderRadius: 3, padding: '3px 10px', marginLeft: 6, fontSize: 9.5, color: '#444' }}>propelsolutions.com</div>
               </div>
               <div style={{ background: '#fafafa', display: 'flex', height: 340 }}>
                 <div style={{ width: 140, background: '#fff', borderRight: '1px solid #f0f0f0', padding: '12px 0', flexShrink: 0 }}>
