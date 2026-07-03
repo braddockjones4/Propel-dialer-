@@ -67,7 +67,7 @@ export default function Landing({ onSignIn }: Props) {
         <span className="serif" style={{ fontSize: 17, fontWeight: 300, letterSpacing: '0.55em', color: scrolled ? BLACK : '#fff' }}>PROPEL</span>
 
         <div className="nav-desktop" style={{ display: 'flex', alignItems: 'center', gap: 36 }}>
-          {['Work', 'Services', 'Contact'].map(label => (
+          {['Why', 'Work', 'Services', 'Contact'].map(label => (
             <button key={label} className="nav-lnk"
               onClick={() => scrollTo(label.toLowerCase())}
               style={{ color: scrolled ? GRAY : 'rgba(255,255,255,0.6)' }}
@@ -97,7 +97,7 @@ export default function Landing({ onSignIn }: Props) {
 
       {mobileOpen && (
         <div style={{ position: 'fixed', top: 60, left: 0, right: 0, zIndex: 199, background: '#fff', borderBottom: '1px solid #f0f0f0', padding: '6px 0 14px' }}>
-          {['Work', 'Services', 'Contact'].map(label => (
+          {['Why', 'Work', 'Services', 'Contact'].map(label => (
             <button key={label} onClick={() => scrollTo(label.toLowerCase())}
               style={{ display: 'block', width: '100%', textAlign: 'left', padding: '12px 28px', background: 'none', border: 'none', fontSize: 11, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: GRAY, cursor: 'pointer' }}>
               {label}
@@ -136,6 +136,68 @@ export default function Landing({ onSignIn }: Props) {
               onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
               See the Work
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* ── WHY ─────────────────────────────────────────────────────────────── */}
+      <section id="why" style={{ padding: '100px 24px', background: '#fff' }}>
+        <div style={{ maxWidth: 860, margin: '0 auto' }}>
+          <div style={{ textAlign: 'center', marginBottom: 72 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.4em', textTransform: 'uppercase', color: GOLD, marginBottom: 14 }}>Why AI</div>
+            <h2 className="serif" style={{ fontSize: 'clamp(30px, 4.5vw, 52px)', fontWeight: 300, color: BLACK, lineHeight: 1.1, margin: '0 0 20px' }}>
+              You're good at your job.<br />
+              <em style={{ fontStyle: 'italic', color: GOLDDARK }}>The repetitive parts are killing it.</em>
+            </h2>
+            <p style={{ fontSize: 15, color: GRAY, maxWidth: 520, margin: '0 auto', lineHeight: 1.9 }}>
+              Most people think AI is about replacing work. It's not. It's about getting your hours back so you can do the parts of your job that actually move the needle.
+            </p>
+          </div>
+
+          {/* Story blocks */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+            {[
+              {
+                number: '01',
+                heading: 'You spend half your day on people who never pick up.',
+                body: "Dialing through a list of 200 contacts and reaching 12 of them is demoralizing. It's not a skill problem - it's a volume problem. An AI system works through that list automatically, connects you the instant someone answers, and leaves a voicemail on every no-answer without you touching the phone. You show up to conversations, not to dialing.",
+              },
+              {
+                number: '02',
+                heading: 'Follow-up falls through the cracks - not because you forgot, because you ran out of day.',
+                body: "The lead who said call me back in two weeks gets lost. The person who texted back at 9pm goes unanswered until morning. Deals die in the gaps between conversations. An automated follow-up system sends the right message at the right time without you having to remember any of it. Your leads feel taken care of even when you're offline.",
+              },
+              {
+                number: '03',
+                heading: "The agents winning right now aren't working harder. They have better systems.",
+                body: "The top producers in every market aren't superhuman. They've removed the friction between them and their best clients. They're not spending Tuesday morning cold calling - they're taking the appointment the system booked for them on Monday night. That gap is closeable. That's what this is.",
+              },
+              {
+                number: '04',
+                heading: "Your time is the one thing you can't make more of.",
+                body: "Every hour spent on repetitive tasks is an hour you're not spending with clients, at the kitchen table negotiating a deal, or with your family. AI doesn't give you a robot - it gives you leverage. You do more with the time you have, and you stop losing deals to agents who simply responded faster.",
+              },
+            ].map(({ number, heading, body }, _i) => (
+              <div key={number} style={{
+                display: 'grid', gridTemplateColumns: '80px 1fr', gap: '0 40px',
+                padding: '48px 0',
+                borderTop: '1px solid rgba(0,0,0,0.06)',
+              }}>
+                <div className="serif" style={{ fontSize: 40, fontWeight: 300, color: 'rgba(201,168,76,0.2)', lineHeight: 1, paddingTop: 4 }}>{number}</div>
+                <div>
+                  <h3 style={{ fontSize: 17, fontWeight: 600, color: BLACK, lineHeight: 1.35, margin: '0 0 14px' }}>{heading}</h3>
+                  <p style={{ fontSize: 14, color: GRAY, lineHeight: 1.9, margin: 0, maxWidth: 580 }}>{body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ textAlign: 'center', paddingTop: 64 }}>
+            <button onClick={() => scrollTo('contact')} style={{ padding: '14px 40px', background: GOLD, color: '#fff', border: 'none', borderRadius: 3, fontSize: 10, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', cursor: 'pointer' }}
+              onMouseEnter={e => (e.currentTarget.style.background = GOLDDARK)}
+              onMouseLeave={e => (e.currentTarget.style.background = GOLD)}>
+              Let's Talk →
             </button>
           </div>
         </div>
