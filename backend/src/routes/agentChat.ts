@@ -3,21 +3,21 @@
 // the agent interprets them, calls tools, executes real actions, and returns
 // a rich response showing exactly what was done.
 //
-// Tool execution is 2-pass:
-//   1. LLM call → may return tool_use blocks
-//   2. Execute all tools in parallel → collect results
-//   3. Second LLM call with tool results → final human-readable reply
+// Tool execution uses a MULTI-TURN AGENTIC LOOP:
+//   while (LLM returns tool_use blocks, up to 5 passes):
+//     execute all tools in parallel → append results → call LLM again
+//   final LLM response (no tool calls) → send to client
 //
 import { Router, Request, Response } from 'express';
 import prisma from '../db';
-import { llmChat, llmConfigured, LlmMessage, LlmToolSchema } from '../agent/llm';
+import { llmChat, llmConfigured, activeProvider, LlmMessage } from '../agent/llm';
 import { sendSmsNow } from '../agent/executor';
 import { io } from '../socket';
 
 const router = Router();
 
 // ── Tool schemas ──────────────────────────────────────────────────────────────
-const CHAT_TOOLS: LlmToolSchema[] = [
+const CHAT_TOOLS = [
   {
     name: 'get_stats',
     description: 'Get a live summary of the contacts database: counts by status, by group, total contacts, recent calls, upcoming appointments.',
@@ -40,7 +40,7 @@ const CHAT_TOOLS: LlmToolSchema[] = [
   },
   {
     name: 'get_contact',
-    description: 'Get full details for a single contact by name or phone number.',
+    description: 'Get full details for a single contact by name or phone number. Use this ONLY when you need to inspect a contact\'s details, history, or look up their ID before doing something else.',
     parameters: {
       type: 'object',
       properties: {
@@ -70,15 +70,15 @@ const CHAT_TOOLS: LlmToolSchema[] = [
   },
   {
     name: 'assign_to_group',
-    description: 'Assign one or more contacts to a group. Creates the group if it does not exist. Can target contacts by ID list, or by filter (status/source/query).',
+    description: 'Assign one or more contacts to a group. Creates the group if it does not exist. PREFERRED: use filter_query with the contact name rather than looking up the ID first.',
     parameters: {
       type: 'object',
       properties: {
-        group_name:  { type: 'string', description: 'Name of the target group.' },
-        contact_ids: { type: 'array',  items: { type: 'string' }, description: 'Specific contact IDs to assign. Leave empty to use filters instead.' },
+        group_name:    { type: 'string', description: 'Name of the target group.' },
+        contact_ids:   { type: 'array',  items: { type: 'string' }, description: 'Specific contact IDs to assign. Leave empty to use filter_query instead.' },
         filter_status: { type: 'string', description: 'Assign all contacts matching this status.' },
         filter_source: { type: 'string', description: 'Assign all contacts matching this source.' },
-        filter_query:  { type: 'string', description: 'Assign all contacts matching this name/phone search.' },
+        filter_query:  { type: 'string', description: 'Name or phone search — assign all matching contacts to the group. Use this instead of looking up the contact first.' },
       },
       required: ['group_name'],
     },
@@ -163,13 +163,9 @@ const CHAT_TOOLS: LlmToolSchema[] = [
 interface ToolResult {
   tool: string;
   success: boolean;
-  summary: string;    // 1-line human-readable result for the reply
-  data?: any;         // full data sent back to LLM for context
-  badge?: {           // rendered in the frontend action card
-    icon: string;
-    label: string;
-    color: string;
-  };
+  summary: string;
+  data?: any;
+  badge?: { icon: string; label: string; color: string };
 }
 
 async function runTool(name: string, args: any): Promise<ToolResult> {
@@ -240,7 +236,7 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
       if (!contact) return { tool: name, success: false, summary: 'Contact not found', badge: { icon: '❌', label: 'Not found', color: '#ef4444' } };
       return {
         tool: name, success: true,
-        summary: `Found ${contact.firstName} ${contact.lastName} — status: ${contact.status}`,
+        summary: `Found ${contact.firstName} ${contact.lastName} — status: ${contact.status}, id: ${contact.id}`,
         data: contact,
         badge: { icon: '👤', label: `${contact.firstName} ${contact.lastName}`, color: '#C9A84C' },
       };
@@ -287,26 +283,37 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
         update: {},
       });
 
-      let ids: string[] = contact_ids || [];
+      let ids: string[] = contact_ids && contact_ids.length > 0 ? contact_ids : [];
       if (ids.length === 0) {
         const where: any = {};
         if (filter_status) where.status = filter_status;
         if (filter_source) where.source = filter_source;
-        if (filter_query) where.OR = [
-          { firstName: { contains: filter_query, mode: 'insensitive' } },
-          { lastName:  { contains: filter_query, mode: 'insensitive' } },
-        ];
-        const matches = await prisma.contact.findMany({ where, select: { id: true } });
+        if (filter_query) {
+          const parts = filter_query.trim().split(/\s+/);
+          where.OR = parts.length > 1
+            ? [
+                { firstName: { contains: parts[0], mode: 'insensitive' }, lastName: { contains: parts[parts.length - 1], mode: 'insensitive' } },
+                { firstName: { contains: filter_query, mode: 'insensitive' } },
+                { lastName:  { contains: filter_query, mode: 'insensitive' } },
+                { phone:     { contains: filter_query } },
+              ]
+            : [
+                { firstName: { contains: filter_query, mode: 'insensitive' } },
+                { lastName:  { contains: filter_query, mode: 'insensitive' } },
+                { phone:     { contains: filter_query } },
+              ];
+        }
+        const matches = await prisma.contact.findMany({ where, select: { id: true, firstName: true, lastName: true } });
         ids = matches.map((c) => c.id);
+        if (ids.length === 0) return { tool: name, success: false, summary: `No contacts matched "${filter_query || filter_status || filter_source}"`, badge: { icon: '⚠️', label: 'No matches', color: '#f97316' } };
       }
-      if (ids.length === 0) return { tool: name, success: false, summary: 'No contacts matched', badge: { icon: '⚠️', label: 'No matches', color: '#f97316' } };
 
       const { count } = await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { contactGroup: group_name.trim() } });
-      try { io.emit('groups-updated', { action: 'assign', groupName: group_name, count }); } catch {}
+      try { io.emit('agent-group', { action: 'assign', groupName: group_name, count }); } catch {}
       return {
         tool: name, success: true,
         summary: `Assigned ${count} contact${count !== 1 ? 's' : ''} to "${group_name}"`,
-        data: { count, groupName: group_name },
+        data: { count, groupName: group_name, contactIds: ids },
         badge: { icon: '📌', label: `${count} → "${group_name}"`, color: '#22c55e' },
       };
     }
@@ -413,10 +420,10 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 // ── System prompt ─────────────────────────────────────────────────────────────
 async function buildSystemPrompt(): Promise<string> {
   const now = new Date();
-  let groupList = '';
+  let groupList = 'none yet';
   try {
     const groups = await (prisma as any).contactGroup.findMany({ select: { name: true }, orderBy: { position: 'asc' } });
-    groupList = (groups as any[]).map((g: any) => g.name).join(', ') || 'none yet';
+    if (groups.length > 0) groupList = (groups as any[]).map((g: any) => `"${g.name}"`).join(', ');
   } catch {}
   const totalContacts = await prisma.contact.count().catch(() => 0);
 
@@ -429,26 +436,148 @@ Existing contact groups: ${groupList}
 CAPABILITIES — you can:
 • Search and retrieve contacts from the database
 • Create, rename, and delete contact groups
-• Assign contacts to groups (by ID list, or by filter: status/source/search)
+• Assign contacts to groups (by ID list, or by filter: status/source/name search)
 • Update contact pipeline statuses
 • Send SMS messages to contacts
 • Add internal notes to contact records
 • Book listing appointments and send SMS confirmations
 • Retrieve pipeline stats and analytics
 
+TOOL STRATEGY — follow these rules exactly:
+• "Add/move/assign [person name] to [group]" → call assign_to_group with filter_query="[person's name]" and group_name="[group]". Do NOT call get_contact first — assign_to_group searches by name directly.
+• "Assign all [status/source] contacts to [group]" → call assign_to_group with filter_status or filter_source.
+• When a task needs multiple steps, call ALL required tools in a single response — don't split across replies.
+• NEVER say "I will now do X" or "Next I'll do Y" without calling the tool to actually do it in the same response. If you say you're going to do something, do it with a tool call right now.
+• After tool results return, give a crisp 1-2 sentence confirmation of what was done. Don't re-explain the plan.
+
 BEHAVIOR:
-• When the user asks you to DO something (create, assign, send, book, etc.) — use the tools to actually do it. Don't just explain how.
-• When the user asks about data (how many, who, which) — use search_contacts or get_stats to look up real data, then report the actual numbers.
-• Be direct and action-oriented. After completing tasks, give a crisp 1-2 sentence confirmation of what you did.
-• If a task is ambiguous (e.g. "send a follow-up to hot leads" but no message specified), ask for the missing detail before acting.
+• Be direct and action-oriented.
 • Never fabricate contact data. Only report what the tools return.
-• If an action could be destructive (mass SMS, delete group), briefly confirm scope before executing, unless the user already confirmed in their message.`;
+• If a destructive action (mass SMS, delete group) seems risky, briefly confirm scope in your text — but still call the tool.`;
+}
+
+// ── Multi-turn agentic loop ───────────────────────────────────────────────────
+async function runAgentLoop(
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  systemPrompt: string,
+): Promise<{ reply: string; actions: ToolResult[] }> {
+  const allActions: ToolResult[] = [];
+  let reply = '';
+  const MAX_PASSES = 5;
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const agentModel   = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+
+  if (anthropicKey) {
+    // ── Anthropic: native multi-turn loop ──────────────────────────────────
+    const anthropicTools = CHAT_TOOLS.map(t => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.parameters,
+    }));
+
+    let apiMessages: any[] = messages.map(m => ({ role: m.role, content: m.content }));
+
+    for (let pass = 0; pass < MAX_PASSES; pass++) {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: agentModel,
+          max_tokens: 1200,
+          temperature: 0.3,
+          system: systemPrompt,
+          tools: anthropicTools,
+          messages: apiMessages,
+        }),
+      });
+
+      if (!r.ok) {
+        const txt = await r.text().catch(() => '');
+        throw new Error(`LLM ${r.status}: ${txt.slice(0, 200)}`);
+      }
+
+      const data = await r.json() as any;
+      const toolUseBlocks = (data.content || []).filter((b: any) => b.type === 'tool_use');
+      const textContent   = (data.content || [])
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.text)
+        .join('')
+        .trim();
+
+      if (textContent) reply = textContent;
+
+      // No more tool calls — done
+      if (toolUseBlocks.length === 0 || data.stop_reason === 'end_turn') break;
+
+      // Execute all tool calls in parallel
+      const toolResultEntries = await Promise.all(
+        toolUseBlocks.map(async (tb: any) => {
+          const result = await runTool(tb.name, tb.input || {});
+          allActions.push(result);
+          return {
+            type: 'tool_result' as const,
+            tool_use_id: tb.id,
+            content: JSON.stringify(
+              result.data !== undefined ? result.data : { summary: result.summary, success: result.success }
+            ),
+          };
+        })
+      );
+
+      // Append assistant turn + tool results for next pass
+      apiMessages.push({ role: 'assistant', content: data.content });
+      apiMessages.push({ role: 'user', content: toolResultEntries });
+    }
+
+  } else {
+    // ── OpenAI fallback: 2-pass (OpenAI doesn't need multi-turn here) ──────
+    const llmMessages: LlmMessage[] = [
+      { role: 'system', content: systemPrompt },
+      ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+    ];
+
+    const pass1 = await llmChat({ messages: llmMessages, tools: CHAT_TOOLS as any, temperature: 0.3, maxTokens: 1200 });
+
+    const toolResults: Array<{ id: string; result: ToolResult }> = [];
+    for (const tc of pass1.toolCalls) {
+      const result = await runTool(tc.name, tc.arguments);
+      toolResults.push({ id: tc.id, result });
+      allActions.push(result);
+    }
+    reply = pass1.content;
+
+    if (toolResults.length > 0) {
+      const pass2Msgs: LlmMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        { role: 'assistant', content: pass1.content || '', tool_calls: pass1.toolCalls },
+        ...toolResults.map(({ id, result }) => ({
+          role: 'tool' as const,
+          content: JSON.stringify(result.data || { summary: result.summary }),
+          tool_call_id: id,
+        })),
+      ];
+      const pass2 = await llmChat({ messages: pass2Msgs, temperature: 0.35, maxTokens: 600 });
+      if (pass2.content) reply = pass2.content;
+    }
+  }
+
+  if (!reply && allActions.length > 0) {
+    reply = allActions.map(a => a.summary).filter(Boolean).join(' — ');
+  }
+  if (!reply) reply = "I wasn't sure what to do with that. Could you be more specific?";
+
+  return { reply, actions: allActions };
 }
 
 // ── Chat endpoint ─────────────────────────────────────────────────────────────
 // POST /api/agent/chat
 // Body: { messages: Array<{ role: 'user'|'assistant', content: string }> }
-// Returns: { reply: string, actions: ToolResult[], usedLlm: boolean }
 router.post('/chat', async (req: Request, res: Response) => {
   try {
     const { messages } = req.body as { messages?: Array<{ role: 'user' | 'assistant'; content: string }> };
@@ -456,107 +585,16 @@ router.post('/chat', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'messages array required' });
     }
 
-    const systemPrompt = await buildSystemPrompt();
-    const actions: ToolResult[] = [];
-
     if (!llmConfigured()) {
-      // Graceful heuristic fallback when no LLM key
       return res.json({
-        reply: "I'm ready to help, but no AI model is configured yet. Please add an ANTHROPIC_API_KEY or OPENAI_API_KEY in your backend environment variables to enable the full agent experience.",
+        reply: "I'm ready to help, but no AI model is configured yet. Add ANTHROPIC_API_KEY or OPENAI_API_KEY to your backend environment variables.",
         actions: [],
         usedLlm: false,
       });
     }
 
-    // ── Pass 1: Let LLM decide which tools to call ─────────────────────────
-    const llmMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: systemPrompt },
-      ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-    ];
-
-    const pass1 = await llmChat({
-      messages: llmMessages,
-      tools: CHAT_TOOLS,
-      temperature: 0.3,
-      maxTokens: 1200,
-    });
-
-    // ── Execute all tool calls ────────────────────────────────────────────
-    const toolResults: Array<{ id: string; result: ToolResult }> = [];
-    for (const tc of pass1.toolCalls) {
-      const result = await runTool(tc.name, tc.arguments);
-      toolResults.push({ id: tc.id, result });
-      actions.push(result);
-    }
-
-    let reply = pass1.content;
-
-    // ── Pass 2: if tools were called, get a final natural-language reply ──
-    if (toolResults.length > 0) {
-      const pass2Messages: any[] = [
-        { role: 'system', content: systemPrompt },
-        ...messages.map((m) => ({ role: m.role, content: m.content })),
-      ];
-
-      // Add the assistant's tool-call turn
-      if (pass1.raw?.content) {
-        pass2Messages.push({ role: 'assistant', content: pass1.raw.content });
-      }
-
-      // Add tool results
-      for (const { id, result } of toolResults) {
-        const resultContent = result.data ? JSON.stringify(result.data) : result.summary;
-        // Claude format: tool_result blocks
-        if (pass1.raw?.model?.startsWith?.('claude') || process.env.ANTHROPIC_API_KEY) {
-          pass2Messages.push({
-            role: 'user',
-            content: [{ type: 'tool_result', tool_use_id: id, content: resultContent }],
-          });
-        } else {
-          // OpenAI format
-          pass2Messages.push({ role: 'tool', content: resultContent, tool_call_id: id });
-        }
-      }
-
-      try {
-        // Direct Anthropic call for the second pass (handles tool_result blocks natively)
-        if (process.env.ANTHROPIC_API_KEY) {
-          const anthropicKey = process.env.ANTHROPIC_API_KEY;
-          const agentModel = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
-
-          // Reconstruct messages: system separate, strip system messages from array
-          const pass2Body: any = {
-            model: agentModel,
-            max_tokens: 600,
-            temperature: 0.35,
-            system: systemPrompt,
-            messages: pass2Messages.filter((m: any) => m.role !== 'system'),
-          };
-
-          const r = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-            body: JSON.stringify(pass2Body),
-          });
-          if (r.ok) {
-            const data = await r.json() as any;
-            reply = (data.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim() || reply;
-          }
-        } else {
-          const pass2 = await llmChat({ messages: pass2Messages as any, temperature: 0.35, maxTokens: 600 });
-          if (pass2.content) reply = pass2.content;
-        }
-      } catch (e: any) {
-        console.warn('[AgentChat] Pass 2 failed, using tool summaries:', e.message);
-        reply = actions.map((a) => a.summary).filter(Boolean).join('. ') + '.';
-      }
-    }
-
-    // If LLM returned nothing useful, synthesize from action summaries
-    if (!reply && actions.length > 0) {
-      reply = actions.map((a) => a.summary).filter(Boolean).join(' — ');
-    }
-    if (!reply) reply = "I wasn't sure what to do with that. Could you be more specific?";
+    const systemPrompt = await buildSystemPrompt();
+    const { reply, actions } = await runAgentLoop(messages, systemPrompt);
 
     res.json({ reply, actions, usedLlm: true });
   } catch (e: any) {
