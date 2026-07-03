@@ -166,7 +166,7 @@ export default function Landing({ onSignIn }: Props) {
               {
                 number: '02',
                 heading: 'Follow-up falls through the cracks - not because you forgot, because you ran out of day.',
-                body: "The lead who said call me back in two weeks gets lost. The person who texted back at 9pm goes unanswered until morning. Deals die in the gaps between conversations. An automated follow-up system sends the right message at the right time without you having to remember any of it. Your leads feel taken care of even when you're offline.",
+                body: "The lead who said call me back in two weeks gets lost. The person who texted back at 9pm goes unanswered until morning. Deals die in the gaps between conversations. The system makes sure nothing slips - so when you do reach out, it's still you, and it still matters.",
               },
               {
                 number: '03',
