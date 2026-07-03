@@ -147,11 +147,11 @@ export default function Landing({ onSignIn }: Props) {
           <div style={{ textAlign: 'center', marginBottom: 72 }}>
             <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.4em', textTransform: 'uppercase', color: GOLD, marginBottom: 14 }}>Why AI</div>
             <h2 className="serif" style={{ fontSize: 'clamp(30px, 4.5vw, 52px)', fontWeight: 300, color: BLACK, lineHeight: 1.1, margin: '0 0 20px' }}>
-              You're good at your job.<br />
-              <em style={{ fontStyle: 'italic', color: GOLDDARK }}>The repetitive parts are killing it.</em>
+              AI is not about replacing people.<br />
+              <em style={{ fontStyle: 'italic', color: GOLDDARK }}>It's about freeing them.</em>
             </h2>
             <p style={{ fontSize: 15, color: GRAY, maxWidth: 520, margin: '0 auto', lineHeight: 1.9 }}>
-              Most people think AI is about replacing work. It's not. It's about getting your hours back so you can do the parts of your job that actually move the needle.
+              Every business has work that needs to happen and work that needs a human. AI handles the first category so your people can focus entirely on the second.
             </p>
           </div>
 
@@ -160,23 +160,23 @@ export default function Landing({ onSignIn }: Props) {
             {[
               {
                 number: '01',
-                heading: 'You spend half your day on people who never pick up.',
-                body: "Dialing through a list of 200 contacts and reaching 12 of them is demoralizing. It's not a skill problem - it's a volume problem. An AI system works through that list automatically, connects you the instant someone answers, and leaves a voicemail on every no-answer without you touching the phone. You show up to conversations, not to dialing.",
+                heading: 'Most of your day is spent on work that does not require you.',
+                body: "Scheduling, following up, sorting, reminding, updating, repeating. These tasks keep businesses running but they don't move anything forward. They just consume the hours of the people doing them. AI handles the operational layer so the people in your business can focus on the things that actually require a human being.",
               },
               {
                 number: '02',
-                heading: 'Follow-up falls through the cracks - not because you forgot, because you ran out of day.',
-                body: "The lead who said call me back in two weeks gets lost. The person who texted back at 9pm goes unanswered until morning. Deals die in the gaps between conversations. The system makes sure nothing slips - so when you do reach out, it's still you, and it still matters.",
+                heading: 'Speed is the new competitive advantage.',
+                body: "In almost every industry, the business that responds first wins. Not because they're better - because they showed up. Most businesses are slow to respond because the people who need to respond are busy doing something else. AI eliminates that lag. It engages instantly, around the clock, without anyone having to be available.",
               },
               {
                 number: '03',
-                heading: "The agents winning right now aren't working harder. They have better systems.",
-                body: "The top producers in every market aren't superhuman. They've removed the friction between them and their best clients. They're not spending Tuesday morning cold calling - they're taking the appointment the system booked for them on Monday night. That gap is closeable. That's what this is.",
+                heading: "The businesses pulling ahead aren't bigger. They're better automated.",
+                body: "The gap between businesses that are thriving and those that are struggling often comes down to one thing: how much of their operation runs without constant human intervention. The ones winning have figured out which parts of their business can be systematized, and they've done it. That's not a coincidence - it's a decision.",
               },
               {
                 number: '04',
-                heading: "Your time is the one thing you can't make more of.",
-                body: "Every hour spent on repetitive tasks is an hour you're not spending with clients, at the kitchen table negotiating a deal, or with your family. AI doesn't give you a robot - it gives you leverage. You do more with the time you have, and you stop losing deals to agents who simply responded faster.",
+                heading: "Your time, and your team's time, is the most expensive thing you have.",
+                body: "Every hour a person spends on a task a system could do is an hour they're not spending on growth, relationships, or the work only they can do. AI is not about replacing people. It's about making sure the people you have are spending their time on what matters - and letting everything else run in the background.",
               },
             ].map(({ number, heading, body }, _i) => (
               <div key={number} style={{
