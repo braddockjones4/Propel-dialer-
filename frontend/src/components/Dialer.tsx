@@ -153,6 +153,8 @@ export default function Dialer() {
   const [index, setIndex]               = useState(0);
   const [sessionFilter, setSessionFilter] = useState('all');
   const [loadingContacts, setLoadingContacts] = useState(false);
+  const [dialerGroups, setDialerGroups] = useState<Array<{ id: string; name: string; color: string; contactCount: number }>>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
 
   // Settings
   const [settings, setSettings]         = useState<DialerSettings>({ callMode: 'webrtc', personalPhone: '', phoneVerified: false });
@@ -245,6 +247,21 @@ export default function Dialer() {
   }, []);
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  // ─── Load groups from API ────────────────────────────────────────────────────
+  const loadDialerGroups = useCallback(async () => {
+    setGroupsLoading(true);
+    try {
+      const r = await authFetch(`${API_BASE}/contact-groups`);
+      if (r.ok) {
+        const data = await r.json();
+        setDialerGroups(Array.isArray(data) ? data : []);
+      }
+    } catch {}
+    setGroupsLoading(false);
+  }, []);
+
+  useEffect(() => { loadDialerGroups(); }, [loadDialerGroups]);
 
   // ─── Pre-select group filter from Contacts book ──────────────────────────────
   useEffect(() => {
@@ -623,38 +640,76 @@ export default function Dialer() {
           </div>
 
           {/* ── Who to call ── */}
-          {(() => {
-            const savedGroups: string[] = (() => { try { return JSON.parse(localStorage.getItem('propel_contact_groups') || '[]'); } catch { return []; } })();
-            const allFilter = { value: 'all', label: 'All Contacts' };
-            const groupFilters = savedGroups.map(g => ({ value: `group:${g}`, label: g }));
-            const filters = [allFilter, ...groupFilters];
-            return (
-              <Card title="Who to call" mb={14}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {filters.map(f => (
-                    <button key={f.value} onClick={() => setSessionFilter(f.value)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
-                        borderRadius: 10, textAlign: 'left', cursor: 'pointer',
-                        background: sessionFilter === f.value ? DARK : 'transparent',
-                        border: `1px solid ${sessionFilter === f.value ? DARK : 'rgba(0,0,0,0.09)'}`,
-                        transition: 'all 0.15s',
+          <Card title="Who to call" mb={14}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {/* All Contacts */}
+              <button
+                key="all"
+                onClick={() => setSessionFilter('all')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                  borderRadius: 10, textAlign: 'left', cursor: 'pointer',
+                  background: sessionFilter === 'all' ? DARK : 'transparent',
+                  border: `1px solid ${sessionFilter === 'all' ? DARK : 'rgba(0,0,0,0.09)'}`,
+                  transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ width: 7, height: 7, borderRadius: '50%', background: sessionFilter === 'all' ? GOLD : '#d1d5db', flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 14, color: sessionFilter === 'all' ? '#fff' : '#374151', fontWeight: sessionFilter === 'all' ? 500 : 400, textAlign: 'left' }}>
+                  All Contacts
+                </span>
+              </button>
+
+              {/* User-created groups from API */}
+              {groupsLoading && (
+                <div style={{ fontSize: 11, color: '#9ca3af', padding: '4px 2px' }}>Loading groups…</div>
+              )}
+              {dialerGroups.map(g => {
+                const fv = `group:${g.name}`;
+                const active = sessionFilter === fv;
+                return (
+                  <button
+                    key={g.id}
+                    onClick={() => setSessionFilter(fv)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+                      borderRadius: 10, textAlign: 'left', cursor: 'pointer',
+                      background: active ? DARK : 'transparent',
+                      border: `1px solid ${active ? DARK : 'rgba(0,0,0,0.09)'}`,
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {/* Group colour dot */}
+                    <div style={{
+                      width: 7, height: 7, borderRadius: '50%',
+                      background: active ? GOLD : g.color,
+                      flexShrink: 0,
+                      boxShadow: active ? 'none' : `0 0 0 1.5px ${g.color}44`,
+                    }} />
+                    <span style={{ flex: 1, fontSize: 14, color: active ? '#fff' : '#374151', fontWeight: active ? 500 : 400, textAlign: 'left' }}>
+                      {g.name}
+                    </span>
+                    {g.contactCount > 0 && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, letterSpacing: '0.04em',
+                        color: active ? 'rgba(255,255,255,0.5)' : '#9ca3af',
+                        background: active ? 'rgba(255,255,255,0.1)' : '#f3f4f6',
+                        borderRadius: 8, padding: '1px 7px',
                       }}>
-                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: sessionFilter === f.value ? GOLD : '#d1d5db', flexShrink: 0 }} />
-                      <span style={{ fontSize: 14, color: sessionFilter === f.value ? '#fff' : '#374151', fontWeight: sessionFilter === f.value ? 500 : 400 }}>
-                        {f.label}
+                        {g.contactCount}
                       </span>
-                    </button>
-                  ))}
-                  {savedGroups.length === 0 && (
-                    <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 2px 0', lineHeight: 1.5 }}>
-                      Create groups in the Contacts tab to dial specific lists.
-                    </p>
-                  )}
-                </div>
-              </Card>
-            );
-          })()}
+                    )}
+                  </button>
+                );
+              })}
+
+              {!groupsLoading && dialerGroups.length === 0 && (
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 2px 0', lineHeight: 1.6 }}>
+                  Create groups in the <strong>Contacts</strong> tab to dial specific lists.
+                </p>
+              )}
+            </div>
+          </Card>
 
           {/* ── Call mode ── */}
           <Card title="Call mode" mb={14}>

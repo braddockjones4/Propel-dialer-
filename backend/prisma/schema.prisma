@@ -155,6 +155,20 @@ model DialerSettings {
   updatedAt     DateTime @updatedAt
 }
 
+// ─── Contact Groups ───────────────────────────────────────────────────────────
+// Named user-defined groups (e.g. "AYC Group"). The actual assignment lives in
+// Contact.contactGroup (a plain string) to keep queries simple; this table
+// persists the list of groups so empty groups survive reloads and the AI agent
+// can discover / create them server-side.
+model ContactGroup {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String   @default("#9ca3af")
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 // ─── Autonomous AI Agent ──────────────────────────────────────────────────────
 // Singleton config row (id = "singleton") controlling the autonomous agent.
 model AgentSettings {

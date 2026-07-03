@@ -53,6 +53,28 @@ function toolSchemas(): LlmToolSchema[] {
       parameters: { type: 'object', properties: { note: { type: 'string' } }, required: ['note'] },
     },
     {
+      name: 'assign_to_group',
+      description: 'Assign this lead to a named contact group. Creates the group automatically if it does not exist. Use when the user asks you to "put this contact in [group]", "move to [group]", "add to [group]", or "create a group called [name] and add this person". A group organizes contacts on the kanban board for targeted dialing sessions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          group_name: {
+            type: 'string',
+            description: 'Exact name of the group to assign to, e.g. "AYC Group" or "Hot Leads". Will be created if it does not exist.',
+          },
+          color: {
+            type: 'string',
+            description: 'Optional hex color for a new group, e.g. "#ef4444". Defaults to gray.',
+          },
+          reason: {
+            type: 'string',
+            description: 'Brief note explaining why this contact belongs in this group.',
+          },
+        },
+        required: ['group_name'],
+      },
+    },
+    {
       name: 'escalate_to_human',
       description: 'Hand off to the human agent when unsure, when the lead is upset, asks something you cannot answer, or requests a human.',
       parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] },
@@ -65,8 +87,25 @@ function toolSchemas(): LlmToolSchema[] {
   ];
 }
 
-function systemPrompt(cfg: AgentConfig, ctx: Awaited<ReturnType<typeof buildContactContext>>, goal: string): string {
+async function fetchGroupNames(): Promise<string[]> {
+  try {
+    const groups = await (prisma as any).contactGroup.findMany({
+      select: { name: true },
+      orderBy: { position: 'asc' },
+    });
+    return groups.map((g: { name: string }) => g.name);
+  } catch {
+    return [];
+  }
+}
+
+async function systemPrompt(cfg: AgentConfig, ctx: Awaited<ReturnType<typeof buildContactContext>>, goal: string): Promise<string> {
   const now = new Date();
+  const groupNames = await fetchGroupNames();
+  const groupList = groupNames.length
+    ? groupNames.map(n => `"${n}"`).join(', ')
+    : '(none yet — you can create new ones with assign_to_group)';
+
   return `You are ${cfg.agentName}, an autonomous assistant working leads for a real estate agent.
 PERSONA: ${cfg.persona}
 TONE: ${cfg.tone}
@@ -86,13 +125,17 @@ ${ctx.hasUpcomingAppointment ? 'NOTE: This lead already has an upcoming appointm
 CONVERSATION SO FAR:
 ${ctx.thread || '(no prior messages)'}
 
+EXISTING CONTACT GROUPS: ${groupList}
+You may assign this lead to any existing group, or create a new one by supplying any name to assign_to_group.
+
 RULES:
 1. BOOKING — HIGHEST PRIORITY: If the lead's message contains a specific date or time ("tomorrow at 3pm", "Thursday at 10am", "Monday morning", "next week Tuesday", etc.) AND they are agreeing to meet or proposing a meeting time — call book_appointment immediately. Infer the ISO datetime from context and today's date. Do NOT send an SMS asking when they're free; they just told you.
-2. Use the provided tools to act. Prefer exactly ONE action.
-3. SMS must be concise (< 300 chars), natural, and never repeat yourself.
-4. Never invent facts about the property, pricing, or the market. If asked something you don't know, offer to have the agent follow up, or escalate.
-5. If the lead is upset, mentions legal action, or asks for a human — escalate_to_human.
-6. If the lead wants to stop being contacted — escalate_to_human with reason "opt-out".`;
+2. GROUP ASSIGNMENT: If the user (agent) asks you via conversation to assign this lead to a group, or if it is clearly appropriate based on the lead's profile (e.g. they mentioned selling their home — consider "Sellers"), call assign_to_group. The group will be created automatically if it doesn't exist.
+3. Use the provided tools to act. Prefer exactly ONE action.
+4. SMS must be concise (< 300 chars), natural, and never repeat yourself.
+5. Never invent facts about the property, pricing, or the market. If asked something you don't know, offer to have the agent follow up, or escalate.
+6. If the lead is upset, mentions legal action, or asks for a human — escalate_to_human.
+7. If the lead wants to stop being contacted — escalate_to_human with reason "opt-out".`;
 }
 
 function mapToolCallToSpec(name: string, args: any): ActionSpec | null {
@@ -117,6 +160,17 @@ function mapToolCallToSpec(name: string, args: any): ActionSpec | null {
     case 'add_note':
       if (!args.note) return null;
       return { type: 'note', reasoning: 'Internal note.', payload: { note: args.note } };
+    case 'assign_to_group':
+      if (!args.group_name) return null;
+      return {
+        type: 'group',
+        reasoning: args.reason || `Assigned to group "${args.group_name}"`,
+        payload: {
+          groupName: String(args.group_name).trim(),
+          groupColor: args.color || undefined,
+          note: args.reason,
+        },
+      };
     case 'escalate_to_human':
       return { type: 'escalate', reasoning: args.reason || 'needs human', payload: { note: args.reason } };
     case 'do_nothing':
@@ -197,8 +251,9 @@ export async function decideActions(
       const userContent = hasTimeMention
         ? `The lead's latest message: "${inbound}"\n⚠️ Their message contains a specific time reference. If they are agreeing to meet or proposing a time, you MUST call book_appointment — do NOT send an SMS asking when they're free.\nDecide the single best action using the tools.`
         : `The lead's latest message: "${inbound}"\nDecide the single best action using the tools.`;
+      const sysPrompt = await systemPrompt(cfg, ctx, 'Respond to the latest inbound message and advance toward booking an appointment.');
       const messages: LlmMessage[] = [
-        { role: 'system', content: systemPrompt(cfg, ctx, 'Respond to the latest inbound message and advance toward booking an appointment.') },
+        { role: 'system', content: sysPrompt },
         { role: 'user', content: userContent },
       ];
       const result = await llmChat({ messages, tools: toolSchemas(), model: cfg.model, temperature: 0.5, maxTokens: 400 });
@@ -263,8 +318,9 @@ export async function draftReply(contactId: string): Promise<{ message: string; 
 
   if (llmConfigured()) {
     try {
+      const sysPrompt = await systemPrompt(cfg, ctx, 'Draft the single best SMS reply to send this lead right now.');
       const messages: LlmMessage[] = [
-        { role: 'system', content: systemPrompt(cfg, ctx, 'Draft the single best SMS reply to send this lead right now.') },
+        { role: 'system', content: sysPrompt },
         { role: 'user', content: `Write ONLY the SMS reply text (no quotes, no preamble). Latest lead message: "${ctx.lastInboundText || '(none)'}"` },
       ];
       const r = await llmChat({ messages, model: cfg.model, temperature: 0.6, maxTokens: 200 });

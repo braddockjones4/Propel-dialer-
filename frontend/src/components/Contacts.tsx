@@ -1,20 +1,37 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import CsvImportModal from './CsvImportModal';
 import { useToast } from './Toast';
-import { API_BASE, authFetch } from '../config';
+import { API_BASE, SOCKET_URL, authFetch } from '../config';
+import { io as socketIo } from 'socket.io-client';
 
-const GOLD = '#C9A84C';
-const DARK = '#0A0A0A';
+const GOLD  = '#C9A84C';
+const DARK  = '#0A0A0A';
 const UNGROUPED = '__ungrouped__';
-const GROUPS_KEY = 'propel_contact_groups';
+
+// Group accent colours the user can choose
+const GROUP_COLORS = [
+  '#9ca3af', '#ef4444', '#f97316', '#eab308',
+  '#22c55e', '#14b8a6', '#3b82f6', '#8b5cf6',
+  '#ec4899', '#C9A84C',
+];
 
 const STATUS_COLORS: Record<string, string> = {
-  hot:       '#ef4444',
-  callback:  '#C9A84C',
-  new:       '#9ca3af',
-  contacted: '#3b82f6',
-  dnc:       '#d1d5db',
+  hot:         '#ef4444',
+  callback:    '#C9A84C',
+  new:         '#9ca3af',
+  contacted:   '#3b82f6',
+  appointment: '#22c55e',
+  closed:      '#14b8a6',
+  dnc:         '#d1d5db',
 };
+
+interface ContactGroup {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  contactCount: number;
+}
 
 interface Contact {
   id: string;
@@ -48,41 +65,73 @@ function fmtPhone(p: string) {
 export default function Contacts({ onNavigate }: ContactsProps) {
   const toast = useToast();
 
-  const [contacts, setContacts]   = useState<Contact[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [search, setSearch]       = useState('');
-
-  // Groups stored in localStorage so empty groups persist across reloads
-  const [groups, setGroups] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]'); } catch { return []; }
-  });
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [contacts, setContacts]       = useState<Contact[]>([]);
+  const [groups,   setGroups]         = useState<ContactGroup[]>([]);
+  const [loading,  setLoading]        = useState(true);
+  const [grpLoading, setGrpLoading]  = useState(true);
+  const [search,   setSearch]         = useState('');
 
   // Drag state
-  const [draggingId, setDraggingId]     = useState<string | null>(null);
+  const [draggingId,    setDraggingId]    = useState<string | null>(null);
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
 
-  // Selected contact (detail panel)
-  const [selected, setSelected]   = useState<Contact | null>(null);
+  // Selected contact detail panel
+  const [selected,  setSelected]  = useState<Contact | null>(null);
   const [editNotes, setEditNotes] = useState('');
-  const [saving, setSaving]       = useState(false);
+  const [saving,    setSaving]    = useState(false);
 
   // New group creation
-  const [creatingGroup, setCreatingGroup] = useState(false);
-  const [newGroupName, setNewGroupName]   = useState('');
+  const [creatingGroup,  setCreatingGroup]  = useState(false);
+  const [newGroupName,   setNewGroupName]   = useState('');
+  const [newGroupColor,  setNewGroupColor]  = useState(GROUP_COLORS[0]);
+  const [createSaving,   setCreateSaving]   = useState(false);
 
-  // Rename group
-  const [renamingGroup, setRenamingGroup] = useState<string | null>(null);
-  const [renameValue, setRenameValue]     = useState('');
+  // Rename / recolor group
+  const [renamingGroup,  setRenamingGroup]  = useState<string | null>(null);  // group.id
+  const [renameValue,    setRenameValue]    = useState('');
+  const [renameColor,    setRenameColor]    = useState('');
 
   // Add contact modal
-  const [showAdd, setShowAdd]       = useState<string | null>(null);
+  const [showAdd,    setShowAdd]    = useState<string | null>(null);  // group name or UNGROUPED
   const [newContact, setNewContact] = useState({ firstName: '', lastName: '', phone: '', email: '', address: '' });
-  const [addSaving, setAddSaving]   = useState(false);
+  const [addSaving,  setAddSaving]  = useState(false);
 
   // CSV import
   const [showImport, setShowImport] = useState(false);
 
-  // ─── Data loading ──────────────────────────────────────────────────────────
+  // Socket ref for cleanup
+  const socketRef = useRef<ReturnType<typeof socketIo> | null>(null);
+
+  // ── Socket: real-time agent group events ──────────────────────────────────
+  useEffect(() => {
+    const token = localStorage.getItem('propel_token');
+    const s = socketIo(SOCKET_URL, { auth: { token }, transports: ['websocket', 'polling'] });
+    socketRef.current = s;
+
+    // Agent assigned a contact to a group — refresh both lists
+    s.on('agent-group', () => {
+      loadGroups();
+      loadContacts();
+    });
+
+    return () => { s.disconnect(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Data loading ──────────────────────────────────────────────────────────
+  const loadGroups = useCallback(async () => {
+    setGrpLoading(true);
+    try {
+      const r = await authFetch(`${API_BASE}/contact-groups`);
+      if (r.ok) {
+        const data = await r.json();
+        setGroups(Array.isArray(data) ? data : []);
+      }
+    } catch {}
+    setGrpLoading(false);
+  }, []);
+
   const loadContacts = useCallback(async () => {
     setLoading(true);
     try {
@@ -93,20 +142,18 @@ export default function Contacts({ onNavigate }: ContactsProps) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadContacts(); }, [loadContacts]);
-
-  // Persist groups list to localStorage
   useEffect(() => {
-    localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
-  }, [groups]);
+    loadGroups();
+    loadContacts();
+  }, [loadGroups, loadContacts]);
 
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-  const contactsInGroup = useCallback((group: string): Contact[] => {
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  const contactsInGroup = useCallback((groupName: string): Contact[] => {
     const q = search.toLowerCase();
     return contacts.filter(c => {
-      const matchGroup = group === UNGROUPED
+      const matchGroup = groupName === UNGROUPED
         ? !c.contactGroup || c.contactGroup === ''
-        : c.contactGroup === group;
+        : c.contactGroup === groupName;
       if (!matchGroup) return false;
       if (!q) return true;
       return (
@@ -117,31 +164,37 @@ export default function Contacts({ onNavigate }: ContactsProps) {
     });
   }, [contacts, search]);
 
-  // ─── Drag & drop ──────────────────────────────────────────────────────────
+  const groupByName = (name: string) => groups.find(g => g.name === name);
+
+  // ── Drag & drop ──────────────────────────────────────────────────────────
   const onDragStart = (e: React.DragEvent, contactId: string) => {
     setDraggingId(contactId);
     e.dataTransfer.effectAllowed = 'move';
   };
 
-  const onDragOver = (e: React.DragEvent, group: string) => {
+  const onDragOver = (e: React.DragEvent, groupName: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    setDragOverGroup(group);
+    setDragOverGroup(groupName);
   };
 
-  const onDrop = async (e: React.DragEvent, group: string) => {
+  const onDrop = async (e: React.DragEvent, groupName: string) => {
     e.preventDefault();
     setDragOverGroup(null);
     if (!draggingId) return;
-    const newGroup = group === UNGROUPED ? null : group;
+    const newGroup = groupName === UNGROUPED ? null : groupName;
+
+    // Optimistic update
     setContacts(prev => prev.map(c => c.id === draggingId ? { ...c, contactGroup: newGroup } : c));
     setDraggingId(null);
+
     try {
       await authFetch(`${API_BASE}/contacts/${draggingId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contactGroup: newGroup }),
       });
+      // Refresh group counts
+      loadGroups();
     } catch {
       toast.error('Failed to move contact');
       loadContacts();
@@ -150,54 +203,101 @@ export default function Contacts({ onNavigate }: ContactsProps) {
 
   const onDragEnd = () => { setDraggingId(null); setDragOverGroup(null); };
 
-  // ─── Group management ─────────────────────────────────────────────────────
-  const createGroup = () => {
+  // ── Group CRUD ────────────────────────────────────────────────────────────
+  const createGroup = async () => {
     const name = newGroupName.trim();
-    if (!name || groups.includes(name)) return;
-    setGroups(prev => [...prev, name]);
+    if (!name) return;
+    if (groups.some(g => g.name === name)) {
+      toast.error(`Group "${name}" already exists`);
+      return;
+    }
+    setCreateSaving(true);
+    try {
+      const r = await authFetch(`${API_BASE}/contact-groups`, {
+        method: 'POST',
+        body: JSON.stringify({ name, color: newGroupColor }),
+      });
+      if (!r.ok) {
+        const err = await r.json();
+        toast.error(err.error || 'Could not create group');
+      } else {
+        const g = await r.json();
+        setGroups(prev => [...prev, g]);
+        toast.success(`Group "${name}" created`);
+      }
+    } catch { toast.error('Network error'); }
+    setCreateSaving(false);
     setCreatingGroup(false);
     setNewGroupName('');
+    setNewGroupColor(GROUP_COLORS[0]);
   };
 
-  const renameGroup = async (oldName: string) => {
-    const newName = renameValue.trim();
+  const startRename = (g: ContactGroup) => {
+    setRenamingGroup(g.id);
+    setRenameValue(g.name);
+    setRenameColor(g.color);
+  };
+
+  const commitRename = async (gId: string) => {
     setRenamingGroup(null);
-    if (!newName || newName === oldName) return;
-    const affected = contacts.filter(c => c.contactGroup === oldName);
-    setContacts(prev => prev.map(c => c.contactGroup === oldName ? { ...c, contactGroup: newName } : c));
-    setGroups(prev => prev.map(g => g === oldName ? newName : g));
-    if (selected?.contactGroup === oldName) setSelected(s => s ? { ...s, contactGroup: newName } : null);
-    await Promise.all(affected.map(c =>
-      authFetch(`${API_BASE}/contacts/${c.id}`, {
+    const newName  = renameValue.trim();
+    const existing = groups.find(g => g.id === gId);
+    if (!existing) return;
+    if (!newName || (newName === existing.name && renameColor === existing.color)) return;
+
+    // Optimistic UI
+    setGroups(prev => prev.map(g => g.id === gId ? { ...g, name: newName, color: renameColor } : g));
+    if (newName !== existing.name) {
+      setContacts(prev => prev.map(c =>
+        c.contactGroup === existing.name ? { ...c, contactGroup: newName } : c
+      ));
+      if (selected?.contactGroup === existing.name) {
+        setSelected(s => s ? { ...s, contactGroup: newName } : null);
+      }
+    }
+
+    try {
+      const r = await authFetch(`${API_BASE}/contact-groups/${gId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contactGroup: newName }),
-      })
-    ));
+        body: JSON.stringify({ name: newName, color: renameColor }),
+      });
+      if (!r.ok) {
+        toast.error('Rename failed');
+        loadGroups(); loadContacts();
+      } else {
+        toast.success('Group updated');
+      }
+    } catch { toast.error('Network error'); loadGroups(); loadContacts(); }
   };
 
-  const deleteGroup = async (name: string) => {
-    if (!window.confirm(`Delete "${name}"? Contacts will become ungrouped.`)) return;
-    const affected = contacts.filter(c => c.contactGroup === name);
-    setContacts(prev => prev.map(c => c.contactGroup === name ? { ...c, contactGroup: null } : c));
-    setGroups(prev => prev.filter(g => g !== name));
-    await Promise.all(affected.map(c =>
-      authFetch(`${API_BASE}/contacts/${c.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contactGroup: null }),
-      })
-    ));
+  const deleteGroup = async (g: ContactGroup) => {
+    if (!window.confirm(`Delete "${g.name}"? Contacts will become ungrouped.`)) return;
+
+    // Optimistic
+    setContacts(prev => prev.map(c => c.contactGroup === g.name ? { ...c, contactGroup: null } : c));
+    setGroups(prev => prev.filter(x => x.id !== g.id));
+
+    try {
+      const r = await authFetch(`${API_BASE}/contact-groups/${g.id}`, { method: 'DELETE' });
+      if (!r.ok) {
+        toast.error('Delete failed');
+        loadGroups(); loadContacts();
+      } else {
+        toast.success(`"${g.name}" deleted`);
+      }
+    } catch { toast.error('Network error'); loadGroups(); loadContacts(); }
   };
 
-  // ─── Add contact ──────────────────────────────────────────────────────────
+  // ── Add contact ──────────────────────────────────────────────────────────
   const saveContact = async () => {
-    if (!newContact.firstName || !newContact.phone) { toast.error('Name and phone required'); return; }
+    if (!newContact.firstName || !newContact.phone) {
+      toast.error('Name and phone required');
+      return;
+    }
     setAddSaving(true);
     try {
       const res = await authFetch(`${API_BASE}/contacts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...newContact,
           source: 'manual',
@@ -209,17 +309,17 @@ export default function Contacts({ onNavigate }: ContactsProps) {
       setShowAdd(null);
       setNewContact({ firstName: '', lastName: '', phone: '', email: '', address: '' });
       loadContacts();
+      loadGroups();
     } catch { toast.error('Could not save contact'); }
     setAddSaving(false);
   };
 
-  // ─── Notes ────────────────────────────────────────────────────────────────
+  // ── Notes ────────────────────────────────────────────────────────────────
   const saveNotes = async () => {
     if (!selected) return;
     setSaving(true);
     await authFetch(`${API_BASE}/contacts/${selected.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notes: editNotes }),
     });
     setSaving(false);
@@ -228,25 +328,39 @@ export default function Contacts({ onNavigate }: ContactsProps) {
     toast.success('Notes saved');
   };
 
-  // ─── Dial group ───────────────────────────────────────────────────────────
-  const dialGroup = (group: string) => {
-    const label = group === UNGROUPED ? 'Ungrouped' : group;
+  // ── Reassign group from detail panel ─────────────────────────────────────
+  const reassignGroup = async (contactId: string, groupName: string | null) => {
+    setContacts(prev => prev.map(c => c.id === contactId ? { ...c, contactGroup: groupName } : c));
+    setSelected(prev => prev ? { ...prev, contactGroup: groupName } : null);
+    await authFetch(`${API_BASE}/contacts/${contactId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ contactGroup: groupName }),
+    });
+    loadGroups();
+  };
+
+  // ── Dial group ───────────────────────────────────────────────────────────
+  const dialGroup = (groupName: string) => {
+    const label = groupName === UNGROUPED ? 'Ungrouped' : groupName;
     localStorage.setItem('dialerGroupFilter', JSON.stringify({
-      type: group === UNGROUPED ? 'all' : 'group',
-      value: group === UNGROUPED ? undefined : group,
+      type: groupName === UNGROUPED ? 'all' : 'group',
+      value: groupName === UNGROUPED ? undefined : groupName,
       label,
-      count: contactsInGroup(group).length,
+      count: contactsInGroup(groupName).length,
     }));
     onNavigate?.('dialer');
   };
 
-  const allColumns = [UNGROUPED, ...groups];
+  // ── Column ordering ──────────────────────────────────────────────────────
+  const allColumns = [UNGROUPED, ...groups.map(g => g.name)];
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const isInitialising = grpLoading && loading;
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={{ height: 'calc(100vh - 49px)', display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}>
 
-      {/* ── Top bar ─────────────────────────────────────────────────────── */}
+      {/* ── Top bar ───────────────────────────────────────────────────── */}
       <div style={{
         background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.07)',
         padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
@@ -263,6 +377,16 @@ export default function Contacts({ onNavigate }: ContactsProps) {
           style={{ flex: 1, maxWidth: 220, padding: '6px 12px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', background: '#fafafa' }}
         />
         <div style={{ flex: 1 }} />
+
+        {/* Live AI indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, opacity: 0.65 }}>
+          <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e',
+            boxShadow: '0 0 5px #22c55e', animation: 'pulse 2s infinite' }} />
+          <span style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', fontWeight: 600 }}>
+            AI Active
+          </span>
+        </div>
+
         <button
           onClick={() => setShowImport(true)}
           style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', background: 'transparent', color: '#6b7280', cursor: 'pointer' }}
@@ -270,44 +394,46 @@ export default function Contacts({ onNavigate }: ContactsProps) {
           Import CSV
         </button>
         <button
-          onClick={() => { setCreatingGroup(true); setNewGroupName(''); }}
+          onClick={() => { setCreatingGroup(true); setNewGroupName(''); setNewGroupColor(GROUP_COLORS[0]); }}
           style={{ padding: '6px 16px', borderRadius: 7, border: 'none', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', background: DARK, color: '#fff', cursor: 'pointer' }}
         >
           + New Group
         </button>
       </div>
 
-      {/* ── Kanban board ────────────────────────────────────────────────── */}
+      {/* ── Kanban board ─────────────────────────────────────────────── */}
       <div style={{
         flex: 1, overflowX: 'auto', overflowY: 'hidden',
         display: 'flex', gap: 14, padding: '18px 20px',
         alignItems: 'flex-start',
       }}>
-        {loading ? (
+        {isInitialising ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#9ca3af', fontSize: 13 }}>
-            Loading contacts…
+            Loading…
           </div>
         ) : (
           <>
-            {allColumns.map(group => {
-              const cards       = contactsInGroup(group);
-              const isOver      = dragOverGroup === group;
-              const isUngrouped = group === UNGROUPED;
-              const label       = isUngrouped ? 'Ungrouped' : group;
-              const isRenaming  = renamingGroup === group;
+            {allColumns.map(groupName => {
+              const cards      = contactsInGroup(groupName);
+              const isOver     = dragOverGroup === groupName;
+              const isUngroup  = groupName === UNGROUPED;
+              const label      = isUngroup ? 'Ungrouped' : groupName;
+              const groupObj   = isUngroup ? null : groupByName(groupName);
+              const accentColor = groupObj?.color || '#9ca3af';
+              const isRenaming = !isUngroup && renamingGroup === groupObj?.id;
 
               return (
                 <div
-                  key={group}
-                  onDragOver={e => onDragOver(e, group)}
-                  onDrop={e => onDrop(e, group)}
-                  onDragLeave={() => dragOverGroup === group && setDragOverGroup(null)}
+                  key={groupName}
+                  onDragOver={e => onDragOver(e, groupName)}
+                  onDrop={e => onDrop(e, groupName)}
+                  onDragLeave={() => dragOverGroup === groupName && setDragOverGroup(null)}
                   style={{
                     width: 256,
                     flexShrink: 0,
                     display: 'flex',
                     flexDirection: 'column',
-                    background: isOver ? 'rgba(201,168,76,0.04)' : '#fff',
+                    background: isOver ? 'rgba(201,168,76,0.03)' : '#fff',
                     borderRadius: 14,
                     border: `1.5px solid ${isOver ? 'rgba(201,168,76,0.45)' : 'rgba(0,0,0,0.07)'}`,
                     transition: 'border-color 0.15s, background 0.15s',
@@ -316,46 +442,68 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                     boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
                   }}
                 >
+                  {/* Column top accent bar */}
+                  <div style={{ height: 3, background: accentColor, borderRadius: '14px 14px 0 0', flexShrink: 0, opacity: isUngroup ? 0.25 : 0.85 }} />
+
                   {/* Column header */}
-                  <div style={{ padding: '13px 14px 10px', borderBottom: '1px solid rgba(0,0,0,0.05)', flexShrink: 0 }}>
+                  <div style={{ padding: '12px 14px 10px', borderBottom: '1px solid rgba(0,0,0,0.05)', flexShrink: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                      {isRenaming ? (
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={e => setRenameValue(e.target.value)}
-                          onBlur={() => renameGroup(group)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') renameGroup(group);
-                            if (e.key === 'Escape') setRenamingGroup(null);
-                          }}
-                          style={{
-                            flex: 1, fontSize: 13, fontWeight: 700,
-                            border: 'none', borderBottom: `2px solid ${GOLD}`,
-                            outline: 'none', background: 'transparent',
-                            padding: '2px 0', color: DARK,
-                          }}
-                        />
+                      {isRenaming && groupObj ? (
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={e => setRenameValue(e.target.value)}
+                            onBlur={() => commitRename(groupObj.id)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') commitRename(groupObj.id);
+                              if (e.key === 'Escape') setRenamingGroup(null);
+                            }}
+                            style={{
+                              width: '100%', fontSize: 13, fontWeight: 700,
+                              border: 'none', borderBottom: `2px solid ${GOLD}`,
+                              outline: 'none', background: 'transparent',
+                              padding: '2px 0', color: DARK, boxSizing: 'border-box',
+                            }}
+                          />
+                          {/* Color picker in rename mode */}
+                          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                            {GROUP_COLORS.map(c => (
+                              <div
+                                key={c}
+                                onClick={() => setRenameColor(c)}
+                                style={{
+                                  width: 16, height: 16, borderRadius: '50%', background: c,
+                                  cursor: 'pointer', border: renameColor === c ? '2px solid #fff' : '2px solid transparent',
+                                  boxShadow: renameColor === c ? `0 0 0 2px ${c}` : 'none',
+                                  flexShrink: 0,
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </div>
                       ) : (
-                        <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: DARK, letterSpacing: '0.01em' }}>
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: DARK, letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {label}
                         </span>
                       )}
+
                       <span style={{
                         fontSize: 10, color: '#9ca3af', background: '#f3f4f6',
-                        borderRadius: 10, padding: '1px 7px', fontWeight: 600,
+                        borderRadius: 10, padding: '1px 7px', fontWeight: 600, flexShrink: 0,
                       }}>
                         {cards.length}
                       </span>
-                      {!isUngrouped && !isRenaming && (
+
+                      {!isUngroup && !isRenaming && groupObj && (
                         <div style={{ display: 'flex', gap: 2 }}>
                           <button
-                            onClick={() => { setRenamingGroup(group); setRenameValue(group); }}
-                            title="Rename"
+                            onClick={() => startRename(groupObj)}
+                            title="Rename / recolor"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '2px 5px', borderRadius: 4, fontSize: 12, lineHeight: 1 }}
                           >✏️</button>
                           <button
-                            onClick={() => deleteGroup(group)}
+                            onClick={() => deleteGroup(groupObj)}
                             title="Delete group"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fca5a5', padding: '2px 5px', borderRadius: 4, fontSize: 12, lineHeight: 1 }}
                           >✕</button>
@@ -366,7 +514,7 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                     {/* Add + Dial buttons */}
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button
-                        onClick={() => setShowAdd(group)}
+                        onClick={() => setShowAdd(groupName)}
                         style={{
                           flex: 1, padding: '5px 0', borderRadius: 6,
                           border: '1.5px dashed #e5e7eb', fontSize: 10, fontWeight: 600,
@@ -378,77 +526,107 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                       </button>
                       {cards.length > 0 && (
                         <button
-                          onClick={() => dialGroup(group)}
+                          onClick={() => dialGroup(groupName)}
+                          title={`Dial all ${cards.length} contacts in this group`}
                           style={{
                             padding: '5px 12px', borderRadius: 6, border: 'none',
                             fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
-                            textTransform: 'uppercase', color: '#fff', background: DARK,
+                            textTransform: 'uppercase', color: '#fff',
+                            background: isUngroup ? DARK : accentColor,
                             cursor: 'pointer', whiteSpace: 'nowrap',
+                            boxShadow: `0 1px 6px ${accentColor}55`,
                           }}
                         >
-                          Dial
+                          ▶ Dial
                         </button>
                       )}
                     </div>
                   </div>
 
-                  {/* Cards */}
-                  <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 8px' }}>
+                  {/* Cards list */}
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
                     {cards.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '28px 0', color: isOver ? GOLD : '#d1d5db', fontSize: 12, transition: 'color 0.15s' }}>
+                      <div style={{
+                        textAlign: 'center', padding: '32px 0',
+                        color: isOver ? GOLD : '#d1d5db', fontSize: 12,
+                        transition: 'color 0.15s',
+                      }}>
                         {isOver ? '⬇ Drop here' : 'No contacts'}
                       </div>
                     ) : (
-                      cards.map(c => (
-                        <div
-                          key={c.id}
-                          draggable
-                          onDragStart={e => onDragStart(e, c.id)}
-                          onDragEnd={onDragEnd}
-                          onClick={() => { setSelected(c); setEditNotes(c.notes || ''); }}
-                          style={{
-                            background: selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fafafa',
-                            borderRadius: 9,
-                            border: `1px solid ${selected?.id === c.id ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.06)'}`,
-                            padding: '10px 12px',
-                            marginBottom: 6,
-                            cursor: 'grab',
-                            opacity: draggingId === c.id ? 0.4 : 1,
-                            transition: 'opacity 0.1s, border-color 0.1s, background 0.1s',
-                            userSelect: 'none',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
+                      cards.map(c => {
+                        const scoreColor = c.leadScore != null
+                          ? c.leadScore >= 70 ? '#22c55e' : c.leadScore >= 40 ? GOLD : '#9ca3af'
+                          : null;
+                        return (
+                          <div
+                            key={c.id}
+                            draggable
+                            onDragStart={e => onDragStart(e, c.id)}
+                            onDragEnd={onDragEnd}
+                            onClick={() => { setSelected(c); setEditNotes(c.notes || ''); }}
+                            style={{
+                              background: selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fafafa',
+                              borderRadius: 9,
+                              border: `1px solid ${selected?.id === c.id ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.06)'}`,
+                              padding: '10px 12px',
+                              marginBottom: 6,
+                              cursor: 'grab',
+                              opacity: draggingId === c.id ? 0.35 : 1,
+                              transition: 'opacity 0.1s, border-color 0.1s, background 0.1s',
+                              userSelect: 'none',
+                              position: 'relative',
+                            }}
+                          >
+                            {/* Lead score bar */}
+                            {c.leadScore != null && (
                               <div style={{
-                                fontWeight: 600, fontSize: 13, color: DARK,
-                                marginBottom: 3, whiteSpace: 'nowrap',
-                                overflow: 'hidden', textOverflow: 'ellipsis',
-                              }}>
-                                {c.firstName} {c.lastName}
-                              </div>
-                              <div style={{ fontSize: 11, color: GOLD, fontFamily: 'monospace', letterSpacing: '0.01em' }}>
-                                {fmtPhone(c.phone)}
-                              </div>
-                              {c.address && (
-                                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                  {c.address}
+                                position: 'absolute', top: 0, left: 0, bottom: 0,
+                                width: 3, borderRadius: '9px 0 0 9px',
+                                background: scoreColor || 'transparent',
+                              }} />
+                            )}
+
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{
+                                  fontWeight: 600, fontSize: 13, color: DARK,
+                                  marginBottom: 3, whiteSpace: 'nowrap',
+                                  overflow: 'hidden', textOverflow: 'ellipsis',
+                                }}>
+                                  {c.firstName} {c.lastName}
                                 </div>
+                                <div style={{ fontSize: 11, color: GOLD, fontFamily: 'monospace', letterSpacing: '0.01em' }}>
+                                  {fmtPhone(c.phone)}
+                                </div>
+                                {c.address && (
+                                  <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    {c.address}
+                                  </div>
+                                )}
+                              </div>
+                              {/* Status dot */}
+                              <div
+                                title={c.status}
+                                style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[c.status] || '#9ca3af', flexShrink: 0, marginTop: 4 }}
+                              />
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                              {c.calls && c.calls.length > 0 && (
+                                <span style={{ fontSize: 10, color: '#9ca3af' }}>
+                                  📞 {c.calls.length}
+                                </span>
+                              )}
+                              {c.leadScore != null && (
+                                <span style={{ fontSize: 10, color: scoreColor || '#9ca3af', fontWeight: 600 }}>
+                                  {c.leadScore}
+                                </span>
                               )}
                             </div>
-                            {/* Status dot */}
-                            <div
-                              title={c.status}
-                              style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[c.status] || '#9ca3af', flexShrink: 0, marginTop: 4 }}
-                            />
                           </div>
-                          {c.calls && c.calls.length > 0 && (
-                            <div style={{ marginTop: 6, fontSize: 10, color: '#9ca3af' }}>
-                              {c.calls.length} call{c.calls.length !== 1 ? 's' : ''}
-                            </div>
-                          )}
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -460,7 +638,7 @@ export default function Contacts({ onNavigate }: ContactsProps) {
               <div style={{
                 width: 256, flexShrink: 0, background: '#fff', borderRadius: 14,
                 border: '1.5px dashed rgba(201,168,76,0.5)', padding: '16px 14px',
-                display: 'flex', flexDirection: 'column', gap: 10,
+                display: 'flex', flexDirection: 'column', gap: 12,
                 boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
               }}>
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: GOLD }}>
@@ -474,19 +652,44 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                   onKeyDown={e => { if (e.key === 'Enter') createGroup(); if (e.key === 'Escape') setCreatingGroup(false); }}
                   style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13, outline: 'none' }}
                 />
+                {/* Color picker */}
+                <div>
+                  <div style={{ fontSize: 9, color: '#9ca3af', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 7 }}>Color</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {GROUP_COLORS.map(c => (
+                      <div
+                        key={c}
+                        onClick={() => setNewGroupColor(c)}
+                        style={{
+                          width: 20, height: 20, borderRadius: '50%', background: c,
+                          cursor: 'pointer',
+                          border: newGroupColor === c ? '2px solid #fff' : '2px solid transparent',
+                          boxShadow: newGroupColor === c ? `0 0 0 2px ${c}` : 'none',
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={createGroup} style={{ flex: 1, padding: '8px', borderRadius: 8, border: 'none', background: DARK, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                    Create
+                  <button
+                    onClick={createGroup}
+                    disabled={createSaving}
+                    style={{ flex: 1, padding: '8px', borderRadius: 8, border: 'none', background: DARK, color: '#fff', fontSize: 12, fontWeight: 600, cursor: createSaving ? 'not-allowed' : 'pointer' }}
+                  >
+                    {createSaving ? 'Creating…' : 'Create'}
                   </button>
-                  <button onClick={() => setCreatingGroup(false)} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'transparent', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}>
+                  <button
+                    onClick={() => { setCreatingGroup(false); setNewGroupName(''); }}
+                    style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'transparent', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}
+                  >
                     Cancel
                   </button>
                 </div>
               </div>
             )}
 
-            {/* ── Empty state ─────────────────── */}
-            {groups.length === 0 && !creatingGroup && contacts.length === 0 && (
+            {/* ── Empty state ─── */}
+            {groups.length === 0 && !creatingGroup && contacts.length === 0 && !grpLoading && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 16, paddingBottom: 40 }}>
                 <div style={{ fontSize: 52, opacity: 0.3 }}>👥</div>
                 <div style={{ fontSize: 17, fontWeight: 300, letterSpacing: '0.08em', color: '#9ca3af' }}>No contacts yet</div>
@@ -504,13 +707,12 @@ export default function Contacts({ onNavigate }: ContactsProps) {
         )}
       </div>
 
-      {/* ── Contact detail side panel ──────────────────────────────────── */}
+      {/* ── Contact detail side panel ──────────────────────────────── */}
       {selected && (
         <>
-          {/* Backdrop on mobile */}
           <div
             onClick={() => setSelected(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.2)', zIndex: 99, display: 'block' }}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.18)', zIndex: 99 }}
             className="md:hidden"
           />
           <div style={{
@@ -520,7 +722,12 @@ export default function Contacts({ onNavigate }: ContactsProps) {
             display: 'flex', flexDirection: 'column', zIndex: 100,
           }}>
             {/* Header */}
-            <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0 }}>
+            <div style={{
+              padding: '16px 18px',
+              borderBottom: '1px solid rgba(0,0,0,0.06)',
+              display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexShrink: 0,
+              borderTop: `3px solid ${selected.contactGroup ? (groupByName(selected.contactGroup)?.color || GOLD) : '#e5e7eb'}`,
+            }}>
               <div>
                 <div style={{ fontSize: 9, letterSpacing: '0.2em', textTransform: 'uppercase', color: GOLD, fontWeight: 700, marginBottom: 4 }}>
                   {selected.contactGroup || 'Ungrouped'}
@@ -528,6 +735,14 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                 <div style={{ fontSize: 19, fontWeight: 300, color: DARK, letterSpacing: '0.02em' }}>
                   {selected.firstName} {selected.lastName}
                 </div>
+                {selected.leadScore != null && (
+                  <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 3 }}>
+                    Lead score: <span style={{
+                      fontWeight: 700,
+                      color: selected.leadScore >= 70 ? '#22c55e' : selected.leadScore >= 40 ? GOLD : '#9ca3af',
+                    }}>{selected.leadScore}</span>
+                  </div>
+                )}
               </div>
               <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#9ca3af', padding: '2px 4px', marginTop: -2 }}>✕</button>
             </div>
@@ -537,9 +752,10 @@ export default function Contacts({ onNavigate }: ContactsProps) {
               {/* Info rows */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
-                  { label: 'Phone',   value: selected.phone, mono: true },
-                  selected.email   ? { label: 'Email',   value: selected.email }   : null,
-                  selected.address ? { label: 'Address', value: [selected.address, selected.city].filter(Boolean).join(', ') } : null,
+                  { label: 'Phone',   value: selected.phone,   mono: true },
+                  selected.email   ? { label: 'Email',   value: selected.email,   mono: false } : null,
+                  selected.address ? { label: 'Address', value: [selected.address, selected.city, selected.state].filter(Boolean).join(', '), mono: false } : null,
+                  selected.source  ? { label: 'Source',  value: selected.source,  mono: false } : null,
                 ].filter(Boolean).map((row: any) => (
                   <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
                     <span style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', flexShrink: 0, marginTop: 2 }}>{row.label}</span>
@@ -554,13 +770,12 @@ export default function Contacts({ onNavigate }: ContactsProps) {
               <div>
                 <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 8 }}>Status</div>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {(['new', 'contacted', 'callback', 'hot', 'dnc'] as const).map(s => (
+                  {(['new', 'contacted', 'callback', 'hot', 'appointment', 'dnc'] as const).map(s => (
                     <button
                       key={s}
                       onClick={async () => {
                         await authFetch(`${API_BASE}/contacts/${selected.id}`, {
                           method: 'PATCH',
-                          headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ status: s }),
                         });
                         setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, status: s } : c));
@@ -581,25 +796,18 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                 </div>
               </div>
 
-              {/* Move to group */}
+              {/* Group selector */}
               <div>
                 <div style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 8 }}>Group</div>
                 <select
                   value={selected.contactGroup || ''}
-                  onChange={async e => {
-                    const val = e.target.value || null;
-                    await authFetch(`${API_BASE}/contacts/${selected.id}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ contactGroup: val }),
-                    });
-                    setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, contactGroup: val } : c));
-                    setSelected(prev => prev ? { ...prev, contactGroup: val } : null);
-                  }}
+                  onChange={e => reassignGroup(selected.id, e.target.value || null)}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12, background: '#fafafa', outline: 'none' }}
                 >
                   <option value="">Ungrouped</option>
-                  {groups.map(g => <option key={g} value={g}>{g}</option>)}
+                  {groups.map(g => (
+                    <option key={g.id} value={g.name}>{g.name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -645,12 +853,28 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                   {saving ? 'Saving…' : 'Save Notes'}
                 </button>
               </div>
+
+              {/* Danger zone */}
+              <div style={{ paddingTop: 8, borderTop: '1px solid #f5f5f5' }}>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm('Mark this contact DNC? They will not be dialed.')) return;
+                    await authFetch(`${API_BASE}/contacts/${selected.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'dnc' }) });
+                    setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, status: 'dnc' } : c));
+                    setSelected(null);
+                    toast.success('Contact marked DNC');
+                  }}
+                  style={{ fontSize: 10, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', letterSpacing: '0.05em' }}
+                >
+                  Mark DNC
+                </button>
+              </div>
             </div>
           </div>
         </>
       )}
 
-      {/* ── Add Contact modal ──────────────────────────────────────────── */}
+      {/* ── Add Contact modal ────────────────────────────────────────── */}
       {showAdd !== null && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div style={{ background: '#fff', borderRadius: 14, width: '100%', maxWidth: 400, overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.15)' }}>
@@ -667,45 +891,30 @@ export default function Contacts({ onNavigate }: ContactsProps) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div>
                   <label style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>First Name *</label>
-                  <input
-                    value={newContact.firstName}
-                    onChange={e => setNewContact(p => ({ ...p, firstName: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
-                  />
+                  <input value={newContact.firstName} onChange={e => setNewContact(p => ({ ...p, firstName: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
                 </div>
                 <div>
                   <label style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>Last Name</label>
-                  <input
-                    value={newContact.lastName}
-                    onChange={e => setNewContact(p => ({ ...p, lastName: e.target.value }))}
-                    style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
-                  />
+                  <input value={newContact.lastName} onChange={e => setNewContact(p => ({ ...p, lastName: e.target.value }))}
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
                 </div>
               </div>
               <div>
                 <label style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>Phone *</label>
-                <input
-                  value={newContact.phone}
-                  onChange={e => setNewContact(p => ({ ...p, phone: e.target.value }))}
+                <input value={newContact.phone} onChange={e => setNewContact(p => ({ ...p, phone: e.target.value }))}
                   placeholder="+14155551234"
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
-                />
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
               </div>
               <div>
                 <label style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>Email</label>
-                <input
-                  value={newContact.email}
-                  onChange={e => setNewContact(p => ({ ...p, email: e.target.value }))}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
-                />
+                <input value={newContact.email} onChange={e => setNewContact(p => ({ ...p, email: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
               </div>
               <div>
                 <label style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.1em', display: 'block', marginBottom: 4 }}>Address</label>
-                <input
-                  value={newContact.address}
-                  onChange={e => setNewContact(p => ({ ...p, address: e.target.value }))}
-                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
-                />
+                <input value={newContact.address} onChange={e => setNewContact(p => ({ ...p, address: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', boxSizing: 'border-box' }} />
               </div>
             </div>
             <div style={{ padding: '14px 20px', borderTop: '1px solid #f0f0f0', display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
@@ -721,8 +930,12 @@ export default function Contacts({ onNavigate }: ContactsProps) {
       )}
 
       {showImport && (
-        <CsvImportModal onClose={() => setShowImport(false)} onImported={() => loadContacts()} />
+        <CsvImportModal onClose={() => setShowImport(false)} onImported={() => { loadContacts(); loadGroups(); }} />
       )}
+
+      <style>{`
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+      `}</style>
     </div>
   );
 }

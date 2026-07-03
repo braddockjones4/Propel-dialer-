@@ -6,7 +6,7 @@ import prisma from '../db';
 import { io } from '../socket';
 import { computeLeadScore } from '../leadScore';
 
-export type ActionType = 'sms' | 'followup' | 'appointment' | 'status' | 'note' | 'dnc' | 'escalate' | 'group';
+export type ActionType = 'sms' | 'followup' | 'appointment' | 'status' | 'note' | 'dnc' | 'escalate';
 
 export interface ActionSpec {
   type: ActionType;
@@ -20,8 +20,6 @@ export interface ActionSpec {
     status?: string;        // for status updates
     note?: string;
     scheduledFor?: string;  // ISO — deferred follow-up send time
-    groupName?: string;     // for group assignment
-    groupColor?: string;    // optional color for new group
   };
 }
 
@@ -135,43 +133,6 @@ export async function executeActionSpec(spec: ActionSpec, contactId: string): Pr
       // No outbound side-effect — just flag for the human via socket + note.
       try { io.emit('agent-escalation', { contactId, note: spec.payload.note || spec.reasoning }); } catch {}
       return `Escalated to human: ${spec.payload.note || spec.reasoning || 'needs attention'}`;
-    }
-
-    case 'group': {
-      const groupName = spec.payload.groupName?.trim();
-      if (!groupName) throw new Error('groupName required');
-
-      // Upsert the group in ContactGroup table (creates it if new)
-      const existingLast = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
-      const nextPos = (existingLast?.position ?? -1) + 1;
-
-      const group = await (prisma as any).contactGroup.upsert({
-        where: { name: groupName },
-        create: {
-          name: groupName,
-          color: spec.payload.groupColor || '#9ca3af',
-          position: nextPos,
-        },
-        update: {},  // already exists — keep current settings
-      });
-
-      // Assign the contact to this group
-      await prisma.contact.update({
-        where: { id: contactId },
-        data: { contactGroup: groupName },
-      });
-
-      // Notify front-end so the kanban board updates in real time
-      try {
-        io.emit('agent-group', {
-          contactId,
-          groupId: group.id,
-          groupName,
-          action: 'assign',
-        });
-      } catch { /* socket optional */ }
-
-      return `Assigned to group "${groupName}"`;
     }
 
     default:
