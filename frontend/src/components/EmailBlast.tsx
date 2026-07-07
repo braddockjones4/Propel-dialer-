@@ -109,8 +109,7 @@ export default function EmailBlast() {
   // in the auth URL via a redirect that the backend exchanges for the user session.
   // (Backend reads state param = userId which is safe for OAuth flows.)
   const connectGmailViaAPI = () => {
-    // Open OAuth URL — backend uses requireAuth which reads the Bearer token from query too
-    window.location.href = `${API_BASE}/gmail/auth`;
+    window.location.href = `${API_BASE}/gmail/auth?token=${token}`;
   };
 
   const disconnect = async () => {

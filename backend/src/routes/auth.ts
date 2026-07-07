@@ -19,7 +19,8 @@ const JWT_EXPIRES = '30d';
 // ── Middleware: verify JWT ────────────────────────────────────────────────────
 export async function requireAuth(req: any, res: Response, next: any) {
   const header = req.headers.authorization || '';
-  const token  = header.startsWith('Bearer ') ? header.slice(7) : null;
+  // Also accept ?token= query param for OAuth redirects (browser can't send headers)
+  const token  = header.startsWith('Bearer ') ? header.slice(7) : (req.query?.token as string | undefined) || null;
   if (!token) { res.status(401).json({ error: 'Unauthorized' }); return; }
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { userId: string };
