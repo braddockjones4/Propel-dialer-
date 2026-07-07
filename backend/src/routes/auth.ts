@@ -137,6 +137,45 @@ function safeUser(u: any) {
   return rest;
 }
 
+// ── GET /api/auth/demo ────────────────────────────────────────────────────────
+// Returns a JWT for the shared demo account. Creates it on first call.
+router.get('/demo', async (_req: Request, res: Response) => {
+  try {
+    const DEMO_EMAIL = 'demo@compasssolutions.com';
+    const DEMO_NAME  = 'Demo User';
+
+    let user = await db.user.findUnique({ where: { email: DEMO_EMAIL } });
+
+    if (!user) {
+      const passwordHash = await bcrypt.hash('demo-compass-2026', 12);
+      user = await db.user.create({
+        data: { email: DEMO_EMAIL, passwordHash, name: DEMO_NAME, role: 'agent' },
+      });
+
+      // Seed demo contacts if the DB is empty
+      const count = await db.contact.count();
+      if (count === 0) {
+        await db.contact.createMany({
+          data: [
+            { firstName: 'Margaret', lastName: 'Thornton',  phone: '+15550100001', contactGroup: 'Expired Listings',  status: 'new'       },
+            { firstName: 'James',    lastName: 'Whitfield', phone: '+15550100002', contactGroup: 'FSBO',              status: 'contacted'  },
+            { firstName: 'Sarah',    lastName: 'Chen',      phone: '+15550100003', contactGroup: 'Circle Prospects',  status: 'new'        },
+            { firstName: 'Robert',   lastName: 'Harrington',phone: '+15550100004', contactGroup: 'Expired Listings',  status: 'callback'   },
+            { firstName: 'Linda',    lastName: 'Morrison',  phone: '+15550100005', contactGroup: 'Past Clients',      status: 'new'        },
+            { firstName: 'David',    lastName: 'Park',      phone: '+15550100006', contactGroup: 'Sphere',            status: 'new'        },
+          ],
+        });
+      }
+    }
+
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.json({ token, user: safeUser(user) });
+  } catch (e: any) {
+    console.error('[Auth] demo:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── POST /api/auth/forgot-password ───────────────────────────────────────────
 router.post('/forgot-password', async (req: Request, res: Response) => {
   try {

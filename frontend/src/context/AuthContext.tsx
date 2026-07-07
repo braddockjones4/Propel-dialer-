@@ -59,7 +59,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, [apiFetch]);
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('demo')) {
+      // Auto-login as the shared demo account
+      fetch(`${API_BASE}/auth/demo`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.token) {
+            localStorage.setItem('propel_token', data.token);
+            setToken(data.token);
+            setUser(data.user);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    } else {
+      refresh();
+    }
+  }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<string | null> => {
     try {

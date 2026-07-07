@@ -97,7 +97,7 @@ function AppInner() {
             </defs>
             <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-nav-app)"/>
           </svg>
-          <span className="font-serif font-light text-xl text-black" style={{ letterSpacing: '0.2em' }}>Real Estate AI</span>
+          <span className="font-serif font-light text-xl text-black" style={{ letterSpacing: '0.2em' }}>Propel Dialer</span>
         </div>
 
         <div className="w-px h-4 mr-6" style={{ background: 'rgba(201,168,76,0.3)' }} />

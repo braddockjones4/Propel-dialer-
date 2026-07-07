@@ -80,10 +80,10 @@ export default function Login({ onBack }: Props) {
           {/* Logo */}
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
             <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 24, fontWeight: 300, letterSpacing: '0.2em', color: '#1a1a1a' }}>
-              Real Estate AI
+              Propel Dialer
             </div>
             <div style={{ fontSize: 11, color: '#9ca3af', letterSpacing: '0.15em', marginTop: 4, textTransform: 'uppercase' }}>
-              Client Portal
+              Real Estate AI
             </div>
           </div>
 
