@@ -23,6 +23,7 @@ interface BlastResult {
   failed: number;
   total: number;
   errors: string[];
+  errorDetails?: { email: string; reason: string }[];
 }
 
 type RecipientMode = 'all' | 'group' | 'select';
@@ -519,8 +520,13 @@ export default function EmailBlast() {
 
           {result.errors.length > 0 && (
             <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '12px 16px', marginBottom: 24, textAlign: 'left' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', marginBottom: 6 }}>Failed addresses:</div>
-              {result.errors.map(e => <div key={e} style={{ fontSize: 12, color: '#dc2626' }}>{e}</div>)}
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#dc2626', marginBottom: 8 }}>Failed addresses:</div>
+              {(result.errorDetails || result.errors.map(e => ({ email: e, reason: '' }))).map(({ email, reason }) => (
+                <div key={email} style={{ marginBottom: 6 }}>
+                  <div style={{ fontSize: 12, color: '#dc2626', fontWeight: 600 }}>{email}</div>
+                  {reason && <div style={{ fontSize: 11, color: '#ef4444', marginTop: 2 }}>{reason}</div>}
+                </div>
+              ))}
             </div>
           )}
 

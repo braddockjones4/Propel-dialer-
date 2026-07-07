@@ -157,6 +157,13 @@ router.post('/blast', requireAuth, async (req: any, res: Response) => {
     let sent = 0;
     let failed = 0;
     const errors: string[] = [];
+    const errorDetails: { email: string; reason: string }[] = [];
+
+    // Build From header — avoid leading space when name is empty
+    const fromName = (user.name || '').trim();
+    const fromHeader = fromName
+      ? `"${fromName}" <${user.gmailEmail}>`
+      : `<${user.gmailEmail}>`;
 
     // Send one at a time with a short delay to stay within Gmail rate limits
     for (const contact of withEmail) {
@@ -167,11 +174,11 @@ router.post('/blast', requireAuth, async (req: any, res: Response) => {
           .replace(/\{\{lastName\}\}/gi, contact.lastName || '')
           .replace(/\{\{fullName\}\}/gi, `${contact.firstName} ${contact.lastName}`.trim());
 
-        const htmlBody = buildEmailHtml(personalizedBody, user.name || user.email);
+        const htmlBody = buildEmailHtml(personalizedBody, fromName || user.gmailEmail);
 
         const raw = buildRawMessage({
-          from:    `${user.name || ''} <${user.gmailEmail}>`,
-          to:      contact.email,
+          from:    fromHeader,
+          to:      contact.email!,
           subject: subject.replace(/\{\{firstName\}\}/gi, contact.firstName || 'there'),
           html:    htmlBody,
         });
@@ -183,8 +190,10 @@ router.post('/blast', requireAuth, async (req: any, res: Response) => {
 
         sent++;
       } catch (e: any) {
-        console.error(`[Gmail] Failed to send to ${contact.email}:`, e.message);
-        errors.push(contact.email);
+        const reason = e?.response?.data?.error?.message || e?.message || 'Unknown error';
+        console.error(`[Gmail] Failed to send to ${contact.email}:`, reason);
+        errors.push(contact.email!);
+        errorDetails.push({ email: contact.email!, reason });
         failed++;
       }
 
@@ -192,7 +201,7 @@ router.post('/blast', requireAuth, async (req: any, res: Response) => {
       await delay(350);
     }
 
-    res.json({ ok: true, sent, failed, total: withEmail.length, errors });
+    res.json({ ok: true, sent, failed, total: withEmail.length, errors, errorDetails });
   } catch (e: any) {
     console.error('[Gmail] blast error:', e.message);
     res.status(500).json({ error: e.message });
