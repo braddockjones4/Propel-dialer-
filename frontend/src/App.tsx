@@ -32,19 +32,21 @@ import Appointments from './components/Appointments';
 import Voicemails from './components/Voicemails';
 import Dashboard from './components/Dashboard';
 import AgentChat from './components/AgentChat';
+import EmailBlast from './components/EmailBlast';
 
-type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'settings';
+type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'email' | 'settings';
 
 const NAV: { id: Page; label: string }[] = [
-  { id: 'dashboard',    label: 'Home'       },
-  { id: 'dialer',       label: 'Dialer'     },
-  { id: 'contacts',     label: 'Contacts'   },
-  { id: 'pipeline',     label: 'Pipeline'   },
-  { id: 'appointments', label: 'Calendar'   },
-  { id: 'voicemails',   label: 'Voicemails' },
-  { id: 'analytics',    label: 'Analytics'  },
-  { id: 'agent',        label: 'AI Agent'   },
-  { id: 'settings',     label: 'Settings'   },
+  { id: 'dashboard',    label: 'Home'        },
+  { id: 'dialer',       label: 'Dialer'      },
+  { id: 'contacts',     label: 'Contacts'    },
+  { id: 'pipeline',     label: 'Pipeline'    },
+  { id: 'appointments', label: 'Calendar'    },
+  { id: 'voicemails',   label: 'Voicemails'  },
+  { id: 'analytics',    label: 'Analytics'   },
+  { id: 'agent',        label: 'AI Agent'    },
+  { id: 'email',        label: 'Email Blast' },
+  { id: 'settings',     label: 'Settings'    },
 ];
 
 // ── Inner app (has auth context) ─────────────────────────────────────────────
@@ -259,6 +261,7 @@ function AppInner() {
         {page === 'appointments' && <Appointments />}
         {page === 'analytics'    && <Analytics />}
         {page === 'agent'        && <AgentChat />}
+        {page === 'email'        && <EmailBlast />}
         {page === 'settings'     && <Settings />}
       </div>
 

@@ -135,6 +135,10 @@ model User {
   stripeCustomerId   String?
   stripeSubId        String?
   planExpiresAt  DateTime?
+  gmailAccessToken  String?   // OAuth access token for Gmail API
+  gmailRefreshToken String?   // OAuth refresh token (long-lived)
+  gmailEmail        String?   // Connected Gmail address
+  gmailTokenExpiry  DateTime? // When access token expires
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   dialerSettings DialerSettings?

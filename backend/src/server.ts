@@ -38,6 +38,7 @@ import settingsRoutes from './routes/settings';
 import agentRoutes from './routes/agent';
 import agentChatRoutes from './routes/agentChat';
 import contactGroupRoutes from './routes/contactGroups';
+import gmailBlastRoutes from './routes/gmailBlast';
 import { initAgentScheduler } from './agent/scheduler';
 import { ensureAgentSchema } from './agent/ensureSchema';
 
@@ -83,6 +84,7 @@ app.use('/api/ai-script',       requireAuth, aiScriptRoutes);
 app.use('/api/dnc',             requireAuth, dncRoutes);
 app.use('/api/appointments',    requireAuth, appointmentRoutes);
 app.use('/api/email',           requireAuth, emailRoutes);
+app.use('/api/gmail',                        gmailBlastRoutes); // OAuth callback must be unauthed
 app.use('/api/reports',         requireAuth, reportsRoutes);
 app.use('/api/next-action',     requireAuth, nextActionRoutes);
 app.use('/api/transcription',   requireAuth, transcriptionRoutes);
