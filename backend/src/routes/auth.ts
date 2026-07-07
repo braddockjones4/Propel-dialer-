@@ -149,7 +149,7 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
     // Generate a signed reset token (expires in 1 hour)
     const resetToken = jwt.sign({ userId: user.id, type: 'reset' }, JWT_SECRET, { expiresIn: '1h' });
-    const frontendUrl = process.env.FRONTEND_URL || 'https://propelsolutions.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://compasssolutions.com';
     const resetUrl = `${frontendUrl}?reset=${resetToken}`;
 
     const { SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, AGENT_NAME } = process.env;
