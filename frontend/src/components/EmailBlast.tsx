@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE } from '../config';
 
 const GOLD  = '#C9A84C';
@@ -46,6 +46,37 @@ export default function EmailBlast() {
   const [body, setBody]                   = useState('');
   const [result, setResult]               = useState<BlastResult | null>(null);
   const [sendError, setSendError]         = useState('');
+
+  // Refs for cursor-position token insertion
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const bodyRef    = useRef<HTMLTextAreaElement>(null);
+  const lastFocus  = useRef<'subject' | 'body'>('body');
+
+  const insertToken = useCallback((token: string) => {
+    const field = lastFocus.current;
+    if (field === 'subject' && subjectRef.current) {
+      const el = subjectRef.current;
+      const start = el.selectionStart ?? subject.length;
+      const end   = el.selectionEnd   ?? subject.length;
+      const next  = subject.slice(0, start) + token + subject.slice(end);
+      setSubject(next);
+      // Restore cursor after the inserted token
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(start + token.length, start + token.length);
+      });
+    } else if (bodyRef.current) {
+      const el = bodyRef.current;
+      const start = el.selectionStart ?? body.length;
+      const end   = el.selectionEnd   ?? body.length;
+      const next  = body.slice(0, start) + token + body.slice(end);
+      setBody(next);
+      requestAnimationFrame(() => {
+        el.focus();
+        el.setSelectionRange(start + token.length, start + token.length);
+      });
+    }
+  }, [subject, body]);
 
   const token = localStorage.getItem('propel_token');
   const authHeader = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -381,15 +412,47 @@ export default function EmailBlast() {
 
           {/* Compose */}
           <div style={card}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: BLACK, marginBottom: 16 }}>Message</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: BLACK }}>Message</div>
+              {/* Token insert chips */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 10, color: GRAY, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Insert:</span>
+                {[
+                  { label: 'First Name', token: '{{firstName}}' },
+                  { label: 'Last Name',  token: '{{lastName}}'  },
+                  { label: 'Full Name',  token: '{{fullName}}'  },
+                ].map(({ label, token: t }) => (
+                  <button
+                    key={t}
+                    onMouseDown={e => { e.preventDefault(); insertToken(t); }}
+                    style={{
+                      padding: '4px 10px',
+                      border: `1.5px solid ${GOLD}`,
+                      borderRadius: 20,
+                      background: 'rgba(201,168,76,0.07)',
+                      color: '#9A7A2E',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      letterSpacing: '0.03em',
+                    }}
+                  >
+                    + {label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div style={{ marginBottom: 14 }}>
               <label style={label}>Subject Line</label>
               <input
+                ref={subjectRef}
                 type="text"
                 value={subject}
                 onChange={e => setSubject(e.target.value)}
-                placeholder="e.g. Market update for {{firstName}}"
+                onFocus={() => { lastFocus.current = 'subject'; }}
+                placeholder="e.g. Quick update for you, {{firstName}}"
                 style={input}
               />
             </div>
@@ -397,20 +460,18 @@ export default function EmailBlast() {
             <div style={{ marginBottom: 8 }}>
               <label style={label}>Message Body</label>
               <textarea
+                ref={bodyRef}
                 value={body}
                 onChange={e => setBody(e.target.value)}
+                onFocus={() => { lastFocus.current = 'body'; }}
                 placeholder={`Hi {{firstName}},\n\nI wanted to reach out with a quick update on the market in your area...\n\nBest,\n[Your Name]`}
                 rows={10}
                 style={{ ...input, resize: 'vertical', minHeight: 200, lineHeight: 1.7 }}
               />
             </div>
 
-            <div style={{ fontSize: 11, color: GRAY, lineHeight: 1.7 }}>
-              <strong style={{ color: BLACK }}>Personalization tokens:</strong>{' '}
-              <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>{'{{firstName}}'}</code>{' '}
-              <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>{'{{lastName}}'}</code>{' '}
-              <code style={{ background: '#f3f4f6', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>{'{{fullName}}'}</code>{' '}
-              — replaced with each contact's name automatically.
+            <div style={{ fontSize: 11, color: GRAY }}>
+              Click a token above to insert it at your cursor position — each recipient's name fills in automatically when sent.
             </div>
           </div>
 
