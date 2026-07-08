@@ -38,14 +38,14 @@ type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'a
 
 const NAV: { id: Page; label: string }[] = [
   { id: 'dashboard',    label: 'Home'        },
-  { id: 'email',        label: 'Email Blast' },
   { id: 'dialer',       label: 'Dialer'      },
+  { id: 'voicemails',   label: 'Voicemails'  },
+  { id: 'email',        label: 'Email Blast' },
   { id: 'contacts',     label: 'Contacts'    },
+  { id: 'agent',        label: 'AI Agent'    },
   { id: 'pipeline',     label: 'Pipeline'    },
   { id: 'appointments', label: 'Calendar'    },
-  { id: 'voicemails',   label: 'Voicemails'  },
   { id: 'analytics',    label: 'Analytics'   },
-  { id: 'agent',        label: 'AI Agent'    },
   { id: 'settings',     label: 'Settings'    },
 ];
 

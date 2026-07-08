@@ -79,6 +79,7 @@ export default function Contacts({ onNavigate }: ContactsProps) {
   // Selected contact detail panel
   const [selected,  setSelected]  = useState<Contact | null>(null);
   const [editNotes, setEditNotes] = useState('');
+  const [editEmail, setEditEmail] = useState('');
   const [saving,    setSaving]    = useState(false);
 
   // New group creation
@@ -564,7 +565,7 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                             draggable
                             onDragStart={e => onDragStart(e, c.id)}
                             onDragEnd={onDragEnd}
-                            onClick={() => { setSelected(c); setEditNotes(c.notes || ''); }}
+                            onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
                             style={{
                               background: selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fafafa',
                               borderRadius: 9,
@@ -753,7 +754,6 @@ export default function Contacts({ onNavigate }: ContactsProps) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
                   { label: 'Phone',   value: selected.phone,   mono: true },
-                  selected.email   ? { label: 'Email',   value: selected.email,   mono: false } : null,
                   selected.address ? { label: 'Address', value: [selected.address, selected.city, selected.state].filter(Boolean).join(', '), mono: false } : null,
                   selected.source  ? { label: 'Source',  value: selected.source,  mono: false } : null,
                 ].filter(Boolean).map((row: any) => (
@@ -764,6 +764,26 @@ export default function Contacts({ onNavigate }: ContactsProps) {
                     </span>
                   </div>
                 ))}
+                {/* Editable email */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', flexShrink: 0 }}>Email</span>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={e => setEditEmail(e.target.value)}
+                    onBlur={async () => {
+                      if (editEmail === (selected.email || '')) return;
+                      await authFetch(`${API_BASE}/contacts/${selected.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ email: editEmail }),
+                      });
+                      setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, email: editEmail } : c));
+                      setSelected(prev => prev ? { ...prev, email: editEmail } : null);
+                    }}
+                    placeholder="Add email…"
+                    style={{ flex: 1, textAlign: 'right', border: 'none', borderBottom: '1px dashed #e5e7eb', background: 'transparent', fontSize: 12, color: DARK, outline: 'none', padding: '2px 0', minWidth: 0 }}
+                  />
+                </div>
               </div>
 
               {/* Status pills */}
