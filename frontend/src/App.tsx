@@ -38,6 +38,7 @@ type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'a
 
 const NAV: { id: Page; label: string }[] = [
   { id: 'dashboard',    label: 'Home'        },
+  { id: 'email',        label: 'Email Blast' },
   { id: 'dialer',       label: 'Dialer'      },
   { id: 'contacts',     label: 'Contacts'    },
   { id: 'pipeline',     label: 'Pipeline'    },
@@ -45,7 +46,6 @@ const NAV: { id: Page; label: string }[] = [
   { id: 'voicemails',   label: 'Voicemails'  },
   { id: 'analytics',    label: 'Analytics'   },
   { id: 'agent',        label: 'AI Agent'    },
-  { id: 'email',        label: 'Email Blast' },
   { id: 'settings',     label: 'Settings'    },
 ];
 

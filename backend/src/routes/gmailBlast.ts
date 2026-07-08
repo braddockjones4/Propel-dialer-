@@ -176,10 +176,15 @@ router.post('/blast', requireAuth, async (req: any, res: Response) => {
 
         const htmlBody = buildEmailHtml(personalizedBody, fromName || user.gmailEmail);
 
+        const personalizedSubject = subject
+          .replace(/\{\{firstName\}\}/gi, contact.firstName || 'there')
+          .replace(/\{\{lastName\}\}/gi, contact.lastName || '')
+          .replace(/\{\{fullName\}\}/gi, `${contact.firstName} ${contact.lastName}`.trim());
+
         const raw = buildRawMessage({
           from:    fromHeader,
           to:      contact.email!,
-          subject: subject.replace(/\{\{firstName\}\}/gi, contact.firstName || 'there'),
+          subject: personalizedSubject,
           html:    htmlBody,
         });
 
