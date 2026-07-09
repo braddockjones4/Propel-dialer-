@@ -149,25 +149,26 @@ export default function Settings() {
   };
 
   return (
-    <div style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px' }}>
+    <div style={{ maxWidth: 760, margin: '0 auto', padding: 'clamp(16px, 4vw, 32px) clamp(12px, 4vw, 24px)' }}>
       <h1 style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 24, fontWeight: 300, letterSpacing: '0.15em', marginBottom: 24, color: '#1a1a1a' }}>
         SETTINGS
       </h1>
 
-      {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb', marginBottom: 28 }}>
+      {/* Tab bar — scrollable on mobile */}
+      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid #e5e7eb', marginBottom: 28, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}
+           className="hide-scrollbar">
         {TAB_LABELS.map(({ id, label, icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             style={{
-              padding: '8px 18px', fontSize: 11, fontWeight: 600,
+              padding: '8px 14px', fontSize: 11, fontWeight: 600,
               letterSpacing: '0.08em', textTransform: 'uppercase',
-              background: 'none', border: 'none',
+              background: 'none', border: 'none', flexShrink: 0,
               borderBottom: tab === id ? '2px solid #C9A84C' : '2px solid transparent',
               color: tab === id ? '#1a1a1a' : '#9ca3af',
               cursor: 'pointer', transition: 'all 0.2s',
-              marginBottom: -1,
+              marginBottom: -1, whiteSpace: 'nowrap',
             }}
           >
             {icon} {label}

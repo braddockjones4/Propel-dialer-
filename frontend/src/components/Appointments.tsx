@@ -108,18 +108,18 @@ export default function Appointments() {
   const isToday = (d: number) => d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row">
 
       {/* ── Left: Calendar ─────────────────────────────── */}
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-3 md:p-6">
         {/* Header */}
-        <div className="flex items-center justify-between mb-5">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between md:mb-5">
+          <div className="flex items-center gap-3">
             <button onClick={prevMonth} className="btn-ghost px-2 py-1 text-lg">‹</button>
             <h2 className="text-xl font-light tracking-wide text-black">{MONTHS[month]} {year}</h2>
             <button onClick={nextMonth} className="btn-ghost px-2 py-1 text-lg">›</button>
           </div>
-          <button onClick={() => { setShowBook(true); setBookMsg(''); }} className="btn-gold px-5 py-2 text-sm">
+          <button onClick={() => { setShowBook(true); setBookMsg(''); }} className="btn-gold px-4 py-2 text-sm w-full md:w-auto">
             + Book Appointment
           </button>
         </div>
@@ -137,7 +137,7 @@ export default function Appointments() {
             <div
               key={i}
               onClick={() => day && setSelected(day === selected ? null : day)}
-              className={`min-h-[90px] p-2 cursor-pointer transition-colors ${day ? 'bg-white hover:bg-gray-50' : 'bg-gray-50'} ${selected === day ? 'ring-1 ring-inset' : ''}`}
+              className={`min-h-[55px] md:min-h-[90px] p-1 md:p-2 cursor-pointer transition-colors ${day ? 'bg-white hover:bg-gray-50' : 'bg-gray-50'} ${selected === day ? 'ring-1 ring-inset' : ''}`}
               style={selected === day ? { outline: '1px solid #C9A84C', outlineOffset: '-1px' } : {}}
             >
               {day && (
@@ -167,7 +167,7 @@ export default function Appointments() {
       </div>
 
       {/* ── Right: Sidebar ─────────────────────────────── */}
-      <div className="w-72 bg-white border-l border-gray-100 p-5 flex flex-col gap-5">
+      <div className="w-full md:w-72 bg-white border-t md:border-t md:border-l border-gray-100 p-4 md:p-5 flex flex-col gap-5">
 
         {/* Selected day detail */}
         {selected && (
@@ -228,7 +228,7 @@ export default function Appointments() {
       {showBook && (
         <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg w-full max-w-md p-6 shadow-xl">
-            <div className="flex items-center justify-between mb-5">
+            <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between md:mb-5">
               <h2 className="text-lg font-light tracking-wide">Book Appointment</h2>
               <button onClick={() => setShowBook(false)} className="text-gray-400 hover:text-black text-xl">×</button>
             </div>

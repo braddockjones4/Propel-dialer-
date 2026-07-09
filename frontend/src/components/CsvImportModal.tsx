@@ -159,6 +159,9 @@ async function postImport(contacts: ParsedRow[], source: string): Promise<{ impo
   return { imported: json.count ?? json.imported ?? data.length, skipped: json.skipped ?? 0 };
 }
 
+// ── Check for Web Contacts API (native device contacts picker) ────────────────
+const hasContactsAPI = typeof (navigator as any).contacts !== 'undefined';
+
 // ── Main component ─────────────────────────────────────────────────────────────
 type Mode  = 'csv' | 'vcf';
 type Stage = 'upload' | 'map' | 'preview' | 'done';
@@ -167,6 +170,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
   const [mode, setMode]           = useState<Mode>('vcf');
   const [stage, setStage]         = useState<Stage>('upload');
   const [dragging, setDragging]   = useState(false);
+  const [nativeError, setNativeError] = useState('');
 
   // CSV state
   const [headers, setHeaders]     = useState<string[]>([]);
@@ -184,7 +188,41 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
   const csvRef = useRef<HTMLInputElement>(null);
   const vcfRef = useRef<HTMLInputElement>(null);
 
-  const switchMode = (m: Mode) => { setMode(m); setStage('upload'); setRows([]); setVcfContacts([]); setResult(null); };
+  const switchMode = (m: Mode) => { setMode(m); setStage('upload'); setRows([]); setVcfContacts([]); setResult(null); setNativeError(''); };
+
+  // ── Native Contacts API (iOS Safari 14.5+ / Chrome Android) ──────────────
+  const importFromNativeContacts = async () => {
+    setNativeError('');
+    try {
+      const nav = navigator as any;
+      const contacts = await nav.contacts.select(['name', 'tel', 'email'], { multiple: true });
+      if (!contacts || contacts.length === 0) return;
+
+      const parsed: ParsedRow[] = contacts.flatMap((c: any) => {
+        const phones: string[] = (c.tel || []).filter(Boolean);
+        const emails: string[] = (c.email || []).filter(Boolean);
+        const nameStr: string = (c.name || [])[0] || '';
+        const nameParts = nameStr.trim().split(/\s+/);
+        const firstName = nameParts[0] || '';
+        const lastName  = nameParts.slice(1).join(' ') || '';
+
+        if (!phones.length) return [];
+        return phones.slice(0, 1).map(phone => {
+          let digits = phone.replace(/[^\d+]/g, '');
+          if (/^\d{10}$/.test(digits)) digits = `+1${digits}`;
+          else if (/^\d{11}$/.test(digits) && digits[0] === '1') digits = `+${digits}`;
+          return { firstName, lastName, phone: digits, email: emails[0] || '' };
+        });
+      }).filter((c: ParsedRow) => c.phone && c.phone.length >= 10);
+
+      if (!parsed.length) { setNativeError('No contacts with phone numbers found.'); return; }
+      setVcfContacts(parsed);
+      setStage('preview');
+    } catch (err: any) {
+      if (err.name === 'SecurityError') setNativeError('Contacts access was denied. Please allow it in your browser settings.');
+      else if (err.name !== 'AbortError') setNativeError('Could not open contacts picker. Try the file upload method below.');
+    }
+  };
 
   // ── CSV loading ───────────────────────────────────────────────────────────
   const loadCsvFile = (file: File) => {
@@ -258,12 +296,12 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }}>
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+      <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-2xl max-h-[92vh] flex flex-col"
            style={{ border: '1px solid rgba(201,168,76,0.2)' }}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'rgba(201,168,76,0.15)' }}>
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b" style={{ borderColor: 'rgba(201,168,76,0.15)' }}>
           <div>
             <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 22, margin: 0 }}>Import Contacts</h2>
             <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>From your phone or a CSV file</p>
@@ -272,13 +310,14 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
         </div>
 
         {/* Mode tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #f3f4f6', padding: '0 24px' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid #f3f4f6', padding: '0 16px', overflowX: 'auto' }}
+             className="hide-scrollbar">
           {([
-            { id: 'vcf' as Mode, label: '📱  From Phone (.vcf)', sub: 'iPhone or Android contacts' },
-            { id: 'csv' as Mode, label: '📄  From CSV',           sub: 'Spreadsheet or list export' },
+            { id: 'vcf' as Mode, label: '📱 From Phone', sub: 'iPhone or Android contacts' },
+            { id: 'csv' as Mode, label: '📄 From CSV',   sub: 'Spreadsheet or list export' },
           ] as { id: Mode; label: string; sub: string }[]).map(tab => (
             <button key={tab.id} onClick={() => switchMode(tab.id)} style={{
-              padding: '12px 18px 10px',
+              padding: '12px 16px 10px', flexShrink: 0,
               background: 'none', border: 'none',
               borderBottom: `2px solid ${mode === tab.id ? GOLD : 'transparent'}`,
               cursor: 'pointer', textAlign: 'left', marginBottom: -1,
@@ -289,13 +328,45 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
           ))}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px' }} className="sm:px-6">
 
           {/* ═══ VCF MODE ══════════════════════════════════════════════ */}
           {mode === 'vcf' && stage === 'upload' && (
             <div>
-              {/* Instructions */}
-              <div style={{ marginBottom: 24, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              {/* Native contacts picker — only shown when Web Contacts API is available (iOS Safari / Chrome Android) */}
+              {hasContactsAPI && (
+                <div style={{ marginBottom: 20 }}>
+                  <button
+                    onClick={importFromNativeContacts}
+                    style={{
+                      width: '100%', padding: '16px', borderRadius: 14,
+                      background: 'linear-gradient(135deg, #0A0A0A 0%, #1a1a1a 100%)',
+                      border: '1px solid rgba(201,168,76,0.3)',
+                      color: '#fff', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+                    }}
+                  >
+                    <span style={{ fontSize: 22 }}>📇</span>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '0.02em' }}>Select from iPhone Contacts</div>
+                      <div style={{ fontSize: 11, color: 'rgba(201,168,76,0.8)', marginTop: 2 }}>Opens your native contacts picker</div>
+                    </div>
+                  </button>
+                  {nativeError && (
+                    <div style={{ fontSize: 12, color: '#ef4444', marginTop: 8, padding: '8px 12px', background: '#fef2f2', borderRadius: 8 }}>
+                      {nativeError}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0 0' }}>
+                    <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+                    <span style={{ fontSize: 10, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>or upload a file</span>
+                    <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Instructions — single column on mobile, 2-col on larger screens */}
+              <div style={{ marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
                 {/* iPhone */}
                 <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 10, padding: 16 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -504,7 +575,8 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
         </div>
 
         {/* Footer */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '14px 24px', borderTop: '1px solid rgba(201,168,76,0.12)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '12px 16px', borderTop: '1px solid rgba(201,168,76,0.12)' }}
+             className="sm:px-6">
           {stage === 'upload' && (
             <button onClick={onClose} style={{ padding: '9px 22px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
               Cancel

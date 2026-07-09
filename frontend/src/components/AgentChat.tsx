@@ -207,7 +207,7 @@ export default function AgentChat() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div style={{ height: 'calc(100vh - 49px)', display: 'flex', overflow: 'hidden', background: '#f7f7f7' }}>
+    <div className="h-[calc(100vh-109px)] md:h-[calc(100vh-49px)]" style={{ display: 'flex', overflow: 'hidden', background: '#f7f7f7' }}>
 
       {/* ── Sidebar overlay (mobile) ───────────────────────────────────── */}
       {sidebarOpen && (
