@@ -109,8 +109,10 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   const PROPFIND_PRINCIPAL    = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:current-user-principal/></D:prop></D:propfind>`;
   const PROPFIND_HOMESET      = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><C:addressbook-home-set/></D:prop></D:propfind>`;
   const PROPFIND_RESOURCETYPE = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:resourcetype/><D:displayname/></D:prop></D:propfind>`;
-  // Enumerate only hrefs (no address-data) — avoids any server-side result limit
   const PROPFIND_HREFS_ONLY   = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:getetag/></D:prop></D:propfind>`;
+  // sync-collection: designed to return ALL items without server-side limits
+  const SYNC_COLLECTION_ETAGS = `<?xml version="1.0" encoding="utf-8"?><D:sync-collection xmlns:D="DAV:"><D:sync-token/><D:sync-level>1</D:sync-level><D:prop><D:getetag/></D:prop></D:sync-collection>`;
+  const REPORT_ALL_ETAGS      = `<?xml version="1.0" encoding="utf-8"?><C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><D:getetag/></D:prop></C:addressbook-query>`;
 
   // ── STEP 1: well-known → follow redirect(s) → get principal path ──────────
   let serverBase = 'https://contacts.icloud.com';
@@ -163,35 +165,62 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   }
   if (!addressbookUrls.length) addressbookUrls = [homeSetUrl];
 
-  // ── STEP 4a: PROPFIND Depth:1 on each addressbook → collect ALL contact hrefs ──
-  // Track hrefs per addressbook so multiget goes to the right collection
+  // ── STEP 4a: Enumerate ALL contact hrefs — try sync-collection, then PROPFIND ──
+  // sync-collection (RFC 6578) is designed to return ALL items without server limits
+
+  function extractHrefsFromXml(xml: string, excludePath: string): string[] {
+    const blocks = xml.match(/<(?:[A-Za-z]+:)?response\b[\s\S]*?<\/(?:[A-Za-z]+:)?response>/gi) || [];
+    const out: string[] = [];
+    const excNorm = excludePath.replace(/\/$/, '');
+    for (const b of blocks) {
+      const href = firstHref(b);
+      if (!href) continue;
+      if (href.replace(/\/$/, '') === excNorm || href.endsWith('/')) continue;
+      if (/<(?:[A-Za-z]+:)?status[^>]*>HTTP\/1\.[01]\s+404/i.test(b)) continue;
+      out.push(href);
+    }
+    return out;
+  }
+
   const abHrefMap: Array<{ abUrl: string; hrefs: string[] }> = [];
 
   for (const abPath of addressbookUrls) {
     const abUrl = abPath.startsWith('http') ? abPath : `${serverBase}${abPath}`;
-    const listing = await fetch(abUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_HREFS_ONLY });
-    if (listing.status === 207 || listing.ok) {
-      const listXml = await listing.text();
-      // Extract hrefs from individual <response> blocks to avoid false matches
-      const responseBlocks = listXml.match(/<(?:[A-Za-z]+:)?response[\s\S]*?<\/(?:[A-Za-z]+:)?response>/gi) || [];
-      const hrefs: string[] = [];
-      for (const block of responseBlocks) {
-        const href = firstHref(block);
-        if (!href) continue;
-        // Skip the collection container itself (ends in / or equals abPath)
-        const normalised = href.replace(/\/$/, '');
-        const abNorm    = abPath.replace(/\/$/, '');
-        if (normalised === abNorm || href.endsWith('/')) continue;
-        // Skip if the response reports a 404 for this href
-        if (/<status[^>]*>HTTP\/1\.[01] 404/i.test(block)) continue;
-        hrefs.push(href);
-      }
-      if (hrefs.length) abHrefMap.push({ abUrl, hrefs });
+    let hrefs: string[] = [];
+
+    // Method 1: sync-collection REPORT — returns ALL items without pagination
+    try {
+      const r1 = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: SYNC_COLLECTION_ETAGS });
+      console.log(`[iCloud] sync-collection → ${r1.status}`);
+      if (r1.status === 207) { hrefs = extractHrefsFromXml(await r1.text(), abPath); }
+    } catch {}
+    console.log(`[iCloud] sync-collection hrefs: ${hrefs.length}`);
+
+    // Method 2: addressbook-query REPORT requesting only etags (no address-data body)
+    if (!hrefs.length) {
+      try {
+        const r2 = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: REPORT_ALL_ETAGS });
+        console.log(`[iCloud] addressbook-query (etags) → ${r2.status}`);
+        if (r2.status === 207) { hrefs = extractHrefsFromXml(await r2.text(), abPath); }
+      } catch {}
+      console.log(`[iCloud] addressbook-query hrefs: ${hrefs.length}`);
     }
+
+    // Method 3: PROPFIND Depth:1
+    if (!hrefs.length) {
+      try {
+        const r3 = await fetch(abUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_HREFS_ONLY });
+        console.log(`[iCloud] PROPFIND Depth:1 → ${r3.status}`);
+        if (r3.status === 207 || r3.ok) { hrefs = extractHrefsFromXml(await r3.text(), abPath); }
+      } catch {}
+      console.log(`[iCloud] PROPFIND hrefs: ${hrefs.length}`);
+    }
+
+    if (hrefs.length) abHrefMap.push({ abUrl, hrefs });
   }
 
   const totalHrefs = abHrefMap.reduce((n, e) => n + e.hrefs.length, 0);
-  console.log(`[iCloud] discovered ${addressbookUrls.length} addressbook(s), ${totalHrefs} contact hrefs`);
+  console.log(`[iCloud] TOTAL hrefs across ${addressbookUrls.length} addressbook(s): ${totalHrefs}`);
 
   if (!totalHrefs) return [];
 
