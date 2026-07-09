@@ -943,7 +943,26 @@ export default function Dialer() {
   // ─────────────────────────────────────────────────────────────────────────────
   // ACTIVE SESSION
   // ─────────────────────────────────────────────────────────────────────────────
-  if (!contact) return null;
+  if (loadingContacts || !contact) return (
+    <div style={{ minHeight: '100vh', background: '#f8f8f8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+      {loadingContacts ? (
+        <>
+          <div style={{ width: 36, height: 36, border: `3px solid ${GOLD}30`, borderTopColor: GOLD, borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <div style={{ fontSize: 14, color: '#9ca3af' }}>Loading contacts…</div>
+        </>
+      ) : (
+        <>
+          <div style={{ fontSize: 32, marginBottom: 4 }}>📭</div>
+          <div style={{ fontSize: 18, fontWeight: 300, color: DARK }}>No contacts found</div>
+          <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 12 }}>Try a different filter or import contacts first.</div>
+          <button onClick={() => setView('setup')} style={{ padding: '10px 24px', borderRadius: 10, background: DARK, color: '#fff', border: 'none', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+            ← Back to Setup
+          </button>
+        </>
+      )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 
   const lastCall = contact.calls?.[0];
   const pct      = Math.round((index / contacts.length) * 100);
