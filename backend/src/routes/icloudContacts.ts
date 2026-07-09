@@ -140,30 +140,39 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   if (!principalPath) throw new Error('DISCOVERY_FAILED');
   const principalUrl = principalPath.startsWith('http') ? principalPath : `${serverBase}${principalPath}`;
 
-  // ── STEP 2: PROPFIND principal → addressbook-home-set ────────────────────
+  // ── STEP 2: PROPFIND principal → addressbook-home-set (ALL hrefs) ─────────
   const hs0 = await fetch(principalUrl, { method: 'PROPFIND', headers: hdrs('0'), body: PROPFIND_HOMESET });
   if (hs0.status === 401) throw new Error('AUTH_FAILED');
   const hsXml = await hs0.text();
 
-  const hsMatch = hsXml.match(/addressbook-home-set[\s\S]{0,600}?<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/i);
-  const homeSetPath = hsMatch ? hsMatch[1].trim() : firstHref(hsXml);
-  if (!homeSetPath) throw new Error('NO_ADDRESSBOOK');
-  const homeSetUrl = homeSetPath.startsWith('http') ? homeSetPath : `${serverBase}${homeSetPath}`;
+  // Extract ALL hrefs from home-set block (Apple can have multiple)
+  const hsBlockMatch = hsXml.match(/addressbook-home-set[\s\S]*?<\/(?:[A-Za-z]+:)?addressbook-home-set>/i);
+  const hsBlock = hsBlockMatch ? hsBlockMatch[0] : hsXml;
+  const homeSetPaths: string[] = [];
+  const hsHrefRe = /<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/gi;
+  let hsm: RegExpExecArray | null;
+  while ((hsm = hsHrefRe.exec(hsBlock)) !== null) homeSetPaths.push(hsm[1].trim());
+  if (!homeSetPaths.length) throw new Error('NO_ADDRESSBOOK');
+  const homeSetUrls = homeSetPaths.map(p => p.startsWith('http') ? p : `${serverBase}${p}`);
+  console.log(`[iCloud] home-set URLs found: ${homeSetUrls.length}`, homeSetUrls);
 
-  // ── STEP 3: PROPFIND home-set Depth:1 → discover addressbook collections ──
-  const disc = await fetch(homeSetUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_RESOURCETYPE });
+  // ── STEP 3: PROPFIND each home-set Depth:1 → discover ALL addressbook collections ──
   let addressbookUrls: string[] = [];
-  if (disc.status === 207 || disc.ok) {
-    const discXml = await disc.text();
-    const responseBlocks = discXml.match(/<(?:[A-Za-z]+:)?response\b[\s\S]*?<\/(?:[A-Za-z]+:)?response>/gi) || [];
-    for (const block of responseBlocks) {
-      if (/<(?:[A-Za-z]+:)?addressbook\b/i.test(block)) {
-        const href = firstHref(block);
-        if (href) addressbookUrls.push(href);
+  for (const homeSetUrl of homeSetUrls) {
+    const disc = await fetch(homeSetUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_RESOURCETYPE });
+    if (disc.status === 207 || disc.ok) {
+      const discXml = await disc.text();
+      const responseBlocks = discXml.match(/<(?:[A-Za-z]+:)?response\b[\s\S]*?<\/(?:[A-Za-z]+:)?response>/gi) || [];
+      for (const block of responseBlocks) {
+        if (/<(?:[A-Za-z]+:)?addressbook\b/i.test(block)) {
+          const href = firstHref(block);
+          if (href && !addressbookUrls.includes(href)) addressbookUrls.push(href);
+        }
       }
     }
   }
-  if (!addressbookUrls.length) addressbookUrls = [homeSetUrl];
+  if (!addressbookUrls.length) addressbookUrls = homeSetUrls;
+  console.log(`[iCloud] addressbooks discovered: ${addressbookUrls.length}`, addressbookUrls);
 
   // ── STEP 4a: Enumerate ALL contact hrefs — try sync-collection, then PROPFIND ──
   // sync-collection (RFC 6578) is designed to return ALL items without server limits
@@ -188,13 +197,34 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
     const abUrl = abPath.startsWith('http') ? abPath : `${serverBase}${abPath}`;
     let hrefs: string[] = [];
 
-    // Method 1: sync-collection REPORT — returns ALL items without pagination
+    // Method 1: sync-collection REPORT with pagination loop
+    // Apple may return partial results + sync-token; loop until no new hrefs
     try {
-      const r1 = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: SYNC_COLLECTION_ETAGS });
-      console.log(`[iCloud] sync-collection → ${r1.status}`);
-      if (r1.status === 207) { hrefs = extractHrefsFromXml(await r1.text(), abPath); }
-    } catch {}
-    console.log(`[iCloud] sync-collection hrefs: ${hrefs.length}`);
+      let syncToken = '';
+      let iterations = 0;
+      const seenHrefs = new Set<string>();
+      while (iterations < 20) {
+        iterations++;
+        const syncBody = syncToken
+          ? `<?xml version="1.0" encoding="utf-8"?><D:sync-collection xmlns:D="DAV:"><D:sync-token>${syncToken}</D:sync-token><D:sync-level>1</D:sync-level><D:prop><D:getetag/></D:prop></D:sync-collection>`
+          : SYNC_COLLECTION_ETAGS;
+        const r1 = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: syncBody });
+        console.log(`[iCloud] sync-collection iter ${iterations} → ${r1.status}`);
+        if (r1.status !== 207) break;
+        const xml1 = await r1.text();
+        const batch = extractHrefsFromXml(xml1, abPath);
+        // Extract sync-token from response for next iteration
+        const tokenMatch = xml1.match(/<(?:[A-Za-z]+:)?sync-token[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?sync-token>/i);
+        const newToken = tokenMatch ? tokenMatch[1].trim() : '';
+        let newItems = 0;
+        for (const h of batch) { if (!seenHrefs.has(h)) { seenHrefs.add(h); hrefs.push(h); newItems++; } }
+        console.log(`[iCloud] sync-collection iter ${iterations}: ${batch.length} in batch, ${newItems} new, total ${hrefs.length}`);
+        // Stop if: no new token, same token as before, or no new items
+        if (!newToken || newToken === syncToken || newItems === 0) break;
+        syncToken = newToken;
+      }
+    } catch (e) { console.log('[iCloud] sync-collection error:', e); }
+    console.log(`[iCloud] sync-collection total hrefs: ${hrefs.length}`);
 
     // Method 2: addressbook-query REPORT requesting only etags (no address-data body)
     if (!hrefs.length) {
@@ -225,6 +255,18 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   if (!totalHrefs) return { contacts: [], noPhone: 0, totalFetched: 0 };
 
   // ── STEP 4b: addressbook-multiget in batches of 100 per addressbook ──────
+  // Deduplicate hrefs across all addressbooks (Apple groups can overlap with main book)
+  const globalHrefSeen = new Set<string>();
+  for (const entry of abHrefMap) {
+    entry.hrefs = entry.hrefs.filter(h => {
+      if (globalHrefSeen.has(h)) return false;
+      globalHrefSeen.add(h);
+      return true;
+    });
+  }
+  const dedupedTotal = abHrefMap.reduce((n, e) => n + e.hrefs.length, 0);
+  console.log(`[iCloud] After dedup: ${dedupedTotal} unique contact hrefs`);
+
   const BATCH = 100;
   const allVCards: string[] = [];
 
