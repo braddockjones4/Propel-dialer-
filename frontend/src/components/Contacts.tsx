@@ -870,9 +870,9 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                             padding: '5px 12px', borderRadius: 6, border: 'none',
                             fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
                             textTransform: 'uppercase', color: '#fff',
-                            background: isUngroup ? DARK : accentColor,
+                            background: DARK,
                             cursor: 'pointer', whiteSpace: 'nowrap',
-                            boxShadow: `0 1px 6px ${accentColor}55`,
+                            boxShadow: '0 1px 6px rgba(0,0,0,0.18)',
                           }}
                         >
                           ▶ Dial
