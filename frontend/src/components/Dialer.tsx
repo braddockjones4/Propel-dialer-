@@ -1131,6 +1131,26 @@ export default function Dialer() {
         {/* Disposition */}
         {showDisposition && (
           <div style={{ background: '#fff', borderRadius: 16, padding: '18px', marginBottom: 12, border: '1px solid rgba(0,0,0,0.07)' }}>
+
+            {/* Call outcome banner — tells the agent exactly what happened */}
+            {(() => {
+              const outcome: Record<string, { icon: string; text: string; bg: string; color: string }> = {
+                'no-answer':   { icon: '📵', text: 'No answer — contact did not pick up', bg: '#f3f4f6', color: '#374151' },
+                'call-ended':  { icon: '📞', text: 'Call ended — contact answered and hung up', bg: '#f0fdf4', color: '#15803d' },
+                'vm-dropped':  { icon: '📨', text: 'Voicemail dropped successfully', bg: '#fefce8', color: '#92400e' },
+                ended:         { icon: '📞', text: 'Call ended', bg: '#f3f4f6', color: '#374151' },
+                error:         { icon: '⚠️', text: 'Call failed to connect', bg: '#fef2f2', color: '#dc2626' },
+              };
+              const o = outcome[bridgeStatus] || (callStatus === 'completed' ? { icon: '📞', text: 'Call ended', bg: '#f3f4f6', color: '#374151' } : null);
+              if (!o) return null;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, background: o.bg, marginBottom: 14 }}>
+                  <span style={{ fontSize: 16 }}>{o.icon}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500, color: o.color }}>{o.text}</span>
+                </div>
+              );
+            })()}
+
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 14 }}>
               How did it go?
             </div>
