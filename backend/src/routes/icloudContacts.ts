@@ -20,10 +20,19 @@ function decrypt(text: string): string {
   return Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]).toString();
 }
 
-// Pull the first <href> value from an XML block near a given tag name
+// Pull the first <href> value from an XML block
 function firstHref(xml: string): string {
   const m = xml.match(/<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/i);
   return m ? m[1].trim() : '';
+}
+
+// Extract ALL hrefs from a multistatus response
+function allHrefs(xml: string): string[] {
+  const results: string[] = [];
+  const re = /<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) results.push(m[1].trim());
+  return results;
 }
 
 function extractVCards(xml: string): string[] {
@@ -35,7 +44,7 @@ function extractVCards(xml: string): string[] {
       .replace(/&#13;/g, '\r').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
     if (/BEGIN:VCARD/i.test(block)) results.push(block);
   }
-  // Fallback: raw BEGIN:VCARD blocks in the XML
+  // Fallback: raw BEGIN:VCARD blocks
   if (!results.length) {
     results.push(...(xml.match(/BEGIN:VCARD[\s\S]*?END:VCARD/gi) || []));
   }
@@ -88,7 +97,7 @@ function parseVCard(text: string): Record<string, string> | null {
   };
 }
 
-// ── Full 4-step CardDAV discovery ─────────────────────────────────────────────
+// ── Full CardDAV import: discover → enumerate all hrefs → multiget in batches ──
 async function fetchIcloudContacts(appleId: string, appPassword: string): Promise<Record<string, string>[]> {
   const auth = `Basic ${Buffer.from(`${appleId}:${appPassword}`).toString('base64')}`;
   const xml_ct = 'application/xml; charset=utf-8';
@@ -97,10 +106,11 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
     return { Authorization: auth, 'Content-Type': xml_ct, Accept: '*/*', 'User-Agent': 'PropelDialer/1.0', Depth: depth };
   }
 
-  const PROPFIND_PRINCIPAL   = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:current-user-principal/></D:prop></D:propfind>`;
-  const PROPFIND_HOMESET     = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><C:addressbook-home-set/></D:prop></D:propfind>`;
-  const PROPFIND_RESOURCETYPE= `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:resourcetype/><D:displayname/></D:prop></D:propfind>`;
-  const REPORT_ALL           = `<?xml version="1.0" encoding="utf-8"?><C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><D:getetag/><C:address-data/></D:prop></C:addressbook-query>`;
+  const PROPFIND_PRINCIPAL    = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:current-user-principal/></D:prop></D:propfind>`;
+  const PROPFIND_HOMESET      = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><C:addressbook-home-set/></D:prop></D:propfind>`;
+  const PROPFIND_RESOURCETYPE = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:resourcetype/><D:displayname/></D:prop></D:propfind>`;
+  // Enumerate only hrefs (no address-data) — avoids any server-side result limit
+  const PROPFIND_HREFS_ONLY   = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:getetag/></D:prop></D:propfind>`;
 
   // ── STEP 1: well-known → follow redirect(s) → get principal path ──────────
   let serverBase = 'https://contacts.icloud.com';
@@ -109,7 +119,6 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   });
   if (wk0.status === 401) throw new Error('AUTH_FAILED');
 
-  // Manually follow up to 3 redirects so auth header is preserved
   async function followRedirects(resp: Awaited<ReturnType<typeof fetch>>, body: string, depth = '0', maxHops = 3): Promise<{ status: number; text: string }> {
     if ([301, 302, 307, 308].includes(resp.status) && maxHops > 0) {
       const loc = resp.headers.get('location') || '';
@@ -134,18 +143,16 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   if (hs0.status === 401) throw new Error('AUTH_FAILED');
   const hsXml = await hs0.text();
 
-  // Try dedicated addressbook-home-set href first, then fall back to any href
   const hsMatch = hsXml.match(/addressbook-home-set[\s\S]{0,600}?<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/i);
   const homeSetPath = hsMatch ? hsMatch[1].trim() : firstHref(hsXml);
   if (!homeSetPath) throw new Error('NO_ADDRESSBOOK');
   const homeSetUrl = homeSetPath.startsWith('http') ? homeSetPath : `${serverBase}${homeSetPath}`;
 
-  // ── STEP 3: PROPFIND home-set Depth:1 → discover actual addressbook collections
+  // ── STEP 3: PROPFIND home-set Depth:1 → discover addressbook collections ──
   const disc = await fetch(homeSetUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_RESOURCETYPE });
   let addressbookUrls: string[] = [];
   if (disc.status === 207 || disc.ok) {
     const discXml = await disc.text();
-    // Find <response> blocks that contain <addressbook/> in their resourcetype
     const responseBlocks = discXml.match(/<(?:[A-Za-z]+:)?response\b[\s\S]*?<\/(?:[A-Za-z]+:)?response>/gi) || [];
     for (const block of responseBlocks) {
       if (/<(?:[A-Za-z]+:)?addressbook\b/i.test(block)) {
@@ -154,21 +161,48 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
       }
     }
   }
-  // If discovery found nothing, fall back to homeSetUrl itself
   if (!addressbookUrls.length) addressbookUrls = [homeSetUrl];
 
-  // ── STEP 4: REPORT on each addressbook ────────────────────────────────────
-  const allVCards: string[] = [];
+  // ── STEP 4a: PROPFIND Depth:1 on each addressbook → collect ALL .vcf hrefs ──
+  // This avoids server-side limits on REPORT responses
+  const contactHrefs: string[] = [];
   for (const abPath of addressbookUrls) {
     const abUrl = abPath.startsWith('http') ? abPath : `${serverBase}${abPath}`;
-    const rep = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: REPORT_ALL });
+    const listing = await fetch(abUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_HREFS_ONLY });
+    if (listing.status === 207 || listing.ok) {
+      const listXml = await listing.text();
+      const hrefs = allHrefs(listXml).filter(h => h.endsWith('.vcf') || h.includes('/card'));
+      contactHrefs.push(...hrefs);
+    }
+  }
+  console.log(`[iCloud] discovered ${addressbookUrls.length} addressbook(s), ${contactHrefs.length} contact hrefs`);
+
+  if (!contactHrefs.length) return [];
+
+  // ── STEP 4b: addressbook-multiget in batches of 100 ─────────────────────
+  const BATCH = 100;
+  const allVCards: string[] = [];
+
+  for (let i = 0; i < contactHrefs.length; i += BATCH) {
+    const batch = contactHrefs.slice(i, i + BATCH);
+    const hrefXml = batch.map(h => `<D:href>${h}</D:href>`).join('');
+    const MULTIGET = `<?xml version="1.0" encoding="utf-8"?>
+<C:addressbook-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+  <D:prop><D:getetag/><C:address-data/></D:prop>
+  ${hrefXml}
+</C:addressbook-multiget>`;
+
+    // Multiget must be sent to the addressbook URL, not a specific card URL
+    // Use the first addressbook URL as the target
+    const abUrl = addressbookUrls[0].startsWith('http') ? addressbookUrls[0] : `${serverBase}${addressbookUrls[0]}`;
+    const rep = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: MULTIGET });
     if (rep.status === 401) throw new Error('AUTH_FAILED');
     if (rep.status === 207 || rep.ok) {
       allVCards.push(...extractVCards(await rep.text()));
     }
   }
 
-  console.log(`[iCloud] discovered ${addressbookUrls.length} addressbook(s), parsed ${allVCards.length} vCards`);
+  console.log(`[iCloud] parsed ${allVCards.length} vCards total`);
   return allVCards.map(parseVCard).filter((c): c is NonNullable<typeof c> => c !== null);
 }
 
@@ -211,7 +245,6 @@ router.post('/icloud-import', async (req: Request, res: Response) => {
             create: { userId, icloudEmail: appleId.trim(), icloudAppPwd: encrypted },
           });
         } catch (saveErr: any) {
-          // Credentials couldn't be saved (DB columns may not exist yet) — still return the import result
           console.warn('[iCloud] Could not save credentials:', saveErr?.message);
         }
       }

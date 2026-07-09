@@ -1129,7 +1129,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
               </div>
 
               {/* Danger zone */}
-              <div style={{ paddingTop: 8, borderTop: '1px solid #f5f5f5' }}>
+              <div style={{ paddingTop: 8, borderTop: '1px solid #f5f5f5', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button
                   onClick={async () => {
                     if (!window.confirm('Mark this contact DNC? They will not be dialed.')) return;
@@ -1141,6 +1141,19 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                   style={{ fontSize: 10, color: '#ef4444', background: 'none', border: '1px solid #fecaca', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', letterSpacing: '0.05em' }}
                 >
                   Mark DNC
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`Delete ${selected.firstName} ${selected.lastName}? This cannot be undone.`)) return;
+                    await authFetch(`${API_BASE}/contacts/${selected.id}`, { method: 'DELETE' });
+                    setContacts(prev => prev.filter(c => c.id !== selected.id));
+                    setSelected(null);
+                    loadGroups();
+                    toast.success('Contact deleted');
+                  }}
+                  style={{ fontSize: 10, color: '#ef4444', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', letterSpacing: '0.05em' }}
+                >
+                  Delete Contact
                 </button>
               </div>
             </div>
