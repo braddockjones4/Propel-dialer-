@@ -193,11 +193,24 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
 
   const switchMode = (m: Mode) => { setMode(m); setStage('upload'); setRows([]); setVcfContacts([]); setResult(null); setNativeError(''); };
 
-  // ── Native Contacts API (iOS Safari 14.5+ / Chrome Android) ──────────────
+  // ── Native Contacts API ───────────────────────────────────────────────────
+  // Works on: iPhone Safari iOS 16+, Chrome Android 80+
+  // Falls back gracefully for older iOS / Chrome iOS / desktop
   const importFromNativeContacts = async () => {
     setNativeError('');
+    const nav = navigator as any;
+
+    // Not supported on this browser — give a clear actionable message
+    if (!nav.contacts) {
+      setNativeError(
+        'This feature requires Safari on iPhone (iOS 16 or later). ' +
+        'Make sure you\'re opening propeldialer.com in Safari — not Chrome or another browser. ' +
+        'Or use the file method below.'
+      );
+      return;
+    }
+
     try {
-      const nav = navigator as any;
       const contacts = await nav.contacts.select(['name', 'tel', 'email'], { multiple: true });
       if (!contacts || contacts.length === 0) return;
 
@@ -222,8 +235,11 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
       setVcfContacts(parsed);
       setStage('preview');
     } catch (err: any) {
-      if (err.name === 'SecurityError') setNativeError('Contacts access was denied. Please allow it in your browser settings.');
-      else if (err.name !== 'AbortError') setNativeError('Could not open contacts picker. Try the file upload method below.');
+      if (err.name === 'SecurityError') {
+        setNativeError('Contacts access was denied. Go to iPhone Settings → Safari → Contacts and allow access.');
+      } else if (err.name !== 'AbortError') {
+        setNativeError('Could not open contacts picker. Try the file method below.');
+      }
     }
   };
 
@@ -336,24 +352,62 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
           {/* ═══ VCF MODE ══════════════════════════════════════════════ */}
           {mode === 'vcf' && stage === 'upload' && (
             <div>
-              {/* ── PRIMARY: file picker button — works on ALL iPhones ── */}
+
+              {/* ── PRIMARY: native contacts picker — always shown ────── */}
+              {/* Works on iPhone Safari iOS 16+. Falls back with clear    */}
+              {/* instructions if on Chrome iOS or older Safari.           */}
               <button
-                onClick={() => vcfRef.current?.click()}
+                onClick={importFromNativeContacts}
                 style={{
                   width: '100%', padding: '18px 16px', borderRadius: 14,
                   background: 'linear-gradient(135deg, #0A0A0A 0%, #1a1a1a 100%)',
                   border: '1px solid rgba(201,168,76,0.35)',
                   color: '#fff', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 14,
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 28 }}>📇</span>
+                <div style={{ textAlign: 'left', flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.02em' }}>
+                    Select from iPhone Contacts
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(201,168,76,0.85)', marginTop: 3 }}>
+                    Opens your native contacts picker · no export needed
+                  </div>
+                </div>
+                <span style={{ fontSize: 18, color: 'rgba(201,168,76,0.6)' }}>›</span>
+              </button>
+
+              {/* Error/guidance from native picker attempt */}
+              {nativeError && (
+                <div style={{ fontSize: 12, color: '#92400e', marginBottom: 10, padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, lineHeight: 1.6 }}>
+                  {nativeError}
+                </div>
+              )}
+
+              {/* ── Divider ────────────────────────────────────────────── */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0' }}>
+                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+                <span style={{ fontSize: 10, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>or use a file</span>
+                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+              </div>
+
+              {/* ── SECONDARY: file picker ──────────────────────────────── */}
+              <button
+                onClick={() => vcfRef.current?.click()}
+                style={{
+                  width: '100%', padding: '14px 16px', borderRadius: 12,
+                  background: '#fff', border: '1.5px solid #e5e7eb',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
                   marginBottom: 10,
                 }}
               >
-                <span style={{ fontSize: 28 }}>📱</span>
-                <div style={{ textAlign: 'left', flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.02em' }}>Select Contacts File</div>
-                  <div style={{ fontSize: 11, color: 'rgba(201,168,76,0.85)', marginTop: 3 }}>Opens iPhone Files — pick your .vcf</div>
+                <span style={{ fontSize: 22 }}>🗂️</span>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>Select .vcf File</div>
+                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Choose an exported contacts file from Files app</div>
                 </div>
-                <span style={{ fontSize: 18, color: 'rgba(201,168,76,0.6)' }}>›</span>
               </button>
               <input
                 ref={vcfRef}
@@ -363,73 +417,45 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
                 onChange={e => { const f = e.target.files?.[0]; if (f) loadVcfFile(f); }}
               />
 
-              {/* ── BONUS: native contacts picker (iOS 18+ / Chrome Android only) ── */}
-              {hasContactsAPI && (
-                <div style={{ marginBottom: 10 }}>
-                  <button
-                    onClick={importFromNativeContacts}
-                    style={{
-                      width: '100%', padding: '14px 16px', borderRadius: 12,
-                      background: '#fff', border: '1.5px solid rgba(201,168,76,0.4)',
-                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
-                    }}
-                  >
-                    <span style={{ fontSize: 22 }}>📇</span>
-                    <div style={{ textAlign: 'left' }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>Pick directly from Contacts app</div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Native picker · no file export needed</div>
-                    </div>
-                  </button>
-                  {nativeError && (
-                    <div style={{ fontSize: 12, color: '#ef4444', marginTop: 6, padding: '8px 12px', background: '#fef2f2', borderRadius: 8 }}>
-                      {nativeError}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ── iCloud all-contacts link ── */}
+              {/* ── iCloud all-contacts link ────────────────────────────── */}
               <a
                 href="https://www.icloud.com/contacts"
                 target="_blank"
                 rel="noreferrer"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                  padding: '12px 14px', borderRadius: 10, marginBottom: 16,
+                  padding: '12px 14px', borderRadius: 10, marginBottom: 14,
                   background: '#f0f9ff', border: '1px solid #bae6fd',
                   textDecoration: 'none', color: '#0369a1',
                 }}
               >
                 <span style={{ fontSize: 18 }}>☁️</span>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 700 }}>Export ALL contacts via iCloud.com</div>
-                  <div style={{ fontSize: 11, color: '#0ea5e9', marginTop: 1 }}>Contacts → ⚙️ → Select All → Export vCard</div>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>Export ALL contacts — iCloud.com</div>
+                  <div style={{ fontSize: 11, color: '#0ea5e9', marginTop: 1 }}>Contacts → ⚙️ → Select All → Export vCard → upload above</div>
                 </div>
-                <span style={{ marginLeft: 'auto', fontSize: 14, color: '#7dd3fc' }}>↗</span>
+                <span style={{ marginLeft: 'auto', fontSize: 14, color: '#7dd3fc', flexShrink: 0 }}>↗</span>
               </a>
 
-              {/* ── iPhone step-by-step guide ── */}
-              <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 12, padding: '14px 16px' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD, marginBottom: 10 }}>
-                  How to get a .vcf from iPhone
+              {/* ── How to export a single contact as .vcf ──────────────── */}
+              <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 12, padding: '12px 14px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD, marginBottom: 9 }}>
+                  How to save contacts as a .vcf file
                 </div>
                 {[
-                  { icon: '📲', text: 'Open the Contacts app on your iPhone' },
-                  { icon: '👤', text: 'Tap any contact → scroll down → tap "Share Contact"' },
-                  { icon: '🗂️', text: 'Choose "Save to Files" — this saves it as a .vcf file' },
-                  { icon: '⬆️', text: 'Come back here and tap "Select Contacts File" above' },
+                  { icon: '📲', text: 'Open the Contacts app on iPhone' },
+                  { icon: '👤', text: 'Tap a contact → scroll down → "Share Contact"' },
+                  { icon: '🗂️', text: 'Tap "Save to Files" — saves a .vcf to your Files app' },
+                  { icon: '⬆️', text: 'Tap "Select .vcf File" above and pick it' },
                 ].map((s, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < 3 ? 9 : 0, alignItems: 'flex-start' }}>
+                  <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < 3 ? 8 : 0, alignItems: 'flex-start' }}>
                     <span style={{ fontSize: 14, minWidth: 22, textAlign: 'center', marginTop: 1 }}>{s.icon}</span>
-                    <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.55 }}>{s.text}</span>
+                    <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{s.text}</span>
                   </div>
                 ))}
-                <div style={{ marginTop: 10, padding: '8px 10px', background: 'rgba(201,168,76,0.07)', borderRadius: 7, fontSize: 11, color: '#7a6020' }}>
-                  💡 <strong>Tip:</strong> To import multiple contacts at once, use iCloud.com (link above) to export all contacts in one file.
-                </div>
               </div>
 
-              {/* Desktop drag zone — hidden on mobile */}
+              {/* Desktop drag zone */}
               <div
                 className="hidden sm:block"
                 onDragOver={e => { e.preventDefault(); setDragging(true); }}
@@ -439,13 +465,11 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
                 style={{
                   border: `2px dashed ${dragging ? GOLD : '#e5e7eb'}`,
                   background: dragging ? 'rgba(201,168,76,0.04)' : 'transparent',
-                  borderRadius: 10, padding: '20px 16px', textAlign: 'center', cursor: 'pointer',
-                  transition: 'all 0.2s', marginTop: 14,
+                  borderRadius: 10, padding: '16px', textAlign: 'center', cursor: 'pointer',
+                  transition: 'all 0.2s', marginTop: 12,
                 }}
               >
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                  Or drag & drop a .vcf file here
-                </div>
+                <div style={{ fontSize: 12, color: '#9ca3af' }}>Or drag & drop a .vcf file here</div>
               </div>
             </div>
           )}

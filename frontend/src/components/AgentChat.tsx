@@ -76,8 +76,17 @@ export default function AgentChat() {
   const [loading,      setLoading]         = useState(false);
   const [sidebarOpen,  setSidebarOpen]     = useState(false);
   const [hoverConvId,  setHoverConvId]     = useState<string | null>(null);
+  // Reactive isMobile — updates on resize / orientation change
+  const [isMobile,     setIsMobile]        = useState(() => window.innerWidth < 768);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLTextAreaElement>(null);
+
+  // Track viewport width reactively
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // Load conversations from localStorage on mount
   useEffect(() => {
@@ -145,13 +154,11 @@ export default function AgentChat() {
     setMessages(nextMsgs);
     setLoading(true);
 
-    // History for API (no thinking bubbles, no system)
     const history = [...messages.filter(m => !m.thinking), userMsg].map(m => ({
       role: m.role,
       content: m.content,
     }));
 
-    // First user message in this conversation
     const firstUser = messages.find(m => m.role === 'user')?.content || content;
 
     try {
@@ -175,7 +182,6 @@ export default function AgentChat() {
       );
       setMessages(finalMsgs);
 
-      // Persist to localStorage
       const savedId = saveMessages(finalMsgs.filter(m => !m.thinking), currentId, firstUser);
       if (!currentId) setCurrentId(savedId);
 
@@ -194,7 +200,6 @@ export default function AgentChat() {
 
   const isEmpty = messages.filter(m => !m.thinking).length === 0;
 
-  // Group conversations by date
   const groupedConversations = React.useMemo(() => {
     const groups: Record<string, Conversation[]> = {};
     for (const conv of conversations) {
@@ -205,20 +210,34 @@ export default function AgentChat() {
     return groups;
   }, [conversations]);
 
+  // Bottom nav height on mobile
+  const BOTTOM_NAV = 60;
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="h-[calc(100dvh-109px)] md:h-[calc(100vh-49px)]" style={{ display: 'flex', overflow: 'hidden', background: '#f7f7f7' }}>
+    <div
+      style={{
+        height: isMobile ? 'calc(100dvh - 109px)' : 'calc(100vh - 49px)',
+        display: 'flex', overflow: 'hidden', background: '#f7f7f7',
+      }}
+    >
 
-      {/* ── Sidebar overlay (mobile) ───────────────────────────────────── */}
-      {sidebarOpen && (
+      {/* ── Sidebar backdrop (mobile only) ─────────────────────────────── */}
+      {sidebarOpen && isMobile && (
         <div
           onClick={() => setSidebarOpen(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 40, top: 49 }}
-          className="md:hidden"
+          style={{
+            position: 'fixed',
+            top: 49, left: 0, right: 0,
+            // Stop above the bottom nav bar so it doesn't cover it
+            bottom: BOTTOM_NAV,
+            background: 'rgba(0,0,0,0.35)',
+            zIndex: 40,
+          }}
         />
       )}
 
-      {/* ── Sidebar ───────────────────────────────────────────────────── */}
+      {/* ── Conversation sidebar ───────────────────────────────────────── */}
       <div
         style={{
           width: SIDEBAR_W,
@@ -227,14 +246,17 @@ export default function AgentChat() {
           display: 'flex',
           flexDirection: 'column',
           flexShrink: 0,
-          // Mobile: absolute overlay; Desktop: always visible
-          position: window.innerWidth < 768 ? 'fixed' : 'relative',
-          top: window.innerWidth < 768 ? 49 : 0,
+          // Mobile: fixed overlay that clears both nav bars
+          // Desktop: always-visible in-flow column
+          position: isMobile ? 'fixed' : 'relative',
+          top: isMobile ? 49 : 0,
           left: 0,
-          bottom: 0,
+          // On mobile stop above the bottom tab bar (60px); on desktop fill to bottom
+          bottom: isMobile ? BOTTOM_NAV : 0,
           zIndex: 45,
-          transform: window.innerWidth < 768 && !sidebarOpen ? `translateX(-${SIDEBAR_W}px)` : 'translateX(0)',
+          transform: isMobile && !sidebarOpen ? `translateX(-${SIDEBAR_W}px)` : 'translateX(0)',
           transition: 'transform 0.22s ease',
+          boxShadow: isMobile && sidebarOpen ? '4px 0 20px rgba(0,0,0,0.12)' : 'none',
         }}
       >
         {/* Sidebar header */}
@@ -316,7 +338,6 @@ export default function AgentChat() {
                         {timeLabel(conv.updatedAt)}
                       </div>
                     </div>
-                    {/* Delete button */}
                     {(hoverConvId === conv.id || currentId === conv.id) && (
                       <button
                         onClick={(e) => deleteConversation(e, conv.id)}
@@ -324,8 +345,7 @@ export default function AgentChat() {
                           width: 22, height: 22, borderRadius: 5, border: 'none',
                           background: 'rgba(0,0,0,0.06)', color: '#9ca3af',
                           cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          flexShrink: 0,
-                          transition: 'all 0.1s',
+                          flexShrink: 0, transition: 'all 0.1s',
                         }}
                         title="Delete conversation"
                       >
@@ -349,23 +369,28 @@ export default function AgentChat() {
         <div style={{
           background: '#fff',
           borderBottom: '1px solid rgba(0,0,0,0.07)',
-          padding: '12px 20px',
-          display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+          padding: isMobile ? '10px 12px' : '12px 20px',
+          display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12, flexShrink: 0,
         }}>
           {/* Mobile sidebar toggle */}
-          <button
-            onClick={() => setSidebarOpen(o => !o)}
-            className="md:hidden"
-            style={{
-              width: 32, height: 32, borderRadius: 7, border: '1px solid #e5e7eb',
-              background: 'transparent', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round">
-              <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-            </svg>
-          </button>
+          {isMobile && (
+            <button
+              onClick={() => setSidebarOpen(o => !o)}
+              style={{
+                width: 34, height: 34, borderRadius: 8,
+                border: '1px solid #e5e7eb',
+                background: sidebarOpen ? 'rgba(201,168,76,0.08)' : 'transparent',
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round">
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
+          )}
 
           {/* AI badge */}
           <div style={{
@@ -387,7 +412,7 @@ export default function AgentChat() {
           </div>
 
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: DARK, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: isMobile ? 13 : 13.5, fontWeight: 700, color: DARK, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {currentId
                 ? (conversations.find(c => c.id === currentId)?.title || 'Propel AI')
                 : 'Propel AI'}
@@ -404,9 +429,11 @@ export default function AgentChat() {
               background: '#22c55e', boxShadow: '0 0 6px #22c55e',
               animation: 'pulse-dot 2s infinite',
             }} />
-            <span style={{ fontSize: 9.5, color: '#6b7280', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>
-              Live
-            </span>
+            {!isMobile && (
+              <span style={{ fontSize: 9.5, color: '#6b7280', letterSpacing: '0.08em', textTransform: 'uppercase', fontWeight: 600 }}>
+                Live
+              </span>
+            )}
           </div>
 
           {messages.length > 0 && (
@@ -423,20 +450,20 @@ export default function AgentChat() {
         </div>
 
         {/* Message list */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 0' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '12px 0' : '20px 0' }}>
 
           {/* Empty state */}
           {isEmpty && (
-            <div style={{ maxWidth: 580, margin: '0 auto', padding: '0 20px' }}>
-              <div style={{ textAlign: 'center', marginBottom: 28, paddingTop: 16 }}>
+            <div style={{ maxWidth: 580, margin: '0 auto', padding: isMobile ? '0 14px' : '0 20px' }}>
+              <div style={{ textAlign: 'center', marginBottom: isMobile ? 16 : 28, paddingTop: isMobile ? 8 : 16 }}>
                 <div style={{
-                  width: 60, height: 60, borderRadius: 16, margin: '0 auto 14px',
+                  width: 54, height: 54, borderRadius: 14, margin: '0 auto 12px',
                   background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
                   border: '1px solid rgba(201,168,76,0.22)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   boxShadow: '0 6px 28px rgba(0,0,0,0.12)',
                 }}>
-                  <svg width="24" height="33" viewBox="0 0 52 72" fill="none">
+                  <svg width="22" height="30" viewBox="0 0 52 72" fill="none">
                     <defs>
                       <linearGradient id="bolt-welcome2" x1="26" y1="4" x2="26" y2="68" gradientUnits="userSpaceOnUse">
                         <stop offset="0%" stopColor="#E8C96A"/>
@@ -446,29 +473,34 @@ export default function AgentChat() {
                     <path d="M36 4 L14 38 L24 38 L16 68 L40 30 L28 30 Z" fill="url(#bolt-welcome2)"/>
                   </svg>
                 </div>
-                <div style={{ fontSize: 21, fontWeight: 300, color: DARK, letterSpacing: '0.04em', fontFamily: '"Cormorant Garamond", serif', marginBottom: 5 }}>
+                <div style={{ fontSize: isMobile ? 18 : 21, fontWeight: 300, color: DARK, letterSpacing: '0.04em', fontFamily: '"Cormorant Garamond", serif', marginBottom: 5 }}>
                   Propel AI
                 </div>
-                <div style={{ fontSize: 12.5, color: '#6b7280', lineHeight: 1.65, maxWidth: 360, margin: '0 auto' }}>
+                <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.65, maxWidth: 320, margin: '0 auto' }}>
                   I'm your operational agent — I don't just answer questions, I take real action in your contact database.
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 7 }}>
+              {/* 1-column on mobile, auto-fit grid on desktop */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(140px, 1fr))',
+                gap: isMobile ? 6 : 7,
+              }}>
                 {SUGGESTIONS.map((s, i) => (
                   <button
                     key={i}
                     onClick={() => sendMessage(s.text)}
                     style={{
-                      textAlign: 'left', padding: '10px 13px', borderRadius: 9,
+                      textAlign: 'left', padding: isMobile ? '11px 14px' : '10px 13px', borderRadius: 9,
                       border: '1px solid rgba(0,0,0,0.08)', background: '#fff',
-                      cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 8,
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
                       transition: 'all 0.12s',
                     }}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(201,168,76,0.4)'; }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,0,0,0.08)'; }}
                   >
-                    <span style={{ fontSize: 15, flexShrink: 0 }}>{s.icon}</span>
-                    <span style={{ fontSize: 11.5, color: '#374151', lineHeight: 1.5 }}>{s.text}</span>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>{s.icon}</span>
+                    <span style={{ fontSize: isMobile ? 13 : 11.5, color: '#374151', lineHeight: 1.4 }}>{s.text}</span>
                   </button>
                 ))}
               </div>
@@ -480,11 +512,11 @@ export default function AgentChat() {
             <div
               key={msg.id}
               style={{
-                maxWidth: 680, margin: '0 auto 14px',
-                padding: '0 20px',
+                maxWidth: 680, margin: `0 auto ${isMobile ? '10px' : '14px'}`,
+                padding: isMobile ? '0 12px' : '0 20px',
                 display: 'flex',
                 flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                alignItems: 'flex-end', gap: 9,
+                alignItems: 'flex-end', gap: 8,
               }}
             >
               {/* Avatar */}
@@ -501,7 +533,7 @@ export default function AgentChat() {
                 </div>
               )}
 
-              <div style={{ maxWidth: '78%', display: 'flex', flexDirection: 'column', gap: 5, alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <div style={{ maxWidth: isMobile ? '85%' : '78%', display: 'flex', flexDirection: 'column', gap: 5, alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 {/* Bubble */}
                 <div style={{
                   padding: '10px 14px',
@@ -512,7 +544,7 @@ export default function AgentChat() {
                   border: msg.role === 'user' ? 'none' : '1px solid rgba(0,0,0,0.07)',
                   boxShadow: msg.role === 'user' ? '0 2px 10px rgba(0,0,0,0.18)' : '0 1px 5px rgba(0,0,0,0.05)',
                   color: msg.role === 'user' ? '#fff' : DARK,
-                  fontSize: 13, lineHeight: 1.65,
+                  fontSize: isMobile ? 14 : 13, lineHeight: 1.65,
                   whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                 }}>
                   {msg.thinking ? <ThinkingDots /> : msg.content}
@@ -558,21 +590,26 @@ export default function AgentChat() {
         </div>
 
         {/* Input area */}
-        <div style={{ background: '#fff', borderTop: '1px solid rgba(0,0,0,0.07)', padding: '12px 20px', flexShrink: 0 }}>
+        <div style={{
+          background: '#fff',
+          borderTop: '1px solid rgba(0,0,0,0.07)',
+          padding: isMobile ? '10px 12px' : '12px 20px',
+          flexShrink: 0,
+        }}>
           {/* Quick chips */}
           {!isEmpty && (
-            <div style={{ display: 'flex', gap: 6, marginBottom: 9, overflowX: 'auto', paddingBottom: 2 }}>
-              {['Get pipeline stats', 'List my groups', 'Find hot leads', 'Create a group'].map(chip => (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, overflowX: 'auto', paddingBottom: 2 }} className="hide-scrollbar">
+              {['Pipeline stats', 'List groups', 'Hot leads', 'Create group'].map(chip => (
                 <button
                   key={chip}
                   onClick={() => sendMessage(chip)}
                   disabled={loading}
                   style={{
-                    padding: '4px 11px', borderRadius: 20,
+                    padding: '5px 11px', borderRadius: 20,
                     border: '1px solid rgba(0,0,0,0.09)',
-                    background: 'transparent', fontSize: 11,
+                    background: 'transparent', fontSize: 12,
                     color: '#6b7280', cursor: loading ? 'not-allowed' : 'pointer',
-                    whiteSpace: 'nowrap', transition: 'all 0.1s',
+                    whiteSpace: 'nowrap', transition: 'all 0.1s', flexShrink: 0,
                   }}
                 >
                   {chip}
@@ -581,7 +618,7 @@ export default function AgentChat() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 9, alignItems: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             <textarea
               ref={inputRef}
               value={input}
@@ -593,7 +630,7 @@ export default function AgentChat() {
               style={{
                 flex: 1, padding: '10px 13px', borderRadius: 11,
                 border: '1.5px solid rgba(0,0,0,0.1)',
-                fontSize: 13, outline: 'none', resize: 'none',
+                fontSize: isMobile ? 15 : 13, outline: 'none', resize: 'none',
                 background: '#fafafa', color: DARK,
                 lineHeight: 1.5, maxHeight: 120,
                 transition: 'border-color 0.12s',
@@ -611,7 +648,7 @@ export default function AgentChat() {
               onClick={() => sendMessage()}
               disabled={loading || !input.trim()}
               style={{
-                width: 40, height: 40, borderRadius: 10, border: 'none', flexShrink: 0,
+                width: 42, height: 42, borderRadius: 11, border: 'none', flexShrink: 0,
                 background: loading || !input.trim() ? '#e5e7eb' : 'linear-gradient(135deg, #1a1a1a 0%, #000 100%)',
                 color: loading || !input.trim() ? '#9ca3af' : '#fff',
                 cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
@@ -621,18 +658,20 @@ export default function AgentChat() {
               }}
             >
               {loading ? (
-                <span style={{ width: 14, height: 14, border: '2px solid #9ca3af', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+                <span style={{ width: 15, height: 15, border: '2px solid #9ca3af', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
               ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="22" y1="2" x2="11" y2="13"/>
                   <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                 </svg>
               )}
             </button>
           </div>
-          <div className="hidden md:block" style={{ fontSize: 9.5, color: '#d1d5db', marginTop: 6, textAlign: 'center', letterSpacing: '0.04em' }}>
-            Enter to send · Shift+Enter for new line · Actions execute immediately
-          </div>
+          {!isMobile && (
+            <div style={{ fontSize: 9.5, color: '#d1d5db', marginTop: 6, textAlign: 'center', letterSpacing: '0.04em' }}>
+              Enter to send · Shift+Enter for new line · Actions execute immediately
+            </div>
+          )}
         </div>
       </div>
 
@@ -640,9 +679,8 @@ export default function AgentChat() {
         @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes blink { 0%, 80%, 100% { opacity: 0.15; } 40% { opacity: 1; } }
-        @media (min-width: 768px) {
-          .md\\:hidden { display: none !important; }
-        }
+        .hide-scrollbar { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
       `}</style>
     </div>
   );
