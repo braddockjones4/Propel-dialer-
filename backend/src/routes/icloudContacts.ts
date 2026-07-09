@@ -98,7 +98,7 @@ function parseVCard(text: string): Record<string, string> | null {
 }
 
 // ── Full CardDAV import: discover → enumerate all hrefs → multiget in batches ──
-async function fetchIcloudContacts(appleId: string, appPassword: string): Promise<Record<string, string>[]> {
+async function fetchIcloudContacts(appleId: string, appPassword: string): Promise<{ contacts: Record<string, string>[]; noPhone: number; totalFetched: number }> {
   const auth = `Basic ${Buffer.from(`${appleId}:${appPassword}`).toString('base64')}`;
   const xml_ct = 'application/xml; charset=utf-8';
 
@@ -222,7 +222,7 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   const totalHrefs = abHrefMap.reduce((n, e) => n + e.hrefs.length, 0);
   console.log(`[iCloud] TOTAL hrefs across ${addressbookUrls.length} addressbook(s): ${totalHrefs}`);
 
-  if (!totalHrefs) return [];
+  if (!totalHrefs) return { contacts: [], noPhone: 0, totalFetched: 0 };
 
   // ── STEP 4b: addressbook-multiget in batches of 100 per addressbook ──────
   const BATCH = 100;
@@ -246,16 +246,19 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
     }
   }
 
-  console.log(`[iCloud] parsed ${allVCards.length} vCards total`);
-  return allVCards.map(parseVCard).filter((c): c is NonNullable<typeof c> => c !== null);
+  const parsed = allVCards.map(parseVCard);
+  const withPhone = parsed.filter((c): c is NonNullable<typeof c> => c !== null);
+  const noPhone   = allVCards.length - withPhone.length;
+  console.log(`[iCloud] vCards: ${allVCards.length} total hrefs fetched, ${withPhone.length} with phone number, ${noPhone} without phone number`);
+  return { contacts: withPhone, noPhone, totalFetched: allVCards.length };
 }
 
-async function importContacts(contacts: Record<string, string>[]) {
-  if (!contacts.length) return { imported: 0, skipped: 0, total: 0 };
+async function importContacts(contacts: Record<string, string>[], noPhone = 0) {
+  if (!contacts.length) return { imported: 0, skipped: 0, total: 0, noPhone };
   const phones = contacts.map(c => c.phone);
   const existingCount = await prisma.contact.count({ where: { phone: { in: phones } } });
   const result = await (prisma as any).contact.createMany({ data: contacts, skipDuplicates: true });
-  return { imported: result.count, skipped: existingCount, total: contacts.length };
+  return { imported: result.count, skipped: existingCount, total: contacts.length, noPhone };
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -276,8 +279,8 @@ router.post('/icloud-import', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Apple ID and App-Specific Password are required.' }); return;
   }
   try {
-    const contacts = await fetchIcloudContacts(appleId.trim(), appPassword.trim());
-    const result   = await importContacts(contacts);
+    const { contacts, noPhone } = await fetchIcloudContacts(appleId.trim(), appPassword.trim());
+    const result   = await importContacts(contacts, noPhone);
     if (saveCredentials) {
       const userId = (req as any).user?.id;
       if (userId) {
@@ -311,8 +314,8 @@ router.post('/icloud-sync', async (req: Request, res: Response) => {
     if (!s?.icloudEmail || !s?.icloudAppPwd) {
       res.status(400).json({ error: 'No iCloud account connected. Set up iCloud sync first.' }); return;
     }
-    const contacts = await fetchIcloudContacts(s.icloudEmail, decrypt(s.icloudAppPwd));
-    res.json(await importContacts(contacts));
+    const { contacts, noPhone } = await fetchIcloudContacts(s.icloudEmail, decrypt(s.icloudAppPwd));
+    res.json(await importContacts(contacts, noPhone));
   } catch (err: any) {
     if (err?.message === 'AUTH_FAILED') {
       try { await (prisma as any).dialerSettings.update({ where: { userId }, data: { icloudAppPwd: null } }); } catch {}

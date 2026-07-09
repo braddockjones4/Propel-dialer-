@@ -683,6 +683,11 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
               {result.skipped > 0 && (
                 <div style={{ fontSize: 13, color: '#9ca3af' }}>{result.skipped} duplicates skipped</div>
               )}
+              {(result as any).noPhone > 0 && (
+                <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 6 }}>
+                  ⚠️ {(result as any).noPhone} contacts skipped — no phone number in iCloud
+                </div>
+              )}
             </div>
           )}
         </div>
