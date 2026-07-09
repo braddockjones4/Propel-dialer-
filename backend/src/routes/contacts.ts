@@ -152,11 +152,11 @@ router.post('/score-all', async (_req: Request, res: Response) => {
   scoreAllContacts().then(r => console.log(`[LeadScore] Scored ${r.updated} contacts`)).catch(console.error);
 });
 
-// POST /api/contacts/bulk — bulk status update
+// POST /api/contacts/bulk — bulk operations
 router.post('/bulk', async (req: Request, res: Response) => {
   const { ids, action, value } = req.body as {
     ids: string[];
-    action: 'setStatus' | 'delete';
+    action: 'setStatus' | 'setGroup' | 'delete';
     value?: string;
   };
 
@@ -164,6 +164,9 @@ router.post('/bulk', async (req: Request, res: Response) => {
 
   if (action === 'setStatus' && value) {
     await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { status: value } });
+    res.json({ updated: ids.length });
+  } else if (action === 'setGroup') {
+    await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { contactGroup: value || null } });
     res.json({ updated: ids.length });
   } else if (action === 'delete') {
     await prisma.contact.deleteMany({ where: { id: { in: ids } } });

@@ -114,6 +114,11 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const [icloudConnected, setIcloudConnected] = useState(false);
   const [icloudSyncing,   setIcloudSyncing]   = useState(false);
 
+  // Multi-select
+  const [selectMode,    setSelectMode]    = useState(false);
+  const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
+  const [bulkGroupOpen, setBulkGroupOpen] = useState(false);
+
   // PWA share target — auto-open import modal when a .vcf was shared to the app
   useEffect(() => {
     if (sharedVcfText) {
@@ -188,6 +193,36 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
       } else { toast.error('Failed to add contact'); }
     } catch { toast.error('Failed to add contact'); }
     finally { setQuickSaving(false); }
+  };
+
+  // ── Multi-select helpers ─────────────────────────────────────────────────
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); setBulkGroupOpen(false); };
+
+  const bulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (!window.confirm(`Delete ${ids.length} contact${ids.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    await authFetch(`${API_BASE}/contacts/bulk`, { method: 'POST', body: JSON.stringify({ ids, action: 'delete' }) });
+    setContacts(prev => prev.filter(c => !selectedIds.has(c.id)));
+    exitSelectMode();
+    loadGroups();
+    toast.success(`${ids.length} contact${ids.length !== 1 ? 's' : ''} deleted`);
+  };
+
+  const bulkMoveToGroup = async (groupName: string) => {
+    const ids = Array.from(selectedIds);
+    await authFetch(`${API_BASE}/contacts/bulk`, { method: 'POST', body: JSON.stringify({ ids, action: 'setGroup', value: groupName || null }) });
+    setContacts(prev => prev.map(c => selectedIds.has(c.id) ? { ...c, contactGroup: groupName || null } : c));
+    exitSelectMode();
+    loadGroups();
+    toast.success(`${ids.length} contact${ids.length !== 1 ? 's' : ''} moved`);
   };
 
   // ── Data loading ──────────────────────────────────────────────────────────
@@ -498,6 +533,13 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
         >
           + Group
         </button>
+        <button
+          onClick={() => { setSelectMode(s => !s); setSelectedIds(new Set()); }}
+          className="hidden md:block"
+          style={{ padding: '6px 12px', borderRadius: 7, fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap', border: `1.5px solid ${selectMode ? GOLD : '#e5e7eb'}`, background: selectMode ? `${GOLD}15` : 'transparent', color: selectMode ? GOLD : '#6b7280' }}
+        >
+          {selectMode ? '✓ Selecting' : 'Select'}
+        </button>
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
@@ -583,6 +625,18 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
           >
             ⬆
           </button>
+          <button
+            onClick={() => { setSelectMode(s => !s); setSelectedIds(new Set()); }}
+            style={{
+              padding: '10px 14px', borderRadius: 8,
+              border: `1.5px solid ${selectMode ? GOLD : 'rgba(0,0,0,0.1)'}`,
+              fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
+              color: selectMode ? GOLD : DARK, background: selectMode ? `${GOLD}15` : '#fff',
+              cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            ✓
+          </button>
         </div>
 
         {/* Contact list */}
@@ -612,11 +666,14 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             mobileCards.map(c => (
               <div
                 key={c.id}
-                onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
+                onClick={() => {
+                  if (selectMode) { toggleSelect(c.id); }
+                  else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }
+                }}
                 style={{
-                  background: selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fff',
+                  background: selectedIds.has(c.id) ? 'rgba(201,168,76,0.08)' : selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fff',
                   borderRadius: 10,
-                  border: `1px solid ${selected?.id === c.id ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.07)'}`,
+                  border: `1px solid ${selectedIds.has(c.id) ? 'rgba(201,168,76,0.45)' : selected?.id === c.id ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.07)'}`,
                   padding: '12px 14px',
                   marginBottom: 8,
                   cursor: 'pointer',
@@ -624,15 +681,26 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                   boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
-                {/* Avatar circle */}
-                <div style={{
-                  width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
-                  background: mobileGroup === UNGROUPED ? '#f3f4f6' : `${mobileAccent}22`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 14, fontWeight: 700, color: mobileGroup === UNGROUPED ? '#9ca3af' : mobileAccent,
-                }}>
-                  {(c.firstName?.[0] || '?').toUpperCase()}
-                </div>
+                {/* Checkbox (select mode) or Avatar */}
+                {selectMode ? (
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                    border: `2px solid ${selectedIds.has(c.id) ? GOLD : '#d1d5db'}`,
+                    background: selectedIds.has(c.id) ? GOLD : '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {selectedIds.has(c.id) && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                  </div>
+                ) : (
+                  <div style={{
+                    width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                    background: mobileGroup === UNGROUPED ? '#f3f4f6' : `${mobileAccent}22`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, fontWeight: 700, color: mobileGroup === UNGROUPED ? '#9ca3af' : mobileAccent,
+                  }}>
+                    {(c.firstName?.[0] || '?').toUpperCase()}
+                  </div>
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, fontSize: 14, color: DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {c.firstName} {c.lastName}
@@ -646,7 +714,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                     </div>
                   )}
                 </div>
-                <span style={{ color: '#d1d5db', fontSize: 14 }}>›</span>
+                {!selectMode && <span style={{ color: '#d1d5db', fontSize: 14 }}>›</span>}
               </div>
             ))
           )}
@@ -816,17 +884,20 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                         return (
                           <div
                             key={c.id}
-                            draggable
-                            onDragStart={e => onDragStart(e, c.id)}
+                            draggable={!selectMode}
+                            onDragStart={e => !selectMode && onDragStart(e, c.id)}
                             onDragEnd={onDragEnd}
-                            onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
+                            onClick={() => {
+                              if (selectMode) { toggleSelect(c.id); }
+                              else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }
+                            }}
                             style={{
-                              background: selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fafafa',
+                              background: selectedIds.has(c.id) ? 'rgba(201,168,76,0.08)' : selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fafafa',
                               borderRadius: 9,
-                              border: `1px solid ${selected?.id === c.id ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.06)'}`,
+                              border: `1px solid ${selectedIds.has(c.id) ? 'rgba(201,168,76,0.45)' : selected?.id === c.id ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.06)'}`,
                               padding: '10px 12px',
                               marginBottom: 6,
-                              cursor: 'grab',
+                              cursor: selectMode ? 'pointer' : 'grab',
                               opacity: draggingId === c.id ? 0.35 : 1,
                               transition: 'opacity 0.1s, border-color 0.1s, background 0.1s',
                               userSelect: 'none',
@@ -860,11 +931,14 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                                   </div>
                                 )}
                               </div>
-                              {/* Status dot */}
-                              <div
-                                title={c.status}
-                                style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[c.status] || '#9ca3af', flexShrink: 0, marginTop: 4 }}
-                              />
+                              {/* Checkbox (select mode) or status dot */}
+                              {selectMode ? (
+                                <div style={{ width: 18, height: 18, borderRadius: 5, flexShrink: 0, border: `2px solid ${selectedIds.has(c.id) ? GOLD : '#d1d5db'}`, background: selectedIds.has(c.id) ? GOLD : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  {selectedIds.has(c.id) && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                                </div>
+                              ) : (
+                                <div title={c.status} style={{ width: 8, height: 8, borderRadius: '50%', background: STATUS_COLORS[c.status] || '#9ca3af', flexShrink: 0, marginTop: 4 }} />
+                              )}
                             </div>
 
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
@@ -961,6 +1035,86 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
           </>
         )}
       </div>
+
+      {/* ── Bulk action bar — floats above bottom tab bar when contacts selected ── */}
+      {selectMode && (
+        <div style={{
+          position: 'fixed', left: 0, right: 0,
+          bottom: 'calc(56px + env(safe-area-inset-bottom))',
+          zIndex: 150,
+          background: DARK,
+          boxShadow: '0 -4px 24px rgba(0,0,0,0.25)',
+          padding: '12px 16px',
+          display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        }} className="md:bottom-0">
+          {/* Count + select-all */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>
+              {selectedIds.size} selected
+            </span>
+            <button
+              onClick={() => {
+                if (selectedIds.size === contacts.length) {
+                  setSelectedIds(new Set());
+                } else {
+                  setSelectedIds(new Set(contacts.map(c => c.id)));
+                }
+              }}
+              style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', padding: 0 }}
+            >
+              {selectedIds.size === contacts.length ? 'Deselect all' : 'Select all'}
+            </button>
+          </div>
+
+          {/* Move to group */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setBulkGroupOpen(o => !o)}
+              disabled={selectedIds.size === 0}
+              style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: selectedIds.size === 0 ? 0.4 : 1 }}
+            >
+              Move to Group ▾
+            </button>
+            {bulkGroupOpen && (
+              <div style={{ position: 'absolute', bottom: '110%', left: 0, background: '#fff', borderRadius: 10, boxShadow: '0 8px 30px rgba(0,0,0,0.2)', overflow: 'hidden', minWidth: 180, zIndex: 200 }}>
+                <button
+                  onClick={() => bulkMoveToGroup('')}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: 12, color: '#6b7280', background: 'none', border: 'none', borderBottom: '1px solid #f0f0f0', cursor: 'pointer' }}
+                >
+                  Ungrouped
+                </button>
+                {groups.map(g => (
+                  <button
+                    key={g.id}
+                    onClick={() => bulkMoveToGroup(g.name)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '10px 14px', fontSize: 12, color: DARK, background: 'none', border: 'none', borderBottom: '1px solid #f9f9f9', cursor: 'pointer' }}
+                  >
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: g.color, flexShrink: 0 }} />
+                    {g.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Delete */}
+          <button
+            onClick={bulkDelete}
+            disabled={selectedIds.size === 0}
+            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', fontSize: 12, fontWeight: 700, cursor: selectedIds.size === 0 ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap', opacity: selectedIds.size === 0 ? 0.4 : 1 }}
+          >
+            Delete
+          </button>
+
+          {/* Cancel */}
+          <button
+            onClick={exitSelectMode}
+            style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* ── Contact detail side panel ──────────────────────────────── */}
       {selected && (
