@@ -11,7 +11,7 @@ import { API_BASE, authFetch } from '../config';
 const GOLD = '#C9A84C';
 
 interface ParsedRow { [key: string]: string }
-interface Props { onClose: () => void; onImported: (count: number) => void; }
+interface Props { onClose: () => void; onImported: (count: number) => void; preloadedVcfText?: string; }
 
 // ── Field options for CSV column mapping ─────────────────────────────────────
 const FIELD_OPTIONS = [
@@ -153,7 +153,7 @@ async function postImport(contacts: ParsedRow[], source: string): Promise<{ impo
 type Mode  = 'csv' | 'vcf';
 type Stage = 'upload' | 'map' | 'preview' | 'done';
 
-export default function CsvImportModal({ onClose, onImported }: Props) {
+export default function CsvImportModal({ onClose, onImported, preloadedVcfText }: Props) {
   const [mode, setMode]         = useState<Mode>('vcf');
   const [stage, setStage]       = useState<Stage>('upload');
   const [dragging, setDragging] = useState(false);
@@ -173,6 +173,16 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
 
   const csvRef = useRef<HTMLInputElement>(null);
   const vcfRef = useRef<HTMLInputElement>(null);
+
+  // PWA share target: if a .vcf was shared to the app, parse it immediately
+  useEffect(() => {
+    if (preloadedVcfText) {
+      const parsed = parseVCard(preloadedVcfText);
+      setVcfContacts(parsed);
+      setMode('vcf');
+      setStage(parsed.length > 0 ? 'preview' : 'upload');
+    }
+  }, [preloadedVcfText]);
 
   const switchMode = (m: Mode) => {
     setMode(m); setStage('upload'); setRows([]); setVcfContacts([]); setResult(null);

@@ -54,6 +54,7 @@ interface Contact {
 
 interface ContactsProps {
   onNavigate?: (page: string) => void;
+  sharedVcfText?: string;
 }
 
 function fmtPhone(p: string) {
@@ -62,7 +63,7 @@ function fmtPhone(p: string) {
   return p;
 }
 
-export default function Contacts({ onNavigate }: ContactsProps) {
+export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const toast = useToast();
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -100,6 +101,13 @@ export default function Contacts({ onNavigate }: ContactsProps) {
 
   // CSV import
   const [showImport, setShowImport] = useState(false);
+
+  // PWA share target — auto-open import modal when a .vcf was shared to the app
+  useEffect(() => {
+    if (sharedVcfText) {
+      setShowImport(true);
+    }
+  }, [sharedVcfText]);
 
   // Mobile: which group column is currently displayed
   const [mobileGroup, setMobileGroup] = useState<string>(UNGROUPED);
@@ -1095,7 +1103,7 @@ export default function Contacts({ onNavigate }: ContactsProps) {
       )}
 
       {showImport && (
-        <CsvImportModal onClose={() => setShowImport(false)} onImported={() => { loadContacts(); loadGroups(); }} />
+        <CsvImportModal onClose={() => setShowImport(false)} onImported={() => { loadContacts(); loadGroups(); }} preloadedVcfText={sharedVcfText} />
       )}
 
       <style>{`

@@ -1,4 +1,4 @@
-import React, { useState, Component } from 'react';
+import React, { useState, useEffect, Component } from 'react';
 
 class ErrorBoundary extends Component<{children: React.ReactNode}, {error: string | null}> {
   constructor(props: any) { super(props); this.state = { error: null }; }
@@ -56,6 +56,28 @@ function AppInner() {
   const [tripleMode, setTripleMode] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
+  const [sharedVcfText, setSharedVcfText] = useState<string | undefined>(undefined);
+
+  // PWA Web Share Target — detect when a .vcf was shared to the app
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('vcf-shared') === '1') {
+      // Remove the param from the URL without a page reload
+      const clean = window.location.pathname;
+      window.history.replaceState({}, '', clean);
+      // Fetch the file the service worker stored
+      fetch('/shared-vcf-file')
+        .then(r => r.ok ? r.text() : Promise.reject('no file'))
+        .then(text => {
+          setSharedVcfText(text);
+          setPage('contacts');
+        })
+        .catch(() => {
+          // If fetch fails just navigate to contacts so user can import manually
+          setPage('contacts');
+        });
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -255,7 +277,7 @@ function AppInner() {
       <div className="pt-[49px] pb-[60px] md:pb-0">
         {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
-        {page === 'contacts'     && <Contacts onNavigate={(p) => setPage(p as Page)} />}
+        {page === 'contacts'     && <Contacts onNavigate={(p) => setPage(p as Page)} sharedVcfText={sharedVcfText} />}
         {page === 'voicemails'   && <Voicemails />}
         {page === 'pipeline'     && <Pipeline />}
         {page === 'appointments' && <Appointments />}
