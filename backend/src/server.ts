@@ -66,6 +66,9 @@ app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 app.use('/api/twilio',         twilioRoutes);
 app.post('/api/twilio/sms-inbound', handleInboundSms);
 
+// iCloud routes MUST be before contactRoutes — contactRoutes has /:id wildcard that would swallow /icloud-*
+app.use('/api/contacts',       requireAuth,  icloudContactsRoutes);
+
 // All features available to any authenticated user (no plan gating)
 app.use('/api/contacts',        requireAuth, contactRoutes);
 app.use('/api/blast',           requireAuth, blastRoutes);
@@ -88,7 +91,6 @@ app.use('/api/appointments',    requireAuth, appointmentRoutes);
 app.use('/api/email',           requireAuth, emailRoutes);
 app.use('/api/gmail',                        gmailBlastRoutes); // OAuth callback must be unauthed
 app.use('/api/contacts',                     googleContactsRoutes); // Google OAuth callback must be unauthed
-app.use('/api/contacts',       requireAuth,  icloudContactsRoutes);
 app.use('/api/reports',         requireAuth, reportsRoutes);
 app.use('/api/next-action',     requireAuth, nextActionRoutes);
 app.use('/api/transcription',   requireAuth, transcriptionRoutes);
