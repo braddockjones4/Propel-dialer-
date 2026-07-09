@@ -171,6 +171,14 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
   const [importing, setImporting] = useState(false);
   const [result, setResult]       = useState<{ imported: number; skipped: number } | null>(null);
 
+  // iCloud Direct state
+  const [icloudExpanded, setIcloudExpanded] = useState(false);
+  const [icloudEmail, setIcloudEmail]       = useState('');
+  const [icloudPwd, setIcloudPwd]           = useState('');
+  const [icloudLoading, setIcloudLoading]   = useState(false);
+  const [icloudError, setIcloudError]       = useState('');
+  const [icloudSaveCreds, setIcloudSaveCreds] = useState(true);
+
   const csvRef = useRef<HTMLInputElement>(null);
   const vcfRef = useRef<HTMLInputElement>(null);
 
@@ -253,6 +261,30 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
     finally { setImporting(false); }
   };
 
+  const handleIcloudImport = async () => {
+    if (!icloudEmail.trim() || !icloudPwd.trim()) {
+      setIcloudError('Enter your Apple ID and App-Specific Password.');
+      return;
+    }
+    setIcloudLoading(true);
+    setIcloudError('');
+    try {
+      const res = await authFetch(`${API_BASE}/contacts/icloud-import`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appleId: icloudEmail.trim(), appPassword: icloudPwd.trim(), saveCredentials: icloudSaveCreds }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setIcloudError(json.error || 'Import failed.'); return; }
+      setResult({ imported: json.imported ?? 0, skipped: json.skipped ?? 0 });
+      setStage('done');
+    } catch {
+      setIcloudError('Connection failed. Check your internet and try again.');
+    } finally {
+      setIcloudLoading(false);
+    }
+  };
+
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', fn);
@@ -302,7 +334,124 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
           {mode === 'vcf' && stage === 'upload' && (
             <div>
 
-              {/* PRIMARY CTA: file picker */}
+              {/* ── iCloud Direct Sync ──────────────────────────────── */}
+              <div style={{
+                borderRadius: 14, marginBottom: 14,
+                border: icloudExpanded ? '1.5px solid #0071e3' : '1px solid #d0e8ff',
+                background: icloudExpanded ? '#f5f9ff' : 'linear-gradient(135deg, #f0f7ff 0%, #e8f4ff 100%)',
+                overflow: 'hidden',
+              }}>
+                {/* Header row */}
+                <button
+                  onClick={() => setIcloudExpanded(e => !e)}
+                  style={{
+                    width: '100%', padding: '18px 18px', background: 'none', border: 'none',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14,
+                  }}
+                >
+                  <span style={{ fontSize: 28, flexShrink: 0 }}>☁️</span>
+                  <div style={{ textAlign: 'left', flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: '#0071e3', letterSpacing: '0.01em' }}>
+                      Connect iCloud Directly
+                    </div>
+                    <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>
+                      Fetch all contacts from iCloud in one tap — no file export needed
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 16, color: '#0071e3', transform: icloudExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>›</span>
+                </button>
+
+                {/* Expanded form */}
+                {icloudExpanded && (
+                  <div style={{ padding: '0 18px 18px' }}>
+                    <div style={{ fontSize: 11, color: '#555', marginBottom: 12, lineHeight: 1.6 }}>
+                      Uses your Apple ID to securely fetch contacts from iCloud. Your password is never stored.
+                    </div>
+
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
+                        Apple ID (email)
+                      </label>
+                      <input
+                        type="email"
+                        value={icloudEmail}
+                        onChange={e => setIcloudEmail(e.target.value)}
+                        placeholder="you@icloud.com"
+                        style={{
+                          width: '100%', padding: '10px 12px', borderRadius: 8, boxSizing: 'border-box',
+                          border: '1px solid #d1d5db', fontSize: 14, color: '#111', background: '#fff', outline: 'none',
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
+                        App-Specific Password
+                        <a href="https://appleid.apple.com/account/manage" target="_blank" rel="noreferrer"
+                           style={{ fontSize: 10, color: '#0071e3', fontWeight: 400, textDecoration: 'none' }}>
+                          Generate one ↗
+                        </a>
+                      </label>
+                      <input
+                        type="password"
+                        value={icloudPwd}
+                        onChange={e => setIcloudPwd(e.target.value)}
+                        placeholder="xxxx-xxxx-xxxx-xxxx"
+                        style={{
+                          width: '100%', padding: '10px 12px', borderRadius: 8, boxSizing: 'border-box',
+                          border: '1px solid #d1d5db', fontSize: 14, color: '#111', background: '#fff',
+                          outline: 'none', fontFamily: 'monospace',
+                        }}
+                      />
+                      <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 5 }}>
+                        appleid.apple.com → Sign In → Security → App-Specific Passwords → Generate
+                      </div>
+                    </div>
+
+                    {/* Save credentials checkbox */}
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={icloudSaveCreds}
+                        onChange={e => setIcloudSaveCreds(e.target.checked)}
+                        style={{ width: 16, height: 16, accentColor: '#0071e3' }}
+                      />
+                      <span style={{ fontSize: 12, color: '#374151' }}>
+                        Save for one-tap sync in future
+                      </span>
+                    </label>
+
+                    {icloudError && (
+                      <div style={{ fontSize: 12, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
+                        {icloudError}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleIcloudImport}
+                      disabled={icloudLoading}
+                      style={{
+                        width: '100%', padding: '12px 18px', borderRadius: 10, border: 'none',
+                        background: icloudLoading ? '#6ea8d4' : 'linear-gradient(135deg, #0071e3 0%, #0058b0 100%)',
+                        color: '#fff', fontSize: 14, fontWeight: 700,
+                        cursor: icloudLoading ? 'default' : 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                      }}
+                    >
+                      {icloudLoading ? '⏳  Connecting to iCloud…' : '☁️  Import All iCloud Contacts'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px' }}>
+                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+                <span style={{ fontSize: 10, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>or select a .vcf file</span>
+                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+              </div>
+
+              {/* ── PRIMARY CTA: file picker */}
               <button
                 onClick={() => vcfRef.current?.click()}
                 style={{

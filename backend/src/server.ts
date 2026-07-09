@@ -30,6 +30,8 @@ import emailRoutes from './routes/email';
 import nextActionRoutes from './routes/nextAction';
 import reportsRoutes from './routes/reports';
 import authRoutes, { requireAuth } from './routes/auth';
+import googleContactsRoutes from './routes/googleContacts';
+import icloudContactsRoutes from './routes/icloudContacts';
 import promoRoutes from './routes/promo';
 import billingRoutes from './routes/billing';
 import teamRoutes from './routes/team';
@@ -85,6 +87,8 @@ app.use('/api/dnc',             requireAuth, dncRoutes);
 app.use('/api/appointments',    requireAuth, appointmentRoutes);
 app.use('/api/email',           requireAuth, emailRoutes);
 app.use('/api/gmail',                        gmailBlastRoutes); // OAuth callback must be unauthed
+app.use('/api/contacts',                     googleContactsRoutes); // Google OAuth callback must be unauthed
+app.use('/api/contacts',       requireAuth,  icloudContactsRoutes);
 app.use('/api/reports',         requireAuth, reportsRoutes);
 app.use('/api/next-action',     requireAuth, nextActionRoutes);
 app.use('/api/transcription',   requireAuth, transcriptionRoutes);

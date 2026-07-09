@@ -104,7 +104,7 @@ export default function Pipeline() {
   const totalValue = byColumn('appointment').length + byColumn('closed').length;
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-109px)] md:h-[calc(100vh-49px)]">
+    <div className="flex flex-col full-page-h">
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 md:px-8 py-3 bg-white border-b"

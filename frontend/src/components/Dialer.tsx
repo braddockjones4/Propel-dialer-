@@ -949,7 +949,7 @@ export default function Dialer() {
   const pct      = Math.round((index / contacts.length) * 100);
 
   return (
-    <div className="h-[calc(100vh-109px)] md:h-auto md:min-h-screen"
+    <div className="full-page-h"
       style={{ background: '#f8f8f8', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* Progress bar */}

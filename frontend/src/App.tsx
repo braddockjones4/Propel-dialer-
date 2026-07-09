@@ -61,6 +61,20 @@ function AppInner() {
   // PWA Web Share Target — detect when a .vcf was shared to the app
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    // Google Contacts import result
+    const googleImported = params.get('googleContactsImported');
+    const googleError    = params.get('googleContactsError');
+    if (googleImported !== null || googleError !== null) {
+      window.history.replaceState({}, '', window.location.pathname);
+      if (googleImported !== null) {
+        const skipped = params.get('googleContactsSkipped') || '0';
+        alert(`✓ Google Contacts imported!\n\n${googleImported} contacts added.${parseInt(skipped) > 0 ? `\n${skipped} duplicates skipped.` : ''}`);
+        setPage('contacts');
+      } else {
+        alert('Google Contacts import was cancelled or failed. Please try again.');
+      }
+    }
+
     if (params.get('vcf-shared') === '1') {
       // Remove the param from the URL without a page reload
       const clean = window.location.pathname;
@@ -274,7 +288,7 @@ function AppInner() {
       </div>
 
       {/* ── Page content ─────────────────────────────────────────────── */}
-      <div className="pt-[49px] pb-[60px] md:pb-0">
+      <div className="pt-[49px]" id="page-content">
         {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
         {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
         {page === 'contacts'     && <Contacts onNavigate={(p) => setPage(p as Page)} sharedVcfText={sharedVcfText} />}
@@ -290,6 +304,15 @@ function AppInner() {
       <style>{`
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* Mobile: reserve space for bottom tab bar + safe area */
+        @media (max-width: 767px) {
+          #page-content { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
+          /* Pages that want to fill exactly the visible viewport (no scroll) */
+          .full-page-h { height: calc(100dvh - 49px - 56px - env(safe-area-inset-bottom)) !important; }
+        }
+        @media (min-width: 768px) {
+          .full-page-h { height: calc(100vh - 49px) !important; }
+        }
       `}</style>
     </>
   );

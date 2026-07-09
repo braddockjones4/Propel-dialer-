@@ -162,7 +162,7 @@ export default function Voicemails() {
   }
 
   return (
-    <div style={{ minHeight: 'calc(100dvh - 109px)', background: '#f8f8f8', padding: 'clamp(16px,4vw,28px) 16px calc(80px + env(safe-area-inset-bottom))' }} className="md:min-h-[calc(100vh-49px)]">
+    <div style={{ minHeight: 'calc(100dvh - 49px - 56px - env(safe-area-inset-bottom))', background: '#f8f8f8', padding: 'clamp(16px,4vw,28px) 16px 24px' }} className="md:min-h-[calc(100vh-49px)]">
       <div style={{ maxWidth: 540, margin: '0 auto' }}>
 
         {/* Header */}
