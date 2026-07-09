@@ -824,7 +824,7 @@ router.get('/contacts', async (req: Request, res: Response) => {
       id: true, firstName: true, lastName: true, phone: true,
       address: true, city: true, state: true, zip: true,
       source: true, status: true, notes: true, leadScore: true,
-      lastReplyAt: true, updatedAt: true,
+      contactGroup: true, lastReplyAt: true, updatedAt: true,
       calls: {
         orderBy: { calledAt: 'desc' },
         take: 1,

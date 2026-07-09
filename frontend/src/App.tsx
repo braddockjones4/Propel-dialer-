@@ -23,7 +23,6 @@ import Login from './components/Login';
 import Landing from './components/Landing';
 import NotificationBell from './components/NotificationBell';
 import Dialer from './components/Dialer';
-import TripleDialer from './components/TripleDialer';
 import Contacts from './components/Contacts';
 import Analytics from './components/Analytics';
 import Settings from './components/Settings';
@@ -53,7 +52,7 @@ const NAV: { id: Page; label: string }[] = [
 function AppInner() {
   const { user, loading, logout } = useAuth();
   const [page, setPage]             = useState<Page>('dashboard');
-  const [tripleMode, setTripleMode] = useState(false);
+
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
   const [sharedVcfText, setSharedVcfText] = useState<string | undefined>(undefined);
@@ -167,20 +166,7 @@ function AppInner() {
 
         {/* Right side: plan badge + user */}
         <div className="flex items-center gap-3 pl-4 flex-shrink-0">
-          {page === 'dialer' && (
-            <>
-              <span className="text-[9px] tracking-widest uppercase text-gray-400">Triple Line</span>
-              <button
-                onClick={() => setTripleMode(t => !t)}
-                className="relative w-9 h-[18px] rounded-full transition-colors duration-300"
-                style={{ background: tripleMode ? '#C9A84C' : '#E0E0E0' }}
-              >
-                <span className="absolute top-0.5 left-0.5 w-[14px] h-[14px] rounded-full bg-white shadow transition-transform duration-300"
-                      style={{ transform: tripleMode ? 'translateX(18px)' : 'translateX(0)' }} />
-              </button>
-              <div className="w-px h-4" style={{ background: 'rgba(201,168,76,0.3)' }} />
-            </>
-          )}
+
 
           <NotificationBell onNavigate={(p) => setPage(p as any)} />
 
@@ -283,7 +269,7 @@ function AppInner() {
       {/* ── Page content ─────────────────────────────────────────────── */}
       <div className="pt-[49px]" id="page-content">
         {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
-        {page === 'dialer'       && (tripleMode ? <TripleDialer /> : <Dialer />)}
+        {page === 'dialer'       && <Dialer />}
         {page === 'contacts'     && <Contacts onNavigate={(p) => setPage(p as Page)} sharedVcfText={sharedVcfText} />}
         {page === 'voicemails'   && <Voicemails />}
         {page === 'pipeline'     && <Pipeline />}

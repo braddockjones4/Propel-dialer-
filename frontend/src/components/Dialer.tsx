@@ -22,6 +22,7 @@ interface DialerContact {
   status: string;
   notes?: string;
   leadScore?: number;
+  contactGroup?: string | null;
   lastReplyAt?: string;
   updatedAt: string;
   calls?: Array<{ calledAt: string; disposition?: string; duration: number }>;
@@ -302,7 +303,7 @@ export default function Dialer() {
         data = data.filter(c => c.source === sourceVal);
       } else if (isGroupFilter) {
         const groupVal = filter.replace('group:', '');
-        data = data.filter(c => (c as any).contactGroup === groupVal);
+        data = data.filter(c => c.contactGroup === groupVal);
       }
 
       // Pin Braddock Jones first for demo
