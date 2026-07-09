@@ -101,6 +101,9 @@ export default function Contacts({ onNavigate }: ContactsProps) {
   // CSV import
   const [showImport, setShowImport] = useState(false);
 
+  // Mobile: which group column is currently displayed
+  const [mobileGroup, setMobileGroup] = useState<string>(UNGROUPED);
+
   // Socket ref for cleanup
   const socketRef = useRef<ReturnType<typeof socketIo> | null>(null);
 
@@ -358,18 +361,27 @@ export default function Contacts({ onNavigate }: ContactsProps) {
   const isInitialising = grpLoading && loading;
 
   // ── Render ───────────────────────────────────────────────────────────────
+
+  // Contacts visible in the current mobile group
+  const mobileCards = contactsInGroup(mobileGroup).filter(c =>
+    !search || `${c.firstName} ${c.lastName} ${c.phone}`.toLowerCase().includes(search.toLowerCase())
+  );
+  const mobileGroupObj = groups.find(g => g.name === mobileGroup) ?? null;
+  const mobileAccent = mobileGroupObj?.color || '#9ca3af';
+
   return (
-    <div style={{ height: 'calc(100vh - 49px)', display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}>
+    <div style={{ height: 'calc(100vh - 109px)', display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}
+         className="md:h-[calc(100vh-49px)]">
 
       {/* ── Top bar ───────────────────────────────────────────────────── */}
       <div style={{
         background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.07)',
-        padding: '10px 20px', display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+        padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
       }}>
-        <span style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 20, fontWeight: 300, letterSpacing: '0.12em', color: DARK }}>
+        <span className="hidden md:inline" style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 20, fontWeight: 300, letterSpacing: '0.12em', color: DARK }}>
           Contacts
         </span>
-        <div style={{ width: 1, height: 18, background: '#e5e7eb' }} />
+        <div className="hidden md:block" style={{ width: 1, height: 18, background: '#e5e7eb' }} />
         <input
           type="text"
           placeholder="Search…"
@@ -377,10 +389,10 @@ export default function Contacts({ onNavigate }: ContactsProps) {
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, maxWidth: 220, padding: '6px 12px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 12, outline: 'none', background: '#fafafa' }}
         />
-        <div style={{ flex: 1 }} />
+        <div className="hidden md:block" style={{ flex: 1 }} />
 
-        {/* Live AI indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, opacity: 0.65 }}>
+        {/* Live AI indicator — desktop only */}
+        <div className="hidden md:flex" style={{ alignItems: 'center', gap: 5, opacity: 0.65 }}>
           <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e',
             boxShadow: '0 0 5px #22c55e', animation: 'pulse 2s infinite' }} />
           <span style={{ fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', fontWeight: 600 }}>
@@ -390,22 +402,127 @@ export default function Contacts({ onNavigate }: ContactsProps) {
 
         <button
           onClick={() => setShowImport(true)}
-          style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', background: 'transparent', color: '#6b7280', cursor: 'pointer' }}
+          style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', background: 'transparent', color: '#6b7280', cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
-          Import Contacts
+          Import
         </button>
         <button
           onClick={() => { setCreatingGroup(true); setNewGroupName(''); setNewGroupColor(GROUP_COLORS[0]); }}
-          style={{ padding: '6px 16px', borderRadius: 7, border: 'none', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', background: DARK, color: '#fff', cursor: 'pointer' }}
+          style={{ padding: '6px 12px', borderRadius: 7, border: 'none', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', background: DARK, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
-          + New Group
+          + Group
         </button>
       </div>
 
+      {/* ══════════════════════════════════════════════════════════════════
+          MOBILE VIEW — group tab bar + vertical contact list
+          Only visible on small screens (hidden on md+)
+      ══════════════════════════════════════════════════════════════════ */}
+      <div className="flex md:hidden flex-col" style={{ flex: 1, overflow: 'hidden' }}>
+
+        {/* Group tab strip */}
+        <div style={{
+          display: 'flex', overflowX: 'auto', background: '#fff',
+          borderBottom: '1px solid rgba(0,0,0,0.07)', flexShrink: 0,
+        }} className="hide-scrollbar">
+          {allColumns.map(gName => {
+            const gObj = gName === UNGROUPED ? null : groups.find(g => g.name === gName);
+            const accent = gObj?.color || '#9ca3af';
+            const label = gName === UNGROUPED ? 'All' : gName;
+            const isActive = mobileGroup === gName;
+            const count = contactsInGroup(gName).length;
+            return (
+              <button key={gName} onClick={() => setMobileGroup(gName)} style={{
+                flexShrink: 0, padding: '10px 14px', background: 'none', border: 'none',
+                borderBottom: `2px solid ${isActive ? accent : 'transparent'}`,
+                cursor: 'pointer', textAlign: 'center', marginBottom: -1,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? DARK : '#9ca3af', whiteSpace: 'nowrap' }}>
+                  {label}
+                </div>
+                <div style={{ fontSize: 10, color: isActive ? accent : '#d1d5db', marginTop: 1 }}>{count}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Dial group button */}
+        {mobileCards.length > 0 && (
+          <div style={{ padding: '8px 14px', background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.05)', flexShrink: 0 }}>
+            <button
+              onClick={() => dialGroup(mobileGroup)}
+              style={{
+                width: '100%', padding: '10px', borderRadius: 8, border: 'none',
+                fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                color: '#fff', cursor: 'pointer',
+                background: mobileGroup === UNGROUPED ? DARK : mobileAccent,
+              }}
+            >
+              ▶ Dial {mobileCards.length} Contact{mobileCards.length !== 1 ? 's' : ''}
+            </button>
+          </div>
+        )}
+
+        {/* Contact list */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
+          {isInitialising ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>Loading…</div>
+          ) : mobileCards.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#d1d5db', fontSize: 13 }}>
+              {search ? 'No contacts match your search' : 'No contacts in this group'}
+            </div>
+          ) : (
+            mobileCards.map(c => (
+              <div
+                key={c.id}
+                onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
+                style={{
+                  background: selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fff',
+                  borderRadius: 10,
+                  border: `1px solid ${selected?.id === c.id ? 'rgba(201,168,76,0.3)' : 'rgba(0,0,0,0.07)'}`,
+                  padding: '12px 14px',
+                  marginBottom: 8,
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                }}
+              >
+                {/* Avatar circle */}
+                <div style={{
+                  width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                  background: mobileGroup === UNGROUPED ? '#f3f4f6' : `${mobileAccent}22`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 700, color: mobileGroup === UNGROUPED ? '#9ca3af' : mobileAccent,
+                }}>
+                  {(c.firstName?.[0] || '?').toUpperCase()}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.firstName} {c.lastName}
+                  </div>
+                  <div style={{ fontSize: 12, color: GOLD, fontFamily: 'monospace', marginTop: 1 }}>
+                    {fmtPhone(c.phone)}
+                  </div>
+                  {c.status && c.status !== 'new' && (
+                    <div style={{ fontSize: 10, color: STATUS_COLORS[c.status] || '#9ca3af', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
+                      {c.status}
+                    </div>
+                  )}
+                </div>
+                <span style={{ color: '#d1d5db', fontSize: 14 }}>›</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════════════
+          DESKTOP KANBAN — hidden on mobile, shown on md+
+      ══════════════════════════════════════════════════════════════════ */}
       {/* ── Kanban board ─────────────────────────────────────────────── */}
-      <div style={{
+      <div className="hidden md:flex" style={{
         flex: 1, overflowX: 'auto', overflowY: 'hidden',
-        display: 'flex', gap: 14, padding: '18px 20px',
+        gap: 14, padding: '18px 20px',
         alignItems: 'flex-start',
       }}>
         {isInitialising ? (
@@ -716,8 +833,8 @@ export default function Contacts({ onNavigate }: ContactsProps) {
             style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.18)', zIndex: 99 }}
             className="md:hidden"
           />
-          <div style={{
-            position: 'fixed', top: 49, right: 0, bottom: 0, width: 320,
+          <div className="bottom-[60px] md:bottom-0 w-full md:w-[320px]" style={{
+            position: 'fixed', top: 49, right: 0,
             background: '#fff', borderLeft: '1px solid rgba(0,0,0,0.07)',
             boxShadow: '-6px 0 30px rgba(0,0,0,0.07)',
             display: 'flex', flexDirection: 'column', zIndex: 100,
