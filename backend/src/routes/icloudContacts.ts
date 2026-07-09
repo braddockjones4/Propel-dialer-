@@ -163,42 +163,57 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   }
   if (!addressbookUrls.length) addressbookUrls = [homeSetUrl];
 
-  // ── STEP 4a: PROPFIND Depth:1 on each addressbook → collect ALL .vcf hrefs ──
-  // This avoids server-side limits on REPORT responses
-  const contactHrefs: string[] = [];
+  // ── STEP 4a: PROPFIND Depth:1 on each addressbook → collect ALL contact hrefs ──
+  // Track hrefs per addressbook so multiget goes to the right collection
+  const abHrefMap: Array<{ abUrl: string; hrefs: string[] }> = [];
+
   for (const abPath of addressbookUrls) {
     const abUrl = abPath.startsWith('http') ? abPath : `${serverBase}${abPath}`;
     const listing = await fetch(abUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_HREFS_ONLY });
     if (listing.status === 207 || listing.ok) {
       const listXml = await listing.text();
-      const hrefs = allHrefs(listXml).filter(h => h.endsWith('.vcf') || h.includes('/card'));
-      contactHrefs.push(...hrefs);
+      // Extract hrefs from individual <response> blocks to avoid false matches
+      const responseBlocks = listXml.match(/<(?:[A-Za-z]+:)?response[\s\S]*?<\/(?:[A-Za-z]+:)?response>/gi) || [];
+      const hrefs: string[] = [];
+      for (const block of responseBlocks) {
+        const href = firstHref(block);
+        if (!href) continue;
+        // Skip the collection container itself (ends in / or equals abPath)
+        const normalised = href.replace(/\/$/, '');
+        const abNorm    = abPath.replace(/\/$/, '');
+        if (normalised === abNorm || href.endsWith('/')) continue;
+        // Skip if the response reports a 404 for this href
+        if (/<status[^>]*>HTTP\/1\.[01] 404/i.test(block)) continue;
+        hrefs.push(href);
+      }
+      if (hrefs.length) abHrefMap.push({ abUrl, hrefs });
     }
   }
-  console.log(`[iCloud] discovered ${addressbookUrls.length} addressbook(s), ${contactHrefs.length} contact hrefs`);
 
-  if (!contactHrefs.length) return [];
+  const totalHrefs = abHrefMap.reduce((n, e) => n + e.hrefs.length, 0);
+  console.log(`[iCloud] discovered ${addressbookUrls.length} addressbook(s), ${totalHrefs} contact hrefs`);
 
-  // ── STEP 4b: addressbook-multiget in batches of 100 ─────────────────────
+  if (!totalHrefs) return [];
+
+  // ── STEP 4b: addressbook-multiget in batches of 100 per addressbook ──────
   const BATCH = 100;
   const allVCards: string[] = [];
 
-  for (let i = 0; i < contactHrefs.length; i += BATCH) {
-    const batch = contactHrefs.slice(i, i + BATCH);
-    const hrefXml = batch.map(h => `<D:href>${h}</D:href>`).join('');
-    const MULTIGET = `<?xml version="1.0" encoding="utf-8"?>
+  for (const { abUrl, hrefs } of abHrefMap) {
+    for (let i = 0; i < hrefs.length; i += BATCH) {
+      const batch = hrefs.slice(i, i + BATCH);
+      const hrefXml = batch.map(h => `<D:href>${h}</D:href>`).join('');
+      const MULTIGET = `<?xml version="1.0" encoding="utf-8"?>
 <C:addressbook-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
   <D:prop><D:getetag/><C:address-data/></D:prop>
   ${hrefXml}
 </C:addressbook-multiget>`;
 
-    // Multiget must be sent to the addressbook URL, not a specific card URL
-    // Use the first addressbook URL as the target
-    const abUrl = addressbookUrls[0].startsWith('http') ? addressbookUrls[0] : `${serverBase}${addressbookUrls[0]}`;
-    const rep = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: MULTIGET });
-    if (rep.status === 401) throw new Error('AUTH_FAILED');
-    if (rep.status === 207 || rep.ok) {
-      allVCards.push(...extractVCards(await rep.text()));
+      const rep = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: MULTIGET });
+      if (rep.status === 401) throw new Error('AUTH_FAILED');
+      if (rep.status === 207 || rep.ok) {
+        allVCards.push(...extractVCards(await rep.text()));
+      }
     }
   }
 
