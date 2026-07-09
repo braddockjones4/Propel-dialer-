@@ -104,7 +104,7 @@ export default function Pipeline() {
   const totalValue = byColumn('appointment').length + byColumn('closed').length;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-49px)]">
+    <div className="flex flex-col h-[calc(100dvh-109px)] md:h-[calc(100vh-49px)]">
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 md:px-8 py-3 bg-white border-b"
@@ -295,8 +295,8 @@ export default function Pipeline() {
         <div className="fixed inset-0 z-40 flex" onClick={() => setDetailContact(null)}>
           <div className="flex-1" />
           <div
-            className="w-80 h-full bg-white shadow-2xl border-l p-6 overflow-y-auto flex flex-col gap-5"
-            style={{ borderColor: 'rgba(201,168,76,0.2)' }}
+            className="w-full md:w-80 bg-white shadow-2xl border-l p-5 md:p-6 overflow-y-auto flex flex-col gap-5"
+            style={{ borderColor: 'rgba(201,168,76,0.2)', paddingBottom: 'max(20px, calc(env(safe-area-inset-bottom) + 80px))' }}
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-start justify-between">

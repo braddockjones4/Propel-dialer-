@@ -61,7 +61,7 @@ export default function Dashboard({ onNavigate }: Props) {
   ];
 
   return (
-    <div className="min-h-screen" style={{ background: '#f8f8f8' }}>
+    <div style={{ background: '#f8f8f8', minHeight: 'calc(100dvh - 109px)', paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)' }} className="md:min-h-screen md:pb-0">
 
       {/* Hero greeting */}
       <div style={{
@@ -97,7 +97,7 @@ export default function Dashboard({ onNavigate }: Props) {
         )}
       </div>
 
-      <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ padding: '20px 16px 8px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
         {/* Quick actions */}
         <div>

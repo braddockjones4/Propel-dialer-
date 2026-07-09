@@ -50,20 +50,20 @@ export default function Reports() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto p-6">
+    <div className="min-h-screen bg-gray-50 pb-20 md:pb-6">
+      <div className="max-w-4xl mx-auto p-3 md:p-6">
 
         {/* Header / controls */}
-        <div className="flex items-center justify-between mb-6 print:hidden">
+        <div className="flex flex-col gap-3 mb-4 md:flex-row md:items-center md:justify-between md:mb-6 print:hidden">
           <div>
-            <h1 className="text-3xl font-light text-black tracking-tight">Reports</h1>
-            <p className="text-sm text-gray-400 mt-0.5">Daily summaries &amp; data exports</p>
+            <h1 className="text-2xl md:text-3xl font-light text-black tracking-tight">Reports</h1>
+            <p className="text-xs md:text-sm text-gray-400 mt-0.5">Daily summaries &amp; data exports</p>
           </div>
-          <div className="flex items-center gap-3">
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="field-input w-40" />
-            <button onClick={printReport} className="btn-ghost px-4 py-2 text-sm">🖨 Print / PDF</button>
-            <button onClick={() => downloadCSV('contacts')} className="btn-ghost px-4 py-2 text-sm">⬇ Contacts CSV</button>
-            <button onClick={() => downloadCSV('calls')} className="btn-gold px-4 py-2 text-sm">⬇ Calls CSV</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="field-input flex-1 min-w-[140px]" />
+            <button onClick={printReport} className="btn-ghost px-3 py-2 text-xs hidden md:block">🖨 Print / PDF</button>
+            <button onClick={() => downloadCSV('contacts')} className="btn-ghost px-3 py-2 text-xs">⬇ Contacts</button>
+            <button onClick={() => downloadCSV('calls')} className="btn-gold px-3 py-2 text-xs">⬇ Calls CSV</button>
           </div>
         </div>
 
@@ -84,7 +84,7 @@ export default function Reports() {
             </div>
 
             {/* Summary stats */}
-            <div className="grid grid-cols-4 gap-3 mb-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-4 md:mb-5">
               {[
                 { label: 'Total Calls',    value: report.summary.totalCalls,                  gold: false },
                 { label: 'Hot Leads',      value: report.summary.hotLeads,                    gold: true  },

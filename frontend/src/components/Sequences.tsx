@@ -52,11 +52,11 @@ export default function Sequences() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-10">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-10 pb-20 md:pb-10">
       <div className="max-w-3xl mx-auto">
 
         {/* Header */}
-        <div className="flex items-end justify-between mb-10">
+        <div className="flex items-start md:items-end justify-between mb-6 md:mb-10 gap-3">
           <div>
             <div className="text-[9px] tracking-widest uppercase mb-2" style={{ color: 'rgba(154,122,46,0.7)' }}>Automation</div>
             <h1 className="text-3xl font-serif font-light text-black tracking-wide">Follow-Up Sequences</h1>
