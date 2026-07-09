@@ -52,26 +52,36 @@ function extractVCards(xml: string): string[] {
 }
 
 function parseVCard(text: string): Record<string, string> | null {
-  const lines = text.replace(/\r\n[ \t]/g, '').replace(/\r/g, '').split('\n');
+  // Unfold RFC 2425 line continuations, normalise line endings
+  const lines = text.replace(/\r\n[ \t]/g, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   const c: Record<string, string> = {};
+
   for (const raw of lines) {
     const line = raw.trim();
     const ci = line.indexOf(':');
     if (ci < 0) continue;
-    const prop = line.slice(0, ci).toUpperCase();
-    const val  = line.slice(ci + 1).trim();
+    const rawProp = line.slice(0, ci).toUpperCase();
+    const val     = line.slice(ci + 1).trim();
+
+    // Strip Apple item-group prefix: "item1.TEL" → "TEL", "item2.EMAIL" → "EMAIL"
+    const prop = rawProp.replace(/^ITEM\d+\./, '');
+
     if (prop === 'FN' && val) c._fn = val;
     if (prop === 'N'  && val) {
       const p = val.split(';');
       if (p[0]?.trim()) c.lastName  = p[0].trim();
       if (p[1]?.trim()) c.firstName = p[1].trim();
     }
+
+    // TEL — handle plain, TEL;TYPE=..., and VALUE=uri (tel:+1xxx)
     if ((prop === 'TEL' || prop.startsWith('TEL;')) && val && !c.phone) {
-      let d = val.replace(/[^\d+]/g, '');
+      const telVal = val.replace(/^tel:/i, '');   // strip "tel:" URI scheme
+      let d = telVal.replace(/[^\d+]/g, '');
       if (/^\d{10}$/.test(d))                    d = '+1' + d;
       else if (/^\d{11}$/.test(d) && d[0]==='1') d = '+' + d;
-      if (d.length >= 10) c.phone = d;
+      if (d.replace(/[^\d]/g, '').length >= 10)  c.phone = d;
     }
+
     if ((prop === 'EMAIL' || prop.startsWith('EMAIL;')) && val && !c.email) c.email = val;
     if ((prop === 'ADR'   || prop.startsWith('ADR;'))   && val && !c.address) {
       const p = val.split(';');
@@ -81,6 +91,22 @@ function parseVCard(text: string): Record<string, string> | null {
       c.zip     = p[5]?.trim() || '';
     }
   }
+
+  // Fallback: scan entire vCard text for any phone-like pattern
+  // Catches numbers in NOTE, X- fields, or unusual property names
+  if (!c.phone) {
+    const phoneRe = /(?:\+1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}|\b\d{10}\b|\+1\d{10}\b/g;
+    const matches = text.match(phoneRe);
+    if (matches) {
+      for (const m of matches) {
+        let d = m.replace(/[^\d+]/g, '');
+        if (/^\d{10}$/.test(d))                    d = '+1' + d;
+        else if (/^\d{11}$/.test(d) && d[0]==='1') d = '+' + d;
+        if (d.replace(/[^\d]/g, '').length >= 10) { c.phone = d; break; }
+      }
+    }
+  }
+
   if (!c.firstName && !c.lastName && c._fn) {
     const p = c._fn.split(' ');
     c.firstName = p[0] || '';
