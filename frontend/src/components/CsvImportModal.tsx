@@ -1,7 +1,7 @@
 // ── Import Contacts Modal ─────────────────────────────────────────────────────
 // Supports two import paths:
 //   1. CSV (BatchLeads, PropStream, Google Contacts, any spreadsheet export)
-//   2. vCard / .vcf (iPhone: Contacts → Share; Android: Contacts → Export)
+//   2. vCard / .vcf (iPhone: Contacts → Share Contact → Save to Files)
 //
 // vCard parsing is done entirely client-side — no new backend needed.
 // Uses the existing POST /api/contacts/import endpoint.
@@ -79,7 +79,6 @@ function parseCsv(text: string): { headers: string[]; rows: ParsedRow[] } {
 /** Parse a .vcf file string into contact objects. Handles vCard 2.1, 3.0, 4.0. */
 function parseVCard(text: string): ParsedRow[] {
   const contacts: ParsedRow[] = [];
-  // Split on BEGIN:VCARD boundaries
   const cards = text.split(/BEGIN:VCARD/i).slice(1);
 
   for (const card of cards) {
@@ -95,34 +94,27 @@ function parseVCard(text: string): ParsedRow[] {
       const prop = line.slice(0, colonIdx).toUpperCase();
       const value = line.slice(colonIdx + 1).trim();
 
-      // Full name
       if (prop === 'FN' && value) {
         contact._fn = value;
       }
 
-      // Structured name: Last;First;Middle;Prefix;Suffix
       if (prop === 'N' && value) {
         const parts = value.split(';');
         if (parts[0]) contact.lastName  = parts[0].trim();
         if (parts[1]) contact.firstName = parts[1].trim();
       }
 
-      // Phone number — take first one found
       if ((prop.startsWith('TEL') || prop === 'PHONE') && value && !contact.phone) {
-        // Strip everything except digits and leading +
         let digits = value.replace(/[^\d+]/g, '');
-        // Normalize: if 10 digits and no country code → add +1
         if (/^\d{10}$/.test(digits)) digits = `+1${digits}`;
         else if (/^\d{11}$/.test(digits) && digits[0] === '1') digits = `+${digits}`;
         if (digits.length >= 10) contact.phone = digits;
       }
 
-      // Email — take first
       if ((prop.startsWith('EMAIL') || prop === 'EMAIL') && value && !contact.email) {
         contact.email = value;
       }
 
-      // Address (ADR: pobox;ext;street;city;state;zip;country)
       if (prop.startsWith('ADR') && value && !contact.address) {
         const parts = value.split(';');
         if (parts[2]) contact.address = parts[2].trim();
@@ -132,7 +124,6 @@ function parseVCard(text: string): ParsedRow[] {
       }
     }
 
-    // If N didn't give us first/last, try splitting FN
     if (!contact.firstName && !contact.lastName && contact._fn) {
       const parts = contact._fn.split(' ');
       contact.firstName = parts[0] || '';
@@ -140,7 +131,6 @@ function parseVCard(text: string): ParsedRow[] {
     }
     delete contact._fn;
 
-    // Only include if we got a phone
     if (contact.phone) contacts.push(contact);
   }
 
@@ -164,21 +154,14 @@ type Mode  = 'csv' | 'vcf';
 type Stage = 'upload' | 'map' | 'preview' | 'done';
 
 export default function CsvImportModal({ onClose, onImported }: Props) {
-  const [mode, setMode]           = useState<Mode>('vcf');
-  const [stage, setStage]         = useState<Stage>('upload');
-  const [dragging, setDragging]   = useState(false);
-  const [nativeError, setNativeError] = useState('');
-  // Detect Web Contacts API inside component — avoids SSR issues and ensures
-  // the check runs after hydration. Only iOS Safari 18+ and Chrome Android support it.
-  const [hasContactsAPI, setHasContactsAPI] = useState(false);
-  useEffect(() => {
-    setHasContactsAPI(typeof (navigator as any).contacts !== 'undefined');
-  }, []);
+  const [mode, setMode]         = useState<Mode>('vcf');
+  const [stage, setStage]       = useState<Stage>('upload');
+  const [dragging, setDragging] = useState(false);
 
   // CSV state
-  const [headers, setHeaders]     = useState<string[]>([]);
-  const [rows, setRows]           = useState<ParsedRow[]>([]);
-  const [mapping, setMapping]     = useState<Record<string, string>>({});
+  const [headers, setHeaders]           = useState<string[]>([]);
+  const [rows, setRows]                 = useState<ParsedRow[]>([]);
+  const [mapping, setMapping]           = useState<Record<string, string>>({});
   const [defaultSource, setDefaultSource] = useState('manual');
 
   // VCF state
@@ -191,56 +174,8 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
   const csvRef = useRef<HTMLInputElement>(null);
   const vcfRef = useRef<HTMLInputElement>(null);
 
-  const switchMode = (m: Mode) => { setMode(m); setStage('upload'); setRows([]); setVcfContacts([]); setResult(null); setNativeError(''); };
-
-  // ── Native Contacts API ───────────────────────────────────────────────────
-  // Works on: iPhone Safari iOS 16+, Chrome Android 80+
-  // Falls back gracefully for older iOS / Chrome iOS / desktop
-  const importFromNativeContacts = async () => {
-    setNativeError('');
-    const nav = navigator as any;
-
-    // Not supported on this browser — give a clear actionable message
-    if (!nav.contacts) {
-      setNativeError(
-        'This feature requires Safari on iPhone (iOS 16 or later). ' +
-        'Make sure you\'re opening propeldialer.com in Safari — not Chrome or another browser. ' +
-        'Or use the file method below.'
-      );
-      return;
-    }
-
-    try {
-      const contacts = await nav.contacts.select(['name', 'tel', 'email'], { multiple: true });
-      if (!contacts || contacts.length === 0) return;
-
-      const parsed: ParsedRow[] = contacts.flatMap((c: any) => {
-        const phones: string[] = (c.tel || []).filter(Boolean);
-        const emails: string[] = (c.email || []).filter(Boolean);
-        const nameStr: string = (c.name || [])[0] || '';
-        const nameParts = nameStr.trim().split(/\s+/);
-        const firstName = nameParts[0] || '';
-        const lastName  = nameParts.slice(1).join(' ') || '';
-
-        if (!phones.length) return [];
-        return phones.slice(0, 1).map(phone => {
-          let digits = phone.replace(/[^\d+]/g, '');
-          if (/^\d{10}$/.test(digits)) digits = `+1${digits}`;
-          else if (/^\d{11}$/.test(digits) && digits[0] === '1') digits = `+${digits}`;
-          return { firstName, lastName, phone: digits, email: emails[0] || '' };
-        });
-      }).filter((c: ParsedRow) => c.phone && c.phone.length >= 10);
-
-      if (!parsed.length) { setNativeError('No contacts with phone numbers found.'); return; }
-      setVcfContacts(parsed);
-      setStage('preview');
-    } catch (err: any) {
-      if (err.name === 'SecurityError') {
-        setNativeError('Contacts access was denied. Go to iPhone Settings → Safari → Contacts and allow access.');
-      } else if (err.name !== 'AbortError') {
-        setNativeError('Could not open contacts picker. Try the file method below.');
-      }
-    }
+  const switchMode = (m: Mode) => {
+    setMode(m); setStage('upload'); setRows([]); setVcfContacts([]); setResult(null);
   };
 
   // ── CSV loading ───────────────────────────────────────────────────────────
@@ -315,17 +250,21 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4"
+         style={{ background: 'rgba(0,0,0,0.5)' }}>
       <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-2xl w-full sm:max-w-2xl max-h-[92vh] flex flex-col"
            style={{ border: '1px solid rgba(201,168,76,0.2)' }}>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b" style={{ borderColor: 'rgba(201,168,76,0.15)' }}>
+        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b"
+             style={{ borderColor: 'rgba(201,168,76,0.15)' }}>
           <div>
-            <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 22, margin: 0 }}>Import Contacts</h2>
+            <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 22, margin: 0 }}>
+              Import Contacts
+            </h2>
             <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>iPhone, Android, or CSV spreadsheet</p>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#d1d5db', lineHeight: 1 }}>✕</button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#d1d5db' }}>✕</button>
         </div>
 
         {/* Mode tabs */}
@@ -333,7 +272,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
              className="hide-scrollbar">
           {([
             { id: 'vcf' as Mode, label: '📱 From Phone', sub: 'iPhone or Android contacts' },
-            { id: 'csv' as Mode, label: '📄 From CSV',   sub: 'Spreadsheet or list export' },
+            { id: 'csv' as Mode, label: '📄 From CSV',   sub: 'Spreadsheet or list export'  },
           ] as { id: Mode; label: string; sub: string }[]).map(tab => (
             <button key={tab.id} onClick={() => switchMode(tab.id)} style={{
               padding: '12px 16px 10px', flexShrink: 0,
@@ -347,67 +286,34 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
           ))}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px' }} className="sm:px-6">
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }} className="sm:px-6">
 
-          {/* ═══ VCF MODE ══════════════════════════════════════════════ */}
+          {/* ═══ VCF MODE — UPLOAD ══════════════════════════════════════ */}
           {mode === 'vcf' && stage === 'upload' && (
             <div>
 
-              {/* ── PRIMARY: native contacts picker — always shown ────── */}
-              {/* Works on iPhone Safari iOS 16+. Falls back with clear    */}
-              {/* instructions if on Chrome iOS or older Safari.           */}
+              {/* PRIMARY CTA: file picker */}
               <button
-                onClick={importFromNativeContacts}
+                onClick={() => vcfRef.current?.click()}
                 style={{
-                  width: '100%', padding: '18px 16px', borderRadius: 14,
+                  width: '100%', padding: '20px 18px', borderRadius: 14,
                   background: 'linear-gradient(135deg, #0A0A0A 0%, #1a1a1a 100%)',
                   border: '1px solid rgba(201,168,76,0.35)',
                   color: '#fff', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', gap: 14,
-                  marginBottom: 8,
+                  marginBottom: 12,
                 }}
               >
-                <span style={{ fontSize: 28 }}>📇</span>
+                <span style={{ fontSize: 30 }}>📂</span>
                 <div style={{ textAlign: 'left', flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: '0.02em' }}>
-                    Select from iPhone Contacts
+                  <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '0.02em' }}>
+                    Select .vcf File
                   </div>
-                  <div style={{ fontSize: 11, color: 'rgba(201,168,76,0.85)', marginTop: 3 }}>
-                    Opens your native contacts picker · no export needed
+                  <div style={{ fontSize: 12, color: 'rgba(201,168,76,0.85)', marginTop: 3 }}>
+                    Choose a contacts file from your iPhone
                   </div>
                 </div>
-                <span style={{ fontSize: 18, color: 'rgba(201,168,76,0.6)' }}>›</span>
-              </button>
-
-              {/* Error/guidance from native picker attempt */}
-              {nativeError && (
-                <div style={{ fontSize: 12, color: '#92400e', marginBottom: 10, padding: '10px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, lineHeight: 1.6 }}>
-                  {nativeError}
-                </div>
-              )}
-
-              {/* ── Divider ────────────────────────────────────────────── */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0' }}>
-                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
-                <span style={{ fontSize: 10, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>or use a file</span>
-                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
-              </div>
-
-              {/* ── SECONDARY: file picker ──────────────────────────────── */}
-              <button
-                onClick={() => vcfRef.current?.click()}
-                style={{
-                  width: '100%', padding: '14px 16px', borderRadius: 12,
-                  background: '#fff', border: '1.5px solid #e5e7eb',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12,
-                  marginBottom: 10,
-                }}
-              >
-                <span style={{ fontSize: 22 }}>🗂️</span>
-                <div style={{ textAlign: 'left' }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>Select .vcf File</div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>Choose an exported contacts file from Files app</div>
-                </div>
+                <span style={{ fontSize: 20, color: 'rgba(201,168,76,0.6)' }}>›</span>
               </button>
               <input
                 ref={vcfRef}
@@ -417,40 +323,42 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
                 onChange={e => { const f = e.target.files?.[0]; if (f) loadVcfFile(f); }}
               />
 
-              {/* ── iCloud all-contacts link ────────────────────────────── */}
+              {/* iCloud all-contacts export */}
               <a
                 href="https://www.icloud.com/contacts"
                 target="_blank"
                 rel="noreferrer"
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                  padding: '12px 14px', borderRadius: 10, marginBottom: 14,
+                  padding: '13px 14px', borderRadius: 12, marginBottom: 16,
                   background: '#f0f9ff', border: '1px solid #bae6fd',
-                  textDecoration: 'none', color: '#0369a1',
+                  textDecoration: 'none', color: '#0369a1', boxSizing: 'border-box',
                 }}
               >
-                <span style={{ fontSize: 18 }}>☁️</span>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700 }}>Export ALL contacts — iCloud.com</div>
-                  <div style={{ fontSize: 11, color: '#0ea5e9', marginTop: 1 }}>Contacts → ⚙️ → Select All → Export vCard → upload above</div>
+                <span style={{ fontSize: 20 }}>☁️</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>Export ALL contacts at once — iCloud.com</div>
+                  <div style={{ fontSize: 11, color: '#0ea5e9', marginTop: 2, lineHeight: 1.5 }}>
+                    Contacts → ⚙️ → Select All → Export vCard → tap "Select .vcf File" above
+                  </div>
                 </div>
-                <span style={{ marginLeft: 'auto', fontSize: 14, color: '#7dd3fc', flexShrink: 0 }}>↗</span>
+                <span style={{ fontSize: 16, color: '#7dd3fc', flexShrink: 0 }}>↗</span>
               </a>
 
-              {/* ── How to export a single contact as .vcf ──────────────── */}
-              <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 12, padding: '12px 14px' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD, marginBottom: 9 }}>
-                  How to save contacts as a .vcf file
+              {/* How-to steps */}
+              <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 12, padding: '14px 16px' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD, marginBottom: 10 }}>
+                  How to export a contact from iPhone
                 </div>
                 {[
-                  { icon: '📲', text: 'Open the Contacts app on iPhone' },
-                  { icon: '👤', text: 'Tap a contact → scroll down → "Share Contact"' },
-                  { icon: '🗂️', text: 'Tap "Save to Files" — saves a .vcf to your Files app' },
-                  { icon: '⬆️', text: 'Tap "Select .vcf File" above and pick it' },
+                  { icon: '📲', text: 'Open the Contacts app' },
+                  { icon: '👤', text: 'Tap a contact → scroll down → tap "Share Contact"' },
+                  { icon: '🗂️', text: 'Tap "Save to Files" — this saves a .vcf file' },
+                  { icon: '📂', text: 'Tap "Select .vcf File" above and choose it' },
                 ].map((s, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 10, marginBottom: i < 3 ? 8 : 0, alignItems: 'flex-start' }}>
-                    <span style={{ fontSize: 14, minWidth: 22, textAlign: 'center', marginTop: 1 }}>{s.icon}</span>
-                    <span style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{s.text}</span>
+                  <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: i < 3 ? 10 : 0 }}>
+                    <span style={{ fontSize: 16, minWidth: 24, textAlign: 'center', marginTop: 1 }}>{s.icon}</span>
+                    <span style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>{s.text}</span>
                   </div>
                 ))}
               </div>
@@ -466,7 +374,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
                   border: `2px dashed ${dragging ? GOLD : '#e5e7eb'}`,
                   background: dragging ? 'rgba(201,168,76,0.04)' : 'transparent',
                   borderRadius: 10, padding: '16px', textAlign: 'center', cursor: 'pointer',
-                  transition: 'all 0.2s', marginTop: 12,
+                  transition: 'all 0.2s', marginTop: 14,
                 }}
               >
                 <div style={{ fontSize: 12, color: '#9ca3af' }}>Or drag & drop a .vcf file here</div>
@@ -474,13 +382,14 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
             </div>
           )}
 
+          {/* ═══ VCF MODE — PREVIEW ═════════════════════════════════════ */}
           {mode === 'vcf' && stage === 'preview' && (
             <div>
               <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>
                   {vcfContacts.length} contacts with phone numbers found
                 </div>
-                <div style={{ fontSize: 11, color: '#9ca3af' }}>Duplicates will be skipped automatically</div>
+                <div style={{ fontSize: 11, color: '#9ca3af' }}>Duplicates skipped automatically</div>
               </div>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', fontSize: 12 }}>
@@ -497,7 +406,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
                         <td style={{ padding: '7px 12px 7px 0', color: '#111', fontWeight: 500 }}>{[c.firstName, c.lastName].filter(Boolean).join(' ') || '—'}</td>
                         <td style={{ padding: '7px 12px 7px 0', color: '#374151', fontFamily: 'monospace', fontSize: 11 }}>{c.phone || '—'}</td>
                         <td style={{ padding: '7px 12px 7px 0', color: '#9ca3af' }}>{c.email || '—'}</td>
-                        <td style={{ padding: '7px 0 7px 0', color: '#9ca3af' }}>{c.city || '—'}</td>
+                        <td style={{ padding: '7px 0', color: '#9ca3af' }}>{c.city || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -511,7 +420,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
             </div>
           )}
 
-          {/* ═══ CSV MODE ══════════════════════════════════════════════ */}
+          {/* ═══ CSV MODE — UPLOAD ══════════════════════════════════════ */}
           {mode === 'csv' && stage === 'upload' && (
             <div>
               <div
@@ -528,9 +437,9 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
               >
                 <div style={{ fontSize: 36, marginBottom: 10, color: 'rgba(201,168,76,0.4)' }}>⬆</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Drop your CSV here</div>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>or click to browse</div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>or tap to browse</div>
                 <div style={{ fontSize: 10.5, color: '#d1d5db', marginTop: 10 }}>
-                  Supports exports from BatchLeads, PropStream, Vulcan7, Google Contacts, and any standard CSV
+                  Supports BatchLeads, PropStream, Vulcan7, Google Contacts, and any standard CSV
                 </div>
               </div>
               <input ref={csvRef} type="file" accept=".csv" style={{ display: 'none' }}
@@ -538,6 +447,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
             </div>
           )}
 
+          {/* ═══ CSV MODE — MAP ═════════════════════════════════════════ */}
           {mode === 'csv' && stage === 'map' && (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -571,6 +481,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
             </div>
           )}
 
+          {/* ═══ CSV MODE — PREVIEW ═════════════════════════════════════ */}
           {mode === 'csv' && stage === 'preview' && (
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Preview — first 5 rows</div>
@@ -620,6 +531,7 @@ export default function CsvImportModal({ onClose, onImported }: Props) {
         {/* Footer */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '12px 16px', borderTop: '1px solid rgba(201,168,76,0.12)' }}
              className="sm:px-6">
+
           {stage === 'upload' && (
             <button onClick={onClose} style={{ padding: '9px 22px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
               Cancel
