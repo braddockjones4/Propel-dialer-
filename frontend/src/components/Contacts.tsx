@@ -106,6 +106,8 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const [showQuickAdd, setShowQuickAdd]   = useState(false);
   const [quickName,    setQuickName]      = useState('');
   const [quickPhone,   setQuickPhone]     = useState('');
+  const [quickEmail,   setQuickEmail]     = useState('');
+  const [quickAddress, setQuickAddress]   = useState('');
   const [quickSaving,  setQuickSaving]    = useState(false);
 
   // iCloud one-tap sync
@@ -173,13 +175,15 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
           firstName: parts[0] || '',
           lastName: parts.slice(1).join(' ') || '',
           phone: quickPhone.trim(),
+          email: quickEmail.trim() || undefined,
+          address: quickAddress.trim() || undefined,
           source: 'manual',
         }),
       });
       if (r.ok) {
         toast.success('Contact added');
         setShowQuickAdd(false);
-        setQuickName(''); setQuickPhone('');
+        setQuickName(''); setQuickPhone(''); setQuickEmail(''); setQuickAddress('');
         loadContacts();
       } else { toast.error('Failed to add contact'); }
     } catch { toast.error('Failed to add contact'); }
@@ -433,8 +437,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const mobileAccent = mobileGroupObj?.color || '#9ca3af';
 
   return (
-    <div style={{ height: 'calc(100vh - 109px)', display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}
-         className="md:h-[calc(100vh-49px)]">
+    <div className="full-page-h" style={{ display: 'flex', flexDirection: 'column', background: '#f5f5f5' }}>
 
       {/* ── Top bar ───────────────────────────────────────────────────── */}
       <div style={{
@@ -463,30 +466,34 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
           </span>
         </div>
 
-        {/* iCloud one-tap sync — only shown when credentials are saved */}
+        {/* iCloud one-tap sync — desktop only (mobile has it in the action bar) */}
         {icloudConnected && (
           <button
             onClick={handleIcloudSync}
             disabled={icloudSyncing}
-            style={{ padding: '6px 12px', borderRadius: 7, border: '1.5px solid #0071e3', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', background: icloudSyncing ? '#e8f2fd' : '#f0f7ff', color: '#0071e3', cursor: icloudSyncing ? 'default' : 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}
+            className="hidden md:flex"
+            style={{ padding: '6px 12px', borderRadius: 7, border: '1.5px solid #0071e3', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', background: icloudSyncing ? '#e8f2fd' : '#f0f7ff', color: '#0071e3', cursor: icloudSyncing ? 'default' : 'pointer', whiteSpace: 'nowrap', alignItems: 'center', gap: 5 }}
           >
             {icloudSyncing ? '⏳' : '☁️'} {icloudSyncing ? 'Syncing…' : 'Sync iCloud'}
           </button>
         )}
         <button
           onClick={() => setShowImport(true)}
+          className="hidden md:block"
           style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', background: 'transparent', color: '#6b7280', cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
           Import
         </button>
         <button
-          onClick={() => { setShowQuickAdd(true); setQuickName(''); setQuickPhone(''); }}
+          onClick={() => { setShowQuickAdd(true); setQuickName(''); setQuickPhone(''); setQuickEmail(''); setQuickAddress(''); }}
+          className="hidden md:block"
           style={{ padding: '6px 14px', borderRadius: 7, border: 'none', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', background: GOLD, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
           + Contact
         </button>
         <button
           onClick={() => { setCreatingGroup(true); setNewGroupName(''); setNewGroupColor(GROUP_COLORS[0]); }}
+          className="hidden md:block"
           style={{ padding: '6px 12px', borderRadius: 7, border: 'none', fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', background: DARK, color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' }}
         >
           + Group
@@ -557,7 +564,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             </button>
           )}
           <button
-            onClick={() => { setShowQuickAdd(true); setQuickName(''); setQuickPhone(''); }}
+            onClick={() => { setShowQuickAdd(true); setQuickName(''); setQuickPhone(''); setQuickEmail(''); setQuickAddress(''); }}
             style={{
               padding: '10px 14px', borderRadius: 8, border: 'none',
               fontSize: 12, fontWeight: 700, letterSpacing: '0.04em',
@@ -1200,43 +1207,51 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
       {showQuickAdd && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
              onClick={e => { if (e.target === e.currentTarget) setShowQuickAdd(false); }}>
-          <div style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 480, padding: '28px 24px 40px', boxShadow: '0 -8px 40px rgba(0,0,0,0.15)' }}>
+          <div style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 480, padding: '20px 24px calc(env(safe-area-inset-bottom) + 24px)', boxShadow: '0 -8px 40px rgba(0,0,0,0.15)', maxHeight: '90dvh', overflowY: 'auto' }}>
             {/* Handle */}
-            <div style={{ width: 36, height: 4, borderRadius: 2, background: '#e5e7eb', margin: '0 auto 24px' }} />
-            <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 20, color: '#0a0a0a' }}>Add New Contact</div>
-
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>Name</label>
-              <input
-                type="text"
-                value={quickName}
-                onChange={e => setQuickName(e.target.value)}
-                placeholder="First Last"
-                autoFocus
-                style={{ width: '100%', padding: '14px 16px', borderRadius: 12, border: '1.5px solid #e5e7eb', fontSize: 16, color: '#111', outline: 'none', boxSizing: 'border-box', background: '#fafafa' }}
-              />
+            <div style={{ width: 36, height: 4, borderRadius: 2, background: '#e5e7eb', margin: '0 auto 20px' }} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#0a0a0a' }}>Add New Contact</div>
+              <button onClick={() => setShowQuickAdd(false)} style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9ca3af' }}>✕</button>
             </div>
 
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 6 }}>Phone Number <span style={{ color: '#ef4444' }}>*</span></label>
-              <input
-                type="tel"
-                value={quickPhone}
-                onChange={e => setQuickPhone(e.target.value)}
-                placeholder="(555) 000-0000"
+            {/* Name */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#9ca3af', marginBottom: 5, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Name</label>
+              <input type="text" value={quickName} onChange={e => setQuickName(e.target.value)} placeholder="First Last" autoFocus
+                style={{ width: '100%', padding: '13px 15px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 16, color: '#111', outline: 'none', boxSizing: 'border-box', background: '#fafafa' }} />
+            </div>
+
+            {/* Phone */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#9ca3af', marginBottom: 5, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                Phone <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              <input type="tel" value={quickPhone} onChange={e => setQuickPhone(e.target.value)} placeholder="(555) 000-0000"
                 onKeyDown={e => { if (e.key === 'Enter' && quickPhone.trim()) handleQuickAdd(); }}
-                style={{ width: '100%', padding: '14px 16px', borderRadius: 12, border: '1.5px solid #e5e7eb', fontSize: 16, color: '#111', outline: 'none', boxSizing: 'border-box', background: '#fafafa' }}
-              />
+                style={{ width: '100%', padding: '13px 15px', borderRadius: 10, border: `1.5px solid ${quickPhone.trim() ? GOLD : '#e5e7eb'}`, fontSize: 16, color: '#111', outline: 'none', boxSizing: 'border-box', background: '#fafafa' }} />
             </div>
 
-            <button
-              onClick={handleQuickAdd}
-              disabled={quickSaving || !quickPhone.trim()}
+            {/* Email */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#9ca3af', marginBottom: 5, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Email</label>
+              <input type="email" value={quickEmail} onChange={e => setQuickEmail(e.target.value)} placeholder="name@example.com"
+                style={{ width: '100%', padding: '13px 15px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 16, color: '#111', outline: 'none', boxSizing: 'border-box', background: '#fafafa' }} />
+            </div>
+
+            {/* Address */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#9ca3af', marginBottom: 5, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Address</label>
+              <input type="text" value={quickAddress} onChange={e => setQuickAddress(e.target.value)} placeholder="123 Main St, City, State"
+                style={{ width: '100%', padding: '13px 15px', borderRadius: 10, border: '1.5px solid #e5e7eb', fontSize: 16, color: '#111', outline: 'none', boxSizing: 'border-box', background: '#fafafa' }} />
+            </div>
+
+            <button onClick={handleQuickAdd} disabled={quickSaving || !quickPhone.trim()}
               style={{
                 width: '100%', padding: '16px', borderRadius: 14, border: 'none',
                 background: quickPhone.trim() ? DARK : '#e5e7eb',
                 color: quickPhone.trim() ? '#fff' : '#9ca3af',
-                fontSize: 16, fontWeight: 700, cursor: quickPhone.trim() ? 'pointer' : 'default',
+                fontSize: 16, fontWeight: 700, cursor: quickPhone.trim() ? 'pointer' : 'not-allowed',
               }}
             >
               {quickSaving ? 'Saving…' : 'Add Contact'}
