@@ -334,3 +334,95 @@ router.delete('/icloud-disconnect', async (req: Request, res: Response) => {
 });
 
 export default router;
+
+// ── DEBUG: raw CardDAV trace (temporary, authenticated) ───────────────────────
+router.post('/icloud-debug', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  let { appleId, appPassword } = req.body as { appleId?: string; appPassword?: string };
+
+  // Fall back to saved credentials
+  if (!appleId || !appPassword) {
+    try {
+      const s = await (prisma as any).dialerSettings.findFirst({ where: { userId } });
+      if (s?.icloudEmail && s?.icloudAppPwd) {
+        appleId = s.icloudEmail;
+        appPassword = decrypt(s.icloudAppPwd);
+      }
+    } catch {}
+  }
+  if (!appleId || !appPassword) { res.status(400).json({ error: 'No credentials' }); return; }
+
+  const auth   = `Basic ${Buffer.from(`${appleId}:${appPassword}`).toString('base64')}`;
+  const hdrs2  = (depth = '0') => ({ Authorization: auth, 'Content-Type': 'application/xml; charset=utf-8', Accept: '*/*', 'User-Agent': 'PropelDialer/1.0', Depth: depth });
+  const log: Record<string, any> = {};
+
+  // Step 1
+  let serverBase = 'https://contacts.icloud.com';
+  const PROPFIND_PRINCIPAL = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:current-user-principal/></D:prop></D:propfind>`;
+  const wk0 = await fetch(`${serverBase}/.well-known/carddav`, { method: 'PROPFIND', headers: hdrs2('0'), body: PROPFIND_PRINCIPAL, redirect: 'manual' });
+  log.step1_status = wk0.status;
+  log.step1_location = wk0.headers.get('location');
+
+  async function follow(resp: any, body: string, depth='0', hops=3): Promise<{status:number,text:string}> {
+    if ([301,302,307,308].includes(resp.status) && hops > 0) {
+      const loc = resp.headers.get('location') || '';
+      try { const u = new URL(loc); serverBase = `${u.protocol}//${u.host}`; } catch {}
+      const r2 = await fetch(loc, { method: 'PROPFIND', headers: hdrs2(depth), body, redirect:'manual' });
+      return follow(r2, body, depth, hops-1);
+    }
+    return { status: resp.status, text: await resp.text() };
+  }
+
+  const wk = await follow(wk0, PROPFIND_PRINCIPAL);
+  log.step1_final_status = wk.status;
+  log.serverBase = serverBase;
+
+  const principalPath = (wk.text.match(/<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/i) || [])[1]?.trim() || '';
+  log.principalPath = principalPath;
+  const principalUrl = principalPath.startsWith('http') ? principalPath : `${serverBase}${principalPath}`;
+
+  // Step 2
+  const PROPFIND_HOMESET = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><C:addressbook-home-set/></D:prop></D:propfind>`;
+  const hs = await fetch(principalUrl, { method: 'PROPFIND', headers: hdrs2('0'), body: PROPFIND_HOMESET });
+  const hsXml = await hs.text();
+  log.step2_status = hs.status;
+  // Extract ALL hrefs from home-set response
+  const allHomeSetHrefs: string[] = [];
+  const hre = /<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/gi;
+  let hm; while ((hm = hre.exec(hsXml)) !== null) allHomeSetHrefs.push(hm[1].trim());
+  log.homeSetHrefs = allHomeSetHrefs;
+
+  // Step 3: for each home-set href, discover addressbooks
+  const PROPFIND_RESOURCETYPE = `<?xml version="1.0" encoding="utf-8"?><D:propfind xmlns:D="DAV:"><D:prop><D:resourcetype/><D:displayname/><CS:getctag xmlns:CS="http://calendarserver.org/ns/"/></D:prop></D:propfind>`;
+  const addressbookDetails: any[] = [];
+  for (const hsPath of allHomeSetHrefs) {
+    if (!hsPath || hsPath === principalPath) continue;
+    const hsUrl = hsPath.startsWith('http') ? hsPath : `${serverBase}${hsPath}`;
+    const disc = await fetch(hsUrl, { method: 'PROPFIND', headers: hdrs2('1'), body: PROPFIND_RESOURCETYPE });
+    const discXml = await disc.text();
+    const blocks = discXml.match(/<(?:[A-Za-z]+:)?response\b[\s\S]*?<\/(?:[A-Za-z]+:)?response>/gi) || [];
+    for (const block of blocks) {
+      const href = (block.match(/<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/i) || [])[1]?.trim() || '';
+      const isAB = /<(?:[A-Za-z]+:)?addressbook\b/i.test(block);
+      const name = (block.match(/<(?:[A-Za-z]+:)?displayname[^>]*>([^<]*)<\/(?:[A-Za-z]+:)?displayname>/i) || [])[1]?.trim() || '';
+      const ctag = (block.match(/<[^>]*getctag[^>]*>([^<]+)<\/[^>]*getctag>/i) || [])[1]?.trim() || '';
+      addressbookDetails.push({ href, isAddressbook: isAB, name, ctag });
+    }
+  }
+  log.addressbooks = addressbookDetails;
+
+  // Step 4: for each addressbook, count hrefs
+  const SYNC = `<?xml version="1.0" encoding="utf-8"?><D:sync-collection xmlns:D="DAV:"><D:sync-token/><D:sync-level>1</D:sync-level><D:prop><D:getetag/></D:prop></D:sync-collection>`;
+  const counts: any[] = [];
+  for (const ab of addressbookDetails.filter(a => a.isAddressbook)) {
+    const abUrl = ab.href.startsWith('http') ? ab.href : `${serverBase}${ab.href}`;
+    const r = await fetch(abUrl, { method: 'REPORT', headers: hdrs2('1'), body: SYNC });
+    const xml = await r.text();
+    const hrefs = [...xml.matchAll(/<(?:[A-Za-z]+:)?href[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?href>/gi)].map(m => m[1].trim()).filter(h => !h.endsWith('/') && h !== ab.href);
+    const syncToken = (xml.match(/<(?:[A-Za-z]+:)?sync-token[^>]*>([^<]+)<\/(?:[A-Za-z]+:)?sync-token>/i) || [])[1]?.trim() || '';
+    counts.push({ name: ab.name, href: ab.href, status: r.status, hrefCount: hrefs.length, syncToken: syncToken.slice(0, 80) });
+  }
+  log.contactCounts = counts;
+
+  res.json(log);
+});
