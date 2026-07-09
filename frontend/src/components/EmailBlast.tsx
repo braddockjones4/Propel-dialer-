@@ -191,7 +191,7 @@ export default function EmailBlast() {
     background: '#fff',
     border: '1px solid rgba(0,0,0,0.07)',
     borderRadius: 12,
-    padding: '32px 36px',
+    padding: 'clamp(16px, 4vw, 32px) clamp(16px, 5vw, 36px)',
   };
 
   const label: React.CSSProperties = {
@@ -255,7 +255,7 @@ export default function EmailBlast() {
   }
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 24px' }}>
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: 'clamp(16px, 4vw, 32px) clamp(12px, 4vw, 24px)' }}>
 
       {/* Header */}
       <div style={{ marginBottom: 32 }}>
@@ -476,7 +476,7 @@ export default function EmailBlast() {
           </div>
 
           {/* Actions */}
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button
               onClick={() => setStep('confirm')}
               disabled={!subject.trim() || !body.trim() || recipients.length === 0}
@@ -540,7 +540,7 @@ export default function EmailBlast() {
 
       {/* ── STEP: SENDING ───────────────────────────────────────────────── */}
       {step === 'sending' && (
-        <div style={{ ...card, textAlign: 'center', padding: '64px 36px' }}>
+        <div style={{ ...card, textAlign: 'center', padding: 'clamp(32px,8vw,64px) clamp(16px,5vw,36px)' }}>
           <div style={{ width: 52, height: 52, border: `3px solid ${GOLD}`, borderTopColor: 'transparent', borderRadius: '50%', margin: '0 auto 24px', animation: 'spin 0.8s linear infinite' }} />
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
           <div style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 26, fontWeight: 300, color: BLACK, marginBottom: 10 }}>
@@ -554,7 +554,7 @@ export default function EmailBlast() {
 
       {/* ── STEP: DONE ──────────────────────────────────────────────────── */}
       {step === 'done' && result && (
-        <div style={{ ...card, textAlign: 'center', padding: '52px 36px' }}>
+        <div style={{ ...card, textAlign: 'center', padding: 'clamp(28px,6vw,52px) clamp(16px,5vw,36px)' }}>
           <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(201,168,76,0.1)', border: `2px solid ${GOLD}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: 22 }}>
             ✓
           </div>
