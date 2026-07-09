@@ -447,29 +447,57 @@ export default function Contacts({ onNavigate }: ContactsProps) {
         </div>
 
         {/* Dial group button */}
-        {mobileCards.length > 0 && (
-          <div style={{ padding: '8px 14px', background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.05)', flexShrink: 0 }}>
+        {/* Action bar: Dial + Import */}
+        <div style={{ padding: '8px 14px', background: '#fff', borderBottom: '1px solid rgba(0,0,0,0.05)', flexShrink: 0, display: 'flex', gap: 8 }}>
+          {mobileCards.length > 0 ? (
             <button
               onClick={() => dialGroup(mobileGroup)}
               style={{
-                width: '100%', padding: '10px', borderRadius: 8, border: 'none',
+                flex: 1, padding: '10px', borderRadius: 8, border: 'none',
                 fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
                 color: '#fff', cursor: 'pointer',
                 background: mobileGroup === UNGROUPED ? DARK : mobileAccent,
               }}
             >
-              ▶ Dial {mobileCards.length} Contact{mobileCards.length !== 1 ? 's' : ''}
+              ▶ Dial {mobileCards.length}
             </button>
-          </div>
-        )}
+          ) : (
+            <div style={{ flex: 1 }} />
+          )}
+          <button
+            onClick={() => setShowImport(true)}
+            style={{
+              padding: '10px 16px', borderRadius: 8, border: '1.5px solid rgba(0,0,0,0.1)',
+              fontSize: 12, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
+              color: DARK, background: '#fff', cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            ⬆ Import
+          </button>
+        </div>
 
         {/* Contact list */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
           {isInitialising ? (
             <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>Loading…</div>
           ) : mobileCards.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#d1d5db', fontSize: 13 }}>
-              {search ? 'No contacts match your search' : 'No contacts in this group'}
+            <div style={{ textAlign: 'center', padding: '48px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+              <div style={{ fontSize: 32, opacity: 0.25 }}>📋</div>
+              <div style={{ fontSize: 13, color: '#9ca3af' }}>
+                {search ? 'No contacts match your search' : 'No contacts in this group yet'}
+              </div>
+              {!search && (
+                <button
+                  onClick={() => setShowImport(true)}
+                  style={{
+                    padding: '12px 24px', borderRadius: 10, border: 'none',
+                    background: DARK, color: '#fff', fontSize: 13, fontWeight: 700,
+                    cursor: 'pointer', letterSpacing: '0.04em',
+                  }}
+                >
+                  Import Contacts
+                </button>
+              )}
             </div>
           ) : (
             mobileCards.map(c => (

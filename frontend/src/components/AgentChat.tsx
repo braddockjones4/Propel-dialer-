@@ -207,7 +207,7 @@ export default function AgentChat() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="h-[calc(100vh-109px)] md:h-[calc(100vh-49px)]" style={{ display: 'flex', overflow: 'hidden', background: '#f7f7f7' }}>
+    <div className="h-[calc(100dvh-109px)] md:h-[calc(100vh-49px)]" style={{ display: 'flex', overflow: 'hidden', background: '#f7f7f7' }}>
 
       {/* ── Sidebar overlay (mobile) ───────────────────────────────────── */}
       {sidebarOpen && (
@@ -453,7 +453,7 @@ export default function AgentChat() {
                   I'm your operational agent — I don't just answer questions, I take real action in your contact database.
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 7 }}>
                 {SUGGESTIONS.map((s, i) => (
                   <button
                     key={i}
@@ -587,7 +587,7 @@ export default function AgentChat() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Tell me what to do — create groups, assign contacts, send texts, book appointments…"
+              placeholder="Ask me anything or give me a task…"
               rows={1}
               disabled={loading}
               style={{
@@ -630,7 +630,7 @@ export default function AgentChat() {
               )}
             </button>
           </div>
-          <div style={{ fontSize: 9.5, color: '#d1d5db', marginTop: 6, textAlign: 'center', letterSpacing: '0.04em' }}>
+          <div className="hidden md:block" style={{ fontSize: 9.5, color: '#d1d5db', marginTop: 6, textAlign: 'center', letterSpacing: '0.04em' }}>
             Enter to send · Shift+Enter for new line · Actions execute immediately
           </div>
         </div>
