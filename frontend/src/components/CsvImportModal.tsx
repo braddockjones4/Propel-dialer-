@@ -169,7 +169,7 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
 
   // Shared
   const [importing, setImporting] = useState(false);
-  const [result, setResult]       = useState<{ imported: number; skipped: number } | null>(null);
+  const [result, setResult]       = useState<{ imported: number; skipped: number; totalFetched?: number; noPhone?: number; fromIcloud?: boolean } | null>(null);
 
   // iCloud Direct state
   const [icloudExpanded, setIcloudExpanded] = useState(false);
@@ -276,7 +276,7 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
       });
       const json = await res.json();
       if (!res.ok) { setIcloudError(json.error || 'Import failed.'); return; }
-      setResult({ imported: json.imported ?? 0, skipped: json.skipped ?? 0 });
+      setResult({ imported: json.imported ?? 0, skipped: json.skipped ?? 0, totalFetched: json.totalFetched ?? json.total ?? 0, noPhone: json.noPhone ?? 0, fromIcloud: true });
       setStage('done');
     } catch {
       setIcloudError('Connection failed. Check your internet and try again.');
@@ -507,12 +507,12 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
               {/* How-to steps */}
               <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 12, padding: '14px 16px' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD, marginBottom: 10 }}>
-                  How to export a contact from iPhone
+                  How to export contacts (all methods)
                 </div>
                 {[
-                  { icon: '📲', text: 'Open the Contacts app' },
-                  { icon: '👤', text: 'Tap a contact → scroll down → tap "Share Contact"' },
-                  { icon: '🗂️', text: 'Tap "Save to Files" — this saves a .vcf file' },
+                  { icon: '💻', text: 'On Mac: Open Contacts → File → Export → Export vCard → import here (exports ALL contacts including "On My iPhone")' },
+                  { icon: '📲', text: 'On iPhone: Open the Contacts app → tap a contact → scroll down → "Share Contact"' },
+                  { icon: '🗂️', text: 'Tap "Save to Files" → this saves a .vcf file' },
                   { icon: '📂', text: 'Tap "Select .vcf File" above and choose it' },
                 ].map((s, i) => (
                   <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: i < 3 ? 10 : 0 }}>
@@ -683,9 +683,22 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
               {result.skipped > 0 && (
                 <div style={{ fontSize: 13, color: '#9ca3af' }}>{result.skipped} duplicates skipped</div>
               )}
-              {(result as any).noPhone > 0 && (
+              {result.noPhone != null && result.noPhone > 0 && (
                 <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 6 }}>
-                  ⚠️ {(result as any).noPhone} contacts skipped — no phone number in iCloud
+                  ⚠️ {result.noPhone} contacts skipped — no phone number in iCloud
+                </div>
+              )}
+              {result.fromIcloud && (result.totalFetched ?? 0) < 100 && (
+                <div style={{ marginTop: 20, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 14px', textAlign: 'left' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>📱 Missing contacts?</div>
+                  <div style={{ fontSize: 12, color: '#78350f', lineHeight: 1.6 }}>
+                    iCloud only syncs contacts you've chosen to store there. Contacts saved as <strong>"On My iPhone"</strong> (local storage) are not accessible via iCloud.
+                  </div>
+                  <div style={{ fontSize: 12, color: '#78350f', marginTop: 8, lineHeight: 1.6 }}>
+                    <strong>To get ALL contacts:</strong><br/>
+                    <span style={{ display: 'block', marginTop: 4 }}>① On iPhone: <strong>Settings → [Your Name] → iCloud → Contacts → toggle ON → Merge</strong>. This moves local contacts to iCloud. Then sync again.</span>
+                    <span style={{ display: 'block', marginTop: 4 }}>② Or on Mac: Open <strong>Contacts app → File → Export → Export vCard</strong>, then import the .vcf file here.</span>
+                  </div>
                 </div>
               )}
             </div>

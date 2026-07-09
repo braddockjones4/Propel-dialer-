@@ -279,7 +279,7 @@ router.post('/icloud-import', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Apple ID and App-Specific Password are required.' }); return;
   }
   try {
-    const { contacts, noPhone } = await fetchIcloudContacts(appleId.trim(), appPassword.trim());
+    const { contacts, noPhone, totalFetched } = await fetchIcloudContacts(appleId.trim(), appPassword.trim());
     const result   = await importContacts(contacts, noPhone);
     if (saveCredentials) {
       const userId = (req as any).user?.id;
@@ -296,7 +296,7 @@ router.post('/icloud-import', async (req: Request, res: Response) => {
         }
       }
     }
-    res.json(result);
+    res.json({ ...result, totalFetched });
   } catch (err: any) {
     const msg = err?.message || '';
     console.error('[iCloud] import error:', msg);
@@ -314,8 +314,9 @@ router.post('/icloud-sync', async (req: Request, res: Response) => {
     if (!s?.icloudEmail || !s?.icloudAppPwd) {
       res.status(400).json({ error: 'No iCloud account connected. Set up iCloud sync first.' }); return;
     }
-    const { contacts, noPhone } = await fetchIcloudContacts(s.icloudEmail, decrypt(s.icloudAppPwd));
-    res.json(await importContacts(contacts, noPhone));
+    const { contacts, noPhone, totalFetched } = await fetchIcloudContacts(s.icloudEmail, decrypt(s.icloudAppPwd));
+    const syncResult = await importContacts(contacts, noPhone);
+    res.json({ ...syncResult, totalFetched });
   } catch (err: any) {
     if (err?.message === 'AUTH_FAILED') {
       try { await (prisma as any).dialerSettings.update({ where: { userId }, data: { icloudAppPwd: null } }); } catch {}
