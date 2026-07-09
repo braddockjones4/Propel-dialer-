@@ -585,6 +585,24 @@ export default function Dialer() {
     }
   }, [bridgeSessionId, bridgeStatus, contactAnswered, endCall, saveAndAdvance]);
 
+  // ─── Manual voicemail drop ───────────────────────────────────────────────────
+  // Lets the agent drop the pre-recorded voicemail when AMD hasn't auto-detected
+  // the machine (e.g., they can hear the voicemail greeting but status is still calling-contact).
+  const handleDropVm = useCallback(async () => {
+    if (!bridgeSessionId) return;
+    try {
+      await authFetch(`${API_BASE}/dialer/manual-vm-drop`, {
+        method: 'POST',
+        body: JSON.stringify({ sessionId: bridgeSessionId }),
+      });
+      // Backend emits vm-dropped socket event; frontend handler will update status.
+      // Advance to next contact immediately.
+      bridgeIdRef.current = null;
+      endCall();
+      saveAndAdvance('left-voicemail');
+    } catch {}
+  }, [bridgeSessionId, endCall, saveAndAdvance]);
+
   // ─── Skip ───────────────────────────────────────────────────────────────────
   const skipContact = () => {
     if (settings.callMode === 'bridge' && bridgeSessionId) {
@@ -1082,10 +1100,27 @@ export default function Dialer() {
           )}
 
           {(isWebrtcInCall || isBridgeActive) && (
-            <button onClick={handleEndCall}
-              style={{ width: '100%', padding: '15px', borderRadius: 12, fontSize: 16, fontWeight: 600, background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', cursor: 'pointer' }}>
-              End Call
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* Drop VM button — visible when contact has answered but AMD is still running */}
+              {settings.callMode === 'bridge' && bridgeStatus === 'calling-contact' && contactAnswered && (
+                <button
+                  onClick={handleDropVm}
+                  disabled={!settings.voicemailReady && !settings.voicemailUrl}
+                  title={(!settings.voicemailReady && !settings.voicemailUrl) ? 'No voicemail recording — record one in Setup' : 'Drop your pre-recorded voicemail now'}
+                  style={{
+                    width: '100%', padding: '13px', borderRadius: 12, fontSize: 15, fontWeight: 600,
+                    background: (!settings.voicemailReady && !settings.voicemailUrl) ? '#f3f4f6' : GOLD,
+                    color: (!settings.voicemailReady && !settings.voicemailUrl) ? '#9ca3af' : '#fff',
+                    border: 'none', cursor: (!settings.voicemailReady && !settings.voicemailUrl) ? 'not-allowed' : 'pointer',
+                  }}>
+                  📨 Drop Voicemail Now
+                </button>
+              )}
+              <button onClick={handleEndCall}
+                style={{ width: '100%', padding: '15px', borderRadius: 12, fontSize: 16, fontWeight: 600, background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', cursor: 'pointer' }}>
+                End Call
+              </button>
+            </div>
           )}
 
           {settings.callMode === 'webrtc' && deviceStatus === 'loading' && !isWebrtcInCall && (

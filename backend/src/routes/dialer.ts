@@ -721,6 +721,20 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
     io.emit('bridge-status', { sessionId, status: 'call-ended' });
   }
 
+  // If call completed while AMD was still running (bridge-b-twiml never fired or returned error),
+  // unblock the frontend so it doesn't freeze in "calling-contact" state.
+  if (b && CallStatus === 'completed' && b.status === 'calling-contact') {
+    b.status = 'no-answer';
+    io.emit('bridge-status', { sessionId, status: 'no-answer' });
+    try {
+      if (b.agentCallSid) {
+        await twilioClient().calls(b.agentCallSid).update({
+          twiml: `<Response><Say voice="Polly.Joanna">Call ended. Moving to next contact.</Say><Hangup/></Response>`,
+        });
+      }
+    } catch {}
+  }
+
   res.sendStatus(204);
 });
 
@@ -761,6 +775,69 @@ router.post('/bridge-hangup', async (req: Request, res: Response) => {
   }
   b.status = 'ended';
   bridges.delete(sessionId);
+  res.json({ ok: true });
+});
+
+// ─── POST /api/dialer/manual-vm-drop ─────────────────────────────────────────
+// Agent manually triggers voicemail drop (for when AMD didn't auto-detect).
+// Requires the contact's call to still be in progress (machine greeting playing).
+router.post('/manual-vm-drop', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id;
+  const { sessionId } = req.body;
+  const b = bridges.get(sessionId);
+
+  if (!b || !b.contactCallSid) {
+    res.status(404).json({ error: 'No active contact call for this session' });
+    return;
+  }
+
+  const fallbackText = process.env.VOICEMAIL_SCRIPT ||
+    `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+    `Please give me a call back when you get a chance. Thank you!`;
+
+  let vmTwiml: string;
+  try {
+    const settings = await prisma.dialerSettings.findUnique({
+      where:  { userId: userId || b.userId },
+      select: { voicemailData: true, voicemailUrl: true },
+    });
+
+    if (settings?.voicemailData) {
+      const mimeType   = settings.voicemailData.match(/^data:([^;]+)/)?.[1] || '';
+      const isPlayable = mimeType === 'audio/wav' || mimeType.startsWith('audio/mp');
+      if (isPlayable && settings.voicemailUrl) {
+        vmTwiml = `<Response><Play>${settings.voicemailUrl}</Play><Hangup/></Response>`;
+      } else {
+        vmTwiml = `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
+      }
+    } else if (settings?.voicemailUrl) {
+      vmTwiml = `<Response><Play>${settings.voicemailUrl}</Play><Hangup/></Response>`;
+    } else {
+      vmTwiml = `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
+    }
+  } catch {
+    vmTwiml = `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
+  }
+
+  try {
+    await twilioClient().calls(b.contactCallSid).update({ twiml: vmTwiml });
+  } catch (e: any) {
+    res.status(500).json({ error: `Could not update contact call: ${e.message}` });
+    return;
+  }
+
+  b.status = 'vm-dropped';
+  io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
+
+  // Disconnect agent with notification
+  if (b.agentCallSid) {
+    try {
+      await twilioClient().calls(b.agentCallSid).update({
+        twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
+      });
+    } catch {}
+  }
+
   res.json({ ok: true });
 });
 
