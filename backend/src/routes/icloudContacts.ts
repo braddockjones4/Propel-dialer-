@@ -318,6 +318,16 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   const withPhone = parsed.filter((c): c is NonNullable<typeof c> => c !== null);
   const noPhone   = allVCards.length - withPhone.length;
   console.log(`[iCloud] vCards: ${allVCards.length} total hrefs fetched, ${withPhone.length} with phone number, ${noPhone} without phone number`);
+  // Debug: log raw vCard text for first 3 contacts missing phone numbers
+  if (noPhone > 0) {
+    let debugCount = 0;
+    for (let i = 0; i < allVCards.length && debugCount < 3; i++) {
+      if (parseVCard(allVCards[i]) === null) {
+        console.log(`[iCloud DEBUG] No-phone vCard #${debugCount + 1}:\n${allVCards[i].slice(0, 800)}\n---`);
+        debugCount++;
+      }
+    }
+  }
   return { contacts: withPhone, noPhone, totalFetched: allVCards.length };
 }
 

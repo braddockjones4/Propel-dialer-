@@ -540,6 +540,21 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
         >
           {selectMode ? '✓ Selecting' : 'Select'}
         </button>
+        {selectMode && (
+          <button
+            onClick={() => {
+              if (selectedIds.size === contacts.length) {
+                setSelectedIds(new Set());
+              } else {
+                setSelectedIds(new Set(contacts.map(c => c.id)));
+              }
+            }}
+            className="hidden md:block"
+            style={{ padding: '6px 12px', borderRadius: 7, fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap', border: `1.5px solid ${GOLD}`, background: GOLD, color: '#fff' }}
+          >
+            {selectedIds.size === contacts.length ? 'Deselect All' : 'Select All'}
+          </button>
+        )}
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════
@@ -1060,7 +1075,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                   setSelectedIds(new Set(contacts.map(c => c.id)));
                 }
               }}
-              style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', padding: 0 }}
+              style={{ fontSize: 11, color: '#e5e7eb', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap', padding: '4px 10px', fontWeight: 600 }}
             >
               {selectedIds.size === contacts.length ? 'Deselect all' : 'Select all'}
             </button>
