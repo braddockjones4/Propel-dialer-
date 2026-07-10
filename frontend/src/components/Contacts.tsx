@@ -279,7 +279,11 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
         loadContacts();
       } else {
         const j = await r.json().catch(() => ({}));
-        toast.error(j.error || 'Failed to add contact');
+        if (r.status === 409 && j.existingContactName) {
+          toast.error(`Already in contacts as "${j.existingContactName}"`);
+        } else {
+          toast.error(j.error || 'Failed to add contact');
+        }
       }
     } catch { toast.error('Network error — could not save contact'); }
     finally { setQuickSaving(false); }
@@ -299,7 +303,12 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const bulkDelete = async () => {
     const ids = Array.from(selectedIds);
     if (!window.confirm(`Delete ${ids.length} contact${ids.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
-    await authFetch(`${API_BASE}/contacts/bulk`, { method: 'POST', body: JSON.stringify({ ids, action: 'delete' }) });
+    const r = await authFetch(`${API_BASE}/contacts/bulk`, { method: 'POST', body: JSON.stringify({ ids, action: 'delete' }) });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      toast.error(j.error || 'Delete failed');
+      return;
+    }
     setContacts(prev => prev.filter(c => !selectedIds.has(c.id)));
     exitSelectMode();
     loadGroups();
@@ -517,7 +526,11 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        toast.error(j.error || 'Could not save contact');
+        if (res.status === 409 && j.existingContactName) {
+          toast.error(`Already in contacts as "${j.existingContactName}"`);
+        } else {
+          toast.error(j.error || 'Could not save contact');
+        }
       } else {
         toast.success('Contact added');
         setShowAdd(null);
@@ -1567,7 +1580,12 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                 <button
                   onClick={async () => {
                     if (!window.confirm(`Delete ${selected.firstName} ${selected.lastName}? This cannot be undone.`)) return;
-                    await authFetch(`${API_BASE}/contacts/${selected.id}`, { method: 'DELETE' });
+                    const delRes = await authFetch(`${API_BASE}/contacts/${selected.id}`, { method: 'DELETE' });
+                    if (!delRes.ok) {
+                      const j = await delRes.json().catch(() => ({}));
+                      toast.error(j.error || 'Delete failed');
+                      return;
+                    }
                     setContacts(prev => prev.filter(c => c.id !== selected.id));
                     setSelected(null);
                     loadGroups();

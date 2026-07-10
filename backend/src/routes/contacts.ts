@@ -11,34 +11,44 @@ async function checkContactLimit(_req: any, _res: Response): Promise<boolean> {
 
 // GET /api/contacts
 router.get('/', async (req: Request, res: Response) => {
-  const { status, source, limit = '100', offset = '0' } = req.query;
+  try {
+    const { status, source, limit = '100', offset = '0' } = req.query;
 
-  // includeDnc=true bypasses the default DNC filter (used by Pipeline)
-  const includeDnc = req.query.includeDnc === 'true';
+    // includeDnc=true bypasses the default DNC filter (used by Pipeline)
+    const includeDnc = req.query.includeDnc === 'true';
 
-  const contacts = await prisma.contact.findMany({
-    where: {
-      ...(source ? { source: String(source) } : {}),
-      ...(!includeDnc && !status ? { NOT: { status: 'dnc' } } : {}),
-      ...(status ? { status: String(status) } : {}),
-    },
-    orderBy: { updatedAt: 'desc' },
-    take: Number(limit),
-    skip: Number(offset),
-    include: { calls: { orderBy: { calledAt: 'desc' }, take: 3 } },
-  });
+    const contacts = await prisma.contact.findMany({
+      where: {
+        ...(source ? { source: String(source) } : {}),
+        ...(!includeDnc && !status ? { NOT: { status: 'dnc' } } : {}),
+        ...(status ? { status: String(status) } : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: Number(limit),
+      skip: Number(offset),
+      include: { calls: { orderBy: { calledAt: 'desc' }, take: 3 } },
+    });
 
-  res.json(contacts);
+    res.json(contacts);
+  } catch (e: any) {
+    console.error('[contacts] GET /:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/contacts/:id
 router.get('/:id', async (req: Request, res: Response) => {
-  const contact = await prisma.contact.findUnique({
-    where: { id: req.params.id },
-    include: { calls: { orderBy: { calledAt: 'desc' } } },
-  });
-  if (!contact) { res.status(404).json({ error: 'Not found' }); return; }
-  res.json(contact);
+  try {
+    const contact = await prisma.contact.findUnique({
+      where: { id: req.params.id },
+      include: { calls: { orderBy: { calledAt: 'desc' } } },
+    });
+    if (!contact) { res.status(404).json({ error: 'Not found' }); return; }
+    res.json(contact);
+  } catch (e: any) {
+    console.error('[contacts] GET /:id:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/contacts
@@ -53,14 +63,30 @@ router.post('/', async (req: Request, res: Response) => {
     } else {
       body.phone = null;
     }
+    // Pre-check for duplicate phone before hitting the unique constraint
+    if (body.phone) {
+      const dup = await prisma.contact.findUnique({
+        where: { phone: body.phone },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      if (dup) {
+        const name = [dup.firstName, dup.lastName].filter(Boolean).join(' ') || 'Unknown';
+        res.status(409).json({
+          error: `This number is already saved as "${name}".`,
+          existingContactId: dup.id,
+          existingContactName: name,
+        });
+        return;
+      }
+    }
     const contact = await prisma.contact.create({ data: body });
     res.status(201).json(contact);
   } catch (e: any) {
     console.error('[contacts] create error:', e.message);
-    // Unique constraint violation → friendly message
     if (e.code === 'P2002') {
-      const field = e.meta?.target?.join(', ') || 'phone or email';
-      res.status(400).json({ error: `A contact with that ${field} already exists.` });
+      const target = e.meta?.target;
+      const field = Array.isArray(target) ? target.join(', ') : (target ?? 'phone or email');
+      res.status(409).json({ error: `A contact with that ${field} already exists.` });
     } else {
       res.status(400).json({ error: e.message });
     }
@@ -106,17 +132,31 @@ router.post('/import', async (req: Request, res: Response) => {
 
 // PATCH /api/contacts/:id
 router.patch('/:id', async (req: Request, res: Response) => {
-  const contact = await prisma.contact.update({
-    where: { id: req.params.id },
-    data: req.body,
-  });
-  res.json(contact);
+  try {
+    const contact = await prisma.contact.update({
+      where: { id: req.params.id },
+      data: req.body,
+    });
+    res.json(contact);
+  } catch (e: any) {
+    if (e.code === 'P2025') { res.status(404).json({ error: 'Contact not found' }); return; }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // DELETE /api/contacts/:id
 router.delete('/:id', async (req: Request, res: Response) => {
-  await prisma.contact.delete({ where: { id: req.params.id } });
-  res.sendStatus(204);
+  try {
+    const id = req.params.id;
+    // Delete related required-FK records first (schema has no cascade)
+    await prisma.call.deleteMany({ where: { contactId: id } });
+    await prisma.appointment.deleteMany({ where: { contactId: id } });
+    await prisma.contact.delete({ where: { id } });
+    res.sendStatus(204);
+  } catch (e: any) {
+    if (e.code === 'P2025') { res.status(404).json({ error: 'Contact not found' }); return; }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/contacts/:id/calls
@@ -185,6 +225,9 @@ router.post('/bulk', async (req: Request, res: Response) => {
     await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { contactGroup: value || null } });
     res.json({ updated: ids.length });
   } else if (action === 'delete') {
+    // Delete related required-FK records first (schema has no cascade)
+    await prisma.call.deleteMany({ where: { contactId: { in: ids } } });
+    await prisma.appointment.deleteMany({ where: { contactId: { in: ids } } });
     await prisma.contact.deleteMany({ where: { id: { in: ids } } });
     res.json({ deleted: ids.length });
   } else {
