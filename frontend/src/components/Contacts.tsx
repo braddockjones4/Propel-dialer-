@@ -1683,9 +1683,28 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
 
             {/* Empty state */}
             {!gmailLoading && !gmailError && !gmailNeedsReauth && !gmailNeedsPeopleApi && gmailContacts.length === 0 && (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '40px 0' }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '40px 0', textAlign: 'center' }}>
                 <div style={{ fontSize: 32 }}>📭</div>
-                <div style={{ fontSize: 14, color: '#6b7280' }}>No contacts with email or phone found in your Google account.</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: DARK }}>No contacts found in this Google account</div>
+                <div style={{ fontSize: 13, color: '#6b7280', maxWidth: 300, lineHeight: 1.5 }}>
+                  Your Google account doesn't have any saved contacts with an email or phone number.
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8, width: '100%', maxWidth: 260 }}>
+                  <a
+                    href="https://contacts.google.com"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ padding: '10px 0', borderRadius: 8, border: '1.5px solid #3b82f6', background: '#eff6ff', color: '#1d4ed8', fontSize: 13, fontWeight: 600, cursor: 'pointer', textDecoration: 'none', display: 'block', textAlign: 'center' }}
+                  >
+                    Open Google Contacts →
+                  </a>
+                  <button
+                    onClick={openGmailImport}
+                    style={{ padding: '10px 0', borderRadius: 8, border: '1.5px solid #d1d5db', background: '#f9fafb', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Retry
+                  </button>
+                </div>
               </div>
             )}
           </div>

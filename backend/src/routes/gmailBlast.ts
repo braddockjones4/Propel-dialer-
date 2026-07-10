@@ -269,6 +269,8 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
 
     // 1. Regular address book (contacts.readonly)
     let pageToken: string | undefined;
+    let connectionsCount = 0;
+    let connectionsScopeError = false;
     for (let page = 0; page < 3; page++) {
       try {
         const { data } = await people.people.connections.list({
@@ -277,42 +279,92 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
           personFields: 'names,emailAddresses,phoneNumbers',
           ...(pageToken ? { pageToken } : {}),
         });
+        connectionsCount += (data.connections || []).length;
         for (const person of data.connections || []) addUnique(parsePerson(person));
         pageToken = data.nextPageToken ?? undefined;
         if (!pageToken) break;
-      } catch { break; }
-    }
-
-    // 2. "Other contacts" — auto-created by Gmail from email history (contacts.other.readonly)
-    let otherPageToken: string | undefined;
-    let otherScopeMissing = false;
-    for (let page = 0; page < 10; page++) {
-      try {
-        const { data } = await (people as any).otherContacts.list({
-          pageSize: 1000,
-          readMask: 'names,emailAddresses,phoneNumbers',
-          ...(otherPageToken ? { pageToken: otherPageToken } : {}),
-        });
-        for (const person of data.otherContacts || []) addUnique(parsePerson(person));
-        otherPageToken = data.nextPageToken ?? undefined;
-        if (!otherPageToken) break;
       } catch (e: any) {
         const status = e?.response?.status;
-        if (status === 403 || status === 401) { otherScopeMissing = true; }
-        console.error('[Gmail] otherContacts error:', status, e?.response?.data?.error?.message || e?.message);
+        if (status === 403 || status === 401) connectionsScopeError = true;
+        console.error('[Gmail] connections.list error:', status, e?.response?.data?.error?.message || e?.message);
         break;
       }
     }
+    console.log(`[Gmail] connections.list returned ${connectionsCount} contacts, scopeError=${connectionsScopeError}`);
 
-    // If otherContacts failed due to missing scope and we have nothing, prompt re-auth
-    if (otherScopeMissing && allContacts.length === 0) {
-      res.status(403).json({ error: 'Please re-authorize Gmail to load your full contact list.', needsReauth: true });
-      return;
+    // 2. "Other contacts" — auto-created by Gmail from email history (contacts.other.readonly)
+    // Note: use google.people directly for otherContacts since the typed client
+    // may not expose this resource; we call via the REST-style resource path instead.
+    let otherPageToken: string | undefined;
+    let otherScopeMissing = false;
+    let otherContactsCount = 0;
+    const peopleClient = (people as any);
+    if (typeof peopleClient?.otherContacts?.list === 'function') {
+      for (let page = 0; page < 10; page++) {
+        try {
+          const { data } = await peopleClient.otherContacts.list({
+            pageSize: 1000,
+            readMask: 'names,emailAddresses,phoneNumbers',
+            ...(otherPageToken ? { pageToken: otherPageToken } : {}),
+          });
+          otherContactsCount += (data.otherContacts || []).length;
+          for (const person of data.otherContacts || []) addUnique(parsePerson(person));
+          otherPageToken = data.nextPageToken ?? undefined;
+          if (!otherPageToken) break;
+        } catch (e: any) {
+          const status = e?.response?.status ?? e?.status ?? e?.code;
+          if (status === 403 || status === 401 || String(status) === '403' || String(status) === '401') {
+            otherScopeMissing = true;
+          }
+          console.error('[Gmail] otherContacts.list error:', status, e?.response?.data?.error?.message || e?.message);
+          break;
+        }
+      }
+    } else {
+      // otherContacts not available on this client version — use REST directly via oauth2Client
+      console.log('[Gmail] otherContacts not on people client, using direct REST call');
+      try {
+        const accessToken = (await oauth2Client.getAccessToken()).token;
+        const fetchRes = await fetch(
+          `https://people.googleapis.com/v1/otherContacts?pageSize=1000&readMask=names%2CemailAddresses%2CphoneNumbers`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        if (fetchRes.ok) {
+          const data = await fetchRes.json() as any;
+          otherContactsCount += (data.otherContacts || []).length;
+          for (const person of data.otherContacts || []) addUnique(parsePerson(person));
+          console.log(`[Gmail] REST otherContacts returned ${data.otherContacts?.length ?? 0} contacts`);
+        } else {
+          const errBody = await fetchRes.json().catch(() => ({}));
+          console.error('[Gmail] REST otherContacts error:', fetchRes.status, JSON.stringify(errBody));
+          if (fetchRes.status === 403 || fetchRes.status === 401) otherScopeMissing = true;
+        }
+      } catch (e: any) {
+        console.error('[Gmail] REST otherContacts fetch error:', e?.message);
+      }
+    }
+    console.log(`[Gmail] otherContacts returned ${otherContactsCount} contacts, scopeMissing=${otherScopeMissing}`);
+
+    // If either scope is missing, prompt re-auth
+    if (otherScopeMissing || connectionsScopeError) {
+      if (allContacts.length === 0) {
+        res.status(403).json({ error: 'Please re-authorize Gmail to load your full contact list.', needsReauth: true });
+        return;
+      }
     }
 
     // Only return contacts that have at least an email or phone
     const useful = allContacts.filter(c => c.email || c.phone);
-    res.json({ contacts: useful, total: useful.length });
+    res.json({
+      contacts: useful,
+      total: useful.length,
+      debug: {
+        connectionsFound: connectionsCount,
+        otherContactsFound: otherContactsCount,
+        connectionsScopeError,
+        otherScopeMissing,
+      },
+    });
   } catch (e: any) {
     // Log the full error so we can diagnose
     const status  = e?.response?.status;
