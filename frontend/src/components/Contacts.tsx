@@ -277,8 +277,11 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
         setShowQuickAdd(false);
         setQuickName(''); setQuickPhone(''); setQuickEmail(''); setQuickAddress('');
         loadContacts();
-      } else { toast.error('Failed to add contact'); }
-    } catch { toast.error('Failed to add contact'); }
+      } else {
+        const j = await r.json().catch(() => ({}));
+        toast.error(j.error || 'Failed to add contact');
+      }
+    } catch { toast.error('Network error — could not save contact'); }
     finally { setQuickSaving(false); }
   };
 
@@ -512,13 +515,17 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
           contactGroup: showAdd === UNGROUPED ? null : showAdd,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).error || 'Failed');
-      toast.success('Contact added');
-      setShowAdd(null);
-      setNewContact({ firstName: '', lastName: '', phone: '', email: '', address: '' });
-      loadContacts();
-      loadGroups();
-    } catch { toast.error('Could not save contact'); }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        toast.error(j.error || 'Could not save contact');
+      } else {
+        toast.success('Contact added');
+        setShowAdd(null);
+        setNewContact({ firstName: '', lastName: '', phone: '', email: '', address: '' });
+        loadContacts();
+        loadGroups();
+      }
+    } catch { toast.error('Network error — could not save contact'); }
     setAddSaving(false);
   };
 

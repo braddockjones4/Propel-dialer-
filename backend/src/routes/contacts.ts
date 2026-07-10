@@ -57,7 +57,13 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(201).json(contact);
   } catch (e: any) {
     console.error('[contacts] create error:', e.message);
-    res.status(400).json({ error: e.message });
+    // Unique constraint violation → friendly message
+    if (e.code === 'P2002') {
+      const field = e.meta?.target?.join(', ') || 'phone or email';
+      res.status(400).json({ error: `A contact with that ${field} already exists.` });
+    } else {
+      res.status(400).json({ error: e.message });
+    }
   }
 });
 
