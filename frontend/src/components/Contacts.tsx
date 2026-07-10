@@ -123,6 +123,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const [gmailImporting,     setGmailImporting]     = useState(false);
   const [gmailError,         setGmailError]         = useState<string | null>(null);
   const [gmailNeedsReauth,   setGmailNeedsReauth]   = useState(false);
+  const [gmailNeedsPeopleApi, setGmailNeedsPeopleApi] = useState(false);
 
   // Multi-select
   const [selectMode,    setSelectMode]    = useState(false);
@@ -183,6 +184,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
     setShowGmailImport(true);
     setGmailError(null);
     setGmailNeedsReauth(false);
+    setGmailNeedsPeopleApi(false);
     setGmailContacts([]);
     setGmailSelectedIds(new Set());
     setGmailGroupName('Gmail Contacts');
@@ -190,7 +192,12 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
     try {
       const r = await authFetch(`${API_BASE}/gmail/contacts`);
       if (r.status === 403) {
-        setGmailNeedsReauth(true);
+        const j = await r.json().catch(() => ({}));
+        if (j.needsPeopleApi) {
+          setGmailNeedsPeopleApi(true);
+        } else {
+          setGmailNeedsReauth(true);
+        }
         setGmailLoading(false);
         return;
       }
@@ -1565,6 +1572,25 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
               </div>
             )}
 
+            {/* People API not enabled */}
+            {!gmailLoading && gmailNeedsPeopleApi && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '32px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 32 }}>⚙️</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: DARK }}>Enable the Google People API</div>
+                <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
+                  Your Google Cloud project needs the People API enabled to read contacts. It takes 30 seconds:
+                </div>
+                <div style={{ textAlign: 'left', background: '#f9fafb', borderRadius: 10, padding: '14px 18px', fontSize: 13, color: '#374151', lineHeight: 1.8, width: '100%' }}>
+                  1. Go to <a href="https://console.cloud.google.com/apis/library/people.googleapis.com" target="_blank" rel="noreferrer" style={{ color: '#ea4335' }}>console.cloud.google.com → People API</a><br />
+                  2. Click <strong>Enable</strong><br />
+                  3. Come back and tap "Try Again" below
+                </div>
+                <button onClick={openGmailImport} style={{ padding: '12px 28px', borderRadius: 10, border: 'none', background: DARK, color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                  Try Again
+                </button>
+              </div>
+            )}
+
             {/* Needs reauth */}
             {!gmailLoading && gmailNeedsReauth && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '32px 0', textAlign: 'center' }}>
@@ -1590,7 +1616,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             )}
 
             {/* Contacts list */}
-            {!gmailLoading && !gmailError && !gmailNeedsReauth && gmailContacts.length > 0 && (
+            {!gmailLoading && !gmailError && !gmailNeedsReauth && !gmailNeedsPeopleApi && gmailContacts.length > 0 && (
               <>
                 {/* Group name + select all */}
                 <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center' }}>
@@ -1656,7 +1682,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             )}
 
             {/* Empty state */}
-            {!gmailLoading && !gmailError && !gmailNeedsReauth && gmailContacts.length === 0 && (
+            {!gmailLoading && !gmailError && !gmailNeedsReauth && !gmailNeedsPeopleApi && gmailContacts.length === 0 && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '40px 0' }}>
                 <div style={{ fontSize: 32 }}>📭</div>
                 <div style={{ fontSize: 14, color: '#6b7280' }}>No contacts with email or phone found in your Google account.</div>

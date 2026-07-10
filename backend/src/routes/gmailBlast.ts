@@ -278,8 +278,22 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
     const useful = allContacts.filter(c => c.email || c.phone);
     res.json({ contacts: useful, total: useful.length });
   } catch (e: any) {
-    // 403 / insufficient scope → user needs to re-authorize
-    if (e?.response?.status === 403 || e?.message?.includes('insufficient')) {
+    // Log the full error so we can diagnose
+    const status  = e?.response?.status;
+    const errData = JSON.stringify(e?.response?.data || e?.message || e);
+    console.error(`[Gmail] contacts fetch error — HTTP ${status}:`, errData);
+
+    // "API not enabled" comes back as 403 with "People API has not been used"
+    const body = JSON.stringify(e?.response?.data || '');
+    if (status === 403 && body.includes('People API')) {
+      res.status(403).json({
+        error: 'The Google People API is not enabled in your Google Cloud project. Enable it at console.cloud.google.com → APIs & Services → Enable APIs → search "People API".',
+        needsPeopleApi: true,
+      });
+      return;
+    }
+    // Insufficient scope → re-authorize
+    if (status === 403 || e?.message?.includes('insufficient')) {
       res.status(403).json({ error: 'Contacts permission not granted. Please reconnect Gmail.', needsReauth: true });
       return;
     }
