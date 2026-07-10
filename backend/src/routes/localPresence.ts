@@ -38,8 +38,12 @@ export async function pickCallerId(destinationPhone: string): Promise<string> {
 
 // ─── GET /api/local-presence ──────────────────────────────────────────────────
 router.get('/', async (_req: Request, res: Response) => {
-  const numbers = await prisma.localNumber.findMany({ orderBy: { areaCode: 'asc' } });
-  res.json(numbers);
+  try {
+    const numbers = await prisma.localNumber.findMany({ orderBy: { areaCode: 'asc' } });
+    res.json(numbers);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── POST /api/local-presence/buy ────────────────────────────────────────────
@@ -55,44 +59,39 @@ router.post('/buy', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
 
-  const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+  try {
+    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
-  // Search for available numbers in that area code
-  const available = await client.availablePhoneNumbers('US').local.list({
-    areaCode: parseInt(areaCode, 10),
-    voiceEnabled: true,
-    smsEnabled: true,
-    limit: 1,
-  });
+    const available = await client.availablePhoneNumbers('US').local.list({
+      areaCode: parseInt(areaCode, 10),
+      voiceEnabled: true,
+      smsEnabled: true,
+      limit: 1,
+    });
 
-  if (available.length === 0) {
-    res.status(404).json({ error: `No numbers available for area code ${areaCode}` }); return;
+    if (available.length === 0) {
+      res.status(404).json({ error: `No numbers available for area code ${areaCode}` }); return;
+    }
+
+    const { NGROK_URL } = process.env;
+
+    const purchased = await client.incomingPhoneNumbers.create({
+      phoneNumber:   available[0].phoneNumber,
+      voiceUrl:      `${NGROK_URL}/api/twilio/voice`,
+      voiceMethod:   'POST',
+      smsUrl:        `${NGROK_URL}/api/twilio/sms-inbound`,
+      smsMethod:     'POST',
+      friendlyName:  label || `Propel Local — ${areaCode}`,
+    });
+
+    const saved = await prisma.localNumber.create({
+      data: { number: purchased.phoneNumber, areaCode, state: state || null, label: label || null, active: true },
+    });
+
+    res.status(201).json(saved);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
-
-  const { NGROK_URL } = process.env;
-
-  // Purchase the number
-  const purchased = await client.incomingPhoneNumbers.create({
-    phoneNumber:   available[0].phoneNumber,
-    voiceUrl:      `${NGROK_URL}/api/twilio/voice`,
-    voiceMethod:   'POST',
-    smsUrl:        `${NGROK_URL}/api/twilio/sms-inbound`,
-    smsMethod:     'POST',
-    friendlyName:  label || `Propel Local — ${areaCode}`,
-  });
-
-  // Save to DB
-  const saved = await prisma.localNumber.create({
-    data: {
-      number:   purchased.phoneNumber,
-      areaCode,
-      state:    state || null,
-      label:    label || null,
-      active:   true,
-    },
-  });
-
-  res.status(201).json(saved);
 });
 
 // ─── POST /api/local-presence/add ────────────────────────────────────────────
@@ -106,21 +105,29 @@ router.post('/add', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'number and areaCode required' }); return;
   }
 
-  const saved = await prisma.localNumber.create({
-    data: { number, areaCode, state: state || null, label: label || null, active: true },
-  });
-
-  res.status(201).json(saved);
+  try {
+    const saved = await prisma.localNumber.create({
+      data: { number, areaCode, state: state || null, label: label || null, active: true },
+    });
+    res.status(201).json(saved);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── PATCH /api/local-presence/:id ───────────────────────────────────────────
 router.patch('/:id', async (req: Request, res: Response) => {
-  const { active, label } = req.body;
-  const updated = await prisma.localNumber.update({
-    where: { id: req.params.id },
-    data: { active, label },
-  });
-  res.json(updated);
+  try {
+    const { active, label } = req.body;
+    const updated = await prisma.localNumber.update({
+      where: { id: req.params.id },
+      data: { active, label },
+    });
+    res.json(updated);
+  } catch (e: any) {
+    if (e.code === 'P2025') { res.status(404).json({ error: 'Not found' }); return; }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── DELETE /api/local-presence/:id ──────────────────────────────────────────
@@ -143,16 +150,26 @@ router.delete('/:id', async (req: Request, res: Response) => {
     }
   }
 
-  await prisma.localNumber.delete({ where: { id: req.params.id } });
-  res.json({ deleted: true });
+  try {
+    await prisma.localNumber.delete({ where: { id: req.params.id } });
+    res.json({ deleted: true });
+  } catch (e: any) {
+    if (e.code === 'P2025') { res.status(404).json({ error: 'Not found' }); return; }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── GET /api/local-presence/match/:phone ────────────────────────────────────
 // Preview which number would be used for a given destination phone
 router.get('/match/:phone', async (req: Request, res: Response) => {
-  const callerId = await pickCallerId(decodeURIComponent(req.params.phone));
-  const areaCode = extractAreaCode(decodeURIComponent(req.params.phone));
-  res.json({ phone: decodeURIComponent(req.params.phone), areaCode, callerId });
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const callerId = await pickCallerId(phone);
+    const areaCode = extractAreaCode(phone);
+    res.json({ phone, areaCode, callerId });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

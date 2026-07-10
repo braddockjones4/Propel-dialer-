@@ -8,38 +8,48 @@ const router = Router();
 
 // GET /api/inbox — list conversations (one per contact, latest message first)
 router.get('/', async (_req: Request, res: Response) => {
-  const messages = await prisma.message.findMany({
-    orderBy: { sentAt: 'desc' },
-    include: { contact: true },
-  });
+  try {
+    const messages = await prisma.message.findMany({
+      orderBy: { sentAt: 'desc' },
+      include: { contact: true },
+    });
 
-  // Group by contact phone / toNumber
-  const threads = new Map<string, any>();
-  for (const msg of messages) {
-    const key = msg.contactId || (msg.direction === 'inbound' ? msg.fromNumber : msg.toNumber);
-    if (!threads.has(key)) {
-      threads.set(key, {
-        contactId:   msg.contactId,
-        contact:     msg.contact,
-        phone:       msg.direction === 'inbound' ? msg.fromNumber : msg.toNumber,
-        lastMessage: msg,
-        unread:      msg.direction === 'inbound' ? 1 : 0,
-      });
-    } else {
-      if (msg.direction === 'inbound') threads.get(key).unread++;
+    // Group by contact phone / toNumber
+    const threads = new Map<string, any>();
+    for (const msg of messages) {
+      const key = msg.contactId || (msg.direction === 'inbound' ? msg.fromNumber : msg.toNumber);
+      if (!threads.has(key)) {
+        threads.set(key, {
+          contactId:   msg.contactId,
+          contact:     msg.contact,
+          phone:       msg.direction === 'inbound' ? msg.fromNumber : msg.toNumber,
+          lastMessage: msg,
+          unread:      msg.direction === 'inbound' ? 1 : 0,
+        });
+      } else {
+        if (msg.direction === 'inbound') threads.get(key).unread++;
+      }
     }
-  }
 
-  res.json(Array.from(threads.values()));
+    res.json(Array.from(threads.values()));
+  } catch (e: any) {
+    console.error('[inbox] GET /:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/inbox/:contactId — full thread for a contact
 router.get('/:contactId', async (req: Request, res: Response) => {
-  const messages = await prisma.message.findMany({
-    where: { contactId: req.params.contactId },
-    orderBy: { sentAt: 'asc' },
-  });
-  res.json(messages);
+  try {
+    const messages = await prisma.message.findMany({
+      where: { contactId: req.params.contactId },
+      orderBy: { sentAt: 'asc' },
+    });
+    res.json(messages);
+  } catch (e: any) {
+    console.error('[inbox] GET /:contactId:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/inbox/:contactId/reply — send SMS to a contact

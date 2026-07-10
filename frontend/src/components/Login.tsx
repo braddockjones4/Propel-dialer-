@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-
-const API = import.meta.env.VITE_API_URL || 'https://propel-dialer-backend.onrender.com';
+import { API_BASE } from '../config';
 
 interface Props {
   onBack?: () => void;
@@ -31,7 +30,7 @@ export default function Login({ onBack }: Props) {
 
     if (mode === 'forgot') {
       try {
-        await fetch(`${API}/api/auth/forgot-password`, {
+        await fetch(`${API_BASE}/auth/forgot-password`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email }),
         });
@@ -42,7 +41,7 @@ export default function Login({ onBack }: Props) {
 
     if (mode === 'reset') {
       try {
-        const r = await fetch(`${API}/api/auth/reset-password`, {
+        const r = await fetch(`${API_BASE}/auth/reset-password`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: resetToken, password }),
         }).then(r => r.json());

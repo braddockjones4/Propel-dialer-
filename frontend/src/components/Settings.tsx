@@ -52,7 +52,7 @@ export default function Settings() {
   const [savingNgrok, setSavingNgrok] = useState(false);
 
   useEffect(() => {
-    authFetch(`${API_BASE}/local-presence/numbers`).then(r => r.json()).then(setNumbers).catch(() => {});
+    authFetch(`${API_BASE}/local-presence`).then(r => r.json()).then(setNumbers).catch(() => {});
     authFetch(`${API_BASE}/settings/status`).then(r => r.json()).then(setStatus).catch(() => {});
     authFetch(`${API_BASE}/settings/ngrok`).then(r => r.json()).then(d => setNgrok(d.ngrokUrl || '')).catch(() => {});
   }, []);
@@ -91,11 +91,14 @@ export default function Settings() {
 
   const addManual = async () => {
     if (!addNumber.trim()) return;
+    const digits = addNumber.replace(/\D/g, '');
+    const areaCode = digits.length === 11 && digits[0] === '1' ? digits.substring(1, 4) : digits.substring(0, 3);
+    if (!areaCode || areaCode.length !== 3) { setBuyError('Could not determine area code from number'); return; }
     setBuying(true);
     const r = await authFetch(`${API_BASE}/local-presence/add`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ number: addNumber, label: buyLabel }),
+      body: JSON.stringify({ number: addNumber, areaCode, label: buyLabel }),
     });
     const data = await r.json();
     setBuying(false);
@@ -296,8 +299,8 @@ export default function Settings() {
               Your Twilio webhooks are configured to route through the Propel Dialer backend automatically.
             </div>
             <div style={{ fontFamily: 'monospace', background: '#f9fafb', borderRadius: 6, padding: '8px 10px', fontSize: 11, color: '#374151' }}>
-              SMS: https://propel-dialer-backend.onrender.com/api/twilio/sms-inbound<br />
-              Voice: https://propel-dialer-backend.onrender.com/api/twilio/voice
+              SMS: {API_BASE.replace(/\/api$/, '')}/api/twilio/sms-inbound<br />
+              Voice: {API_BASE.replace(/\/api$/, '')}/api/twilio/voice
             </div>
           </Section>
         </div>

@@ -20,6 +20,7 @@ function startOf(unit: 'day' | 'week' | 'month'): Date {
 
 // ─── GET /api/analytics ───────────────────────────────────────────────────────
 router.get('/', async (_req: Request, res: Response) => {
+  try {
   const [
     totalCalls,
     callsToday,
@@ -119,6 +120,10 @@ router.get('/', async (_req: Request, res: Response) => {
     contactsBySource: contactsBySource.map(d => ({ label: d.source, count: d._count._all })),
     recentCalls,
   });
+  } catch (e: any) {
+    console.error('[analytics] GET /:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;
