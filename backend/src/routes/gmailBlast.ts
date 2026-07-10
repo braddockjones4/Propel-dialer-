@@ -41,6 +41,7 @@ router.get('/auth', requireAuth, (req: any, res: Response) => {
       'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/contacts.readonly',
+      'https://www.googleapis.com/auth/contacts.other.readonly',
     ],
     state: req.user.id,              // passed back in callback
   });
@@ -247,31 +248,54 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
 
     const people = google.people({ version: 'v1', auth: oauth2Client });
 
-    // Page through all connections (max 1000 per page, up to 3 pages = 3000 contacts)
+    function parsePerson(person: any) {
+      const name      = person.names?.[0];
+      const emailObj  = person.emailAddresses?.[0];
+      const phoneObj  = person.phoneNumbers?.[0];
+      const email     = emailObj?.value?.trim() || null;
+      const phone     = phoneObj?.value?.replace(/[^\d+]/g, '') || null;
+      const firstName = name?.givenName?.trim()  || (name?.displayName?.split(' ')[0] ?? '');
+      const lastName  = name?.familyName?.trim() || (name?.displayName?.split(' ').slice(1).join(' ') ?? '');
+      return { firstName, lastName, email, phone };
+    }
+
     const allContacts: any[] = [];
+    const seen = new Set<string>();
+
+    function addUnique(c: any) {
+      const key = c.email || c.phone || `${c.firstName}${c.lastName}`;
+      if (key && !seen.has(key)) { seen.add(key); allContacts.push(c); }
+    }
+
+    // 1. Regular address book (contacts.readonly)
     let pageToken: string | undefined;
-
     for (let page = 0; page < 3; page++) {
-      const { data } = await people.people.connections.list({
-        resourceName: 'people/me',
-        pageSize: 1000,
-        personFields: 'names,emailAddresses,phoneNumbers',
-        ...(pageToken ? { pageToken } : {}),
-      });
+      try {
+        const { data } = await people.people.connections.list({
+          resourceName: 'people/me',
+          pageSize: 1000,
+          personFields: 'names,emailAddresses,phoneNumbers',
+          ...(pageToken ? { pageToken } : {}),
+        });
+        for (const person of data.connections || []) addUnique(parsePerson(person));
+        pageToken = data.nextPageToken ?? undefined;
+        if (!pageToken) break;
+      } catch { break; }
+    }
 
-      for (const person of data.connections || []) {
-        const name      = person.names?.[0];
-        const emailObj  = person.emailAddresses?.[0];
-        const phoneObj  = person.phoneNumbers?.[0];
-        const email     = emailObj?.value?.trim() || null;
-        const phone     = phoneObj?.value?.replace(/[^\d+]/g, '') || null;
-        const firstName = name?.givenName?.trim()  || (name?.displayName?.split(' ')[0] ?? '');
-        const lastName  = name?.familyName?.trim() || (name?.displayName?.split(' ').slice(1).join(' ') ?? '');
-        allContacts.push({ firstName, lastName, email, phone });
-      }
-
-      pageToken = data.nextPageToken ?? undefined;
-      if (!pageToken) break;
+    // 2. "Other contacts" — auto-created by Gmail from email history (contacts.other.readonly)
+    let otherPageToken: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      try {
+        const { data } = await (people as any).otherContacts.list({
+          pageSize: 1000,
+          readMask: 'names,emailAddresses,phoneNumbers',
+          ...(otherPageToken ? { pageToken: otherPageToken } : {}),
+        });
+        for (const person of data.otherContacts || []) addUnique(parsePerson(person));
+        otherPageToken = data.nextPageToken ?? undefined;
+        if (!otherPageToken) break;
+      } catch { break; }
     }
 
     // Only return contacts that have at least an email or phone
