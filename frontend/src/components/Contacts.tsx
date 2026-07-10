@@ -1572,7 +1572,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                 <div style={{ fontSize: 15, fontWeight: 600, color: DARK }}>Contacts permission needed</div>
                 <div style={{ fontSize: 13, color: '#6b7280' }}>Your Gmail is connected for sending, but we need one more permission to read your contacts. Click below to re-authorize.</div>
                 <button
-                  onClick={() => { window.location.href = `${API_BASE}/gmail/auth?token=${localStorage.getItem('token') || ''}`; }}
+                  onClick={() => { window.location.href = `${API_BASE}/gmail/auth?token=${localStorage.getItem('propel_token') || ''}`; }}
                   style={{ padding: '12px 28px', borderRadius: 10, border: 'none', background: '#ea4335', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
                 >
                   Re-authorize Gmail
