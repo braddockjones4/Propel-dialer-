@@ -102,50 +102,52 @@ console.log('[ScheduledBlast] Cron scheduler started (checks every minute)');
 
 // ─── GET /api/blast/scheduled ─────────────────────────────────────────────────
 router.get('/', async (_req: Request, res: Response) => {
-  const blasts = await prisma.scheduledBlast.findMany({
-    orderBy: { scheduledAt: 'desc' },
-    take: 50,
-  });
-  res.json(blasts);
+  try {
+    const blasts = await prisma.scheduledBlast.findMany({ orderBy: { scheduledAt: 'desc' }, take: 50 });
+    res.json(blasts);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── POST /api/blast/scheduled ────────────────────────────────────────────────
 router.post('/', async (req: Request, res: Response) => {
-  const { message, filter, scheduledAt, mediaUrl } = req.body as {
+  const { message, filter, scheduledAt } = req.body as {
     message: string;
     filter: { source?: string; status?: string };
     scheduledAt: string;
     mediaUrl?: string;
   };
 
-  if (!message?.trim())   { res.status(400).json({ error: 'message required' }); return; }
-  if (!scheduledAt)       { res.status(400).json({ error: 'scheduledAt required' }); return; }
+  if (!message?.trim()) { res.status(400).json({ error: 'message required' }); return; }
+  if (!scheduledAt)     { res.status(400).json({ error: 'scheduledAt required' }); return; }
 
   const scheduledDate = new Date(scheduledAt);
   if (isNaN(scheduledDate.getTime())) {
     res.status(400).json({ error: 'Invalid scheduledAt date' }); return;
   }
 
-  const blast = await prisma.scheduledBlast.create({
-    data: {
-      message,
-      filter:      JSON.stringify(filter || {}),
-      scheduledAt: scheduledDate,
-      status:      'pending',
-    },
-  });
-
-  res.status(201).json(blast);
+  try {
+    const blast = await prisma.scheduledBlast.create({
+      data: { message, filter: JSON.stringify(filter || {}), scheduledAt: scheduledDate, status: 'pending' },
+    });
+    res.status(201).json(blast);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── DELETE /api/blast/scheduled/:id — cancel a pending blast ─────────────────
 router.delete('/:id', async (req: Request, res: Response) => {
-  const blast = await prisma.scheduledBlast.findUnique({ where: { id: req.params.id } });
-  if (!blast)                    { res.status(404).json({ error: 'Not found' }); return; }
-  if (blast.status !== 'pending') { res.status(400).json({ error: 'Can only cancel pending blasts' }); return; }
-
-  await prisma.scheduledBlast.update({ where: { id: req.params.id }, data: { status: 'cancelled' } });
-  res.json({ cancelled: true });
+  try {
+    const blast = await prisma.scheduledBlast.findUnique({ where: { id: req.params.id } });
+    if (!blast)                     { res.status(404).json({ error: 'Not found' }); return; }
+    if (blast.status !== 'pending') { res.status(400).json({ error: 'Can only cancel pending blasts' }); return; }
+    await prisma.scheduledBlast.update({ where: { id: req.params.id }, data: { status: 'cancelled' } });
+    res.json({ cancelled: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

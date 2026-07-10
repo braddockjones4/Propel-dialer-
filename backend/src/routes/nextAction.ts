@@ -163,36 +163,39 @@ router.get('/:contactId', async (req: Request, res: Response) => {
 // ── POST /api/next-action/:contactId/execute ──────────────────────────────────
 // One-click execute the recommended action
 router.post('/:contactId/execute', async (req: Request, res: Response) => {
-  const { action, message } = req.body as { action: NextAction['action']; message?: string };
-  const { contactId } = req.params;
+  try {
+    const { action, message } = req.body as { action: NextAction['action']; message?: string };
+    const { contactId } = req.params;
 
-  const contact = await prisma.contact.findUnique({ where: { id: contactId } });
-  if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
+    const contact = await prisma.contact.findUnique({ where: { id: contactId } });
+    if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
+    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
 
-  switch (action) {
-    case 'send-sms': {
-      if (!message) { res.status(400).json({ error: 'message required for send-sms' }); return; }
-      if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
-        res.status(500).json({ error: 'Twilio not configured' }); return;
+    switch (action) {
+      case 'send-sms': {
+        if (!message) { res.status(400).json({ error: 'message required for send-sms' }); return; }
+        if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
+          res.status(500).json({ error: 'Twilio not configured' }); return;
+        }
+        const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+        await client.messages.create({ to: contact.phone!, from: TWILIO_CALLER_ID, body: message });
+        await prisma.message.create({
+          data: { contactId, direction: 'outbound', body: message, fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone! },
+        });
+        res.json({ executed: true, action });
+        break;
       }
-      const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-      await client.messages.create({ to: contact.phone!, from: TWILIO_CALLER_ID, body: message });
-      await prisma.message.create({
-        data: { contactId, direction: 'outbound', body: message, fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone! },
-      });
-      res.json({ executed: true, action });
-      break;
+      case 'mark-dnc': {
+        await prisma.contact.update({ where: { id: contactId }, data: { status: 'dnc' } });
+        res.json({ executed: true, action });
+        break;
+      }
+      default:
+        res.json({ executed: false, action, requiresFrontend: true });
     }
-    case 'mark-dnc': {
-      await prisma.contact.update({ where: { id: contactId }, data: { status: 'dnc' } });
-      res.json({ executed: true, action });
-      break;
-    }
-    default:
-      // For call-back, book-appointment, send-email — return a signal to the frontend to handle
-      res.json({ executed: false, action, requiresFrontend: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 
