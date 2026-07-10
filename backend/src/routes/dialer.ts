@@ -349,7 +349,7 @@ router.post('/call', async (req: Request, res: Response) => {
 
     bridges.set(sessionId, {
       contactId,
-      contactPhone: contact.phone,
+      contactPhone: contact.phone!,
       contactName,
       confName,
       agentCallSid: null,
@@ -389,7 +389,7 @@ router.post('/call', async (req: Request, res: Response) => {
 
     bridges.set(sessionId, {
       contactId,
-      contactPhone: contact.phone,
+      contactPhone: contact.phone!,
       contactName,
       confName,
       agentCallSid: null,   // set by /voice webhook when browser connects
@@ -698,7 +698,7 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
   console.log(`[bridge-b-status] session=${sessionId} | status=${CallStatus} | sid=${CallSid}`);
 
   // Contact's phone was answered (human or VM) — notify frontend so it knows AMD is running
-  if (CallStatus === 'answered') {
+  if (CallStatus === 'in-progress') {
     io.emit('bridge-status', { sessionId, status: 'contact-answered' });
   }
 

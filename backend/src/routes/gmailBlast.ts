@@ -390,6 +390,125 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
   }
 });
 
+// ── POST /api/gmail/import-contacts ──────────────────────────────────────────
+// Smart Gmail import:
+//  1. Phone match + existing has no email → ENRICH (write the email in)
+//  2. Email already in DB → SKIP (true duplicate)
+//  3. No match at all → CREATE new contact
+router.post('/import-contacts', requireAuth, async (req: any, res: Response) => {
+  const { contacts, groupName } = req.body as {
+    contacts: { firstName: string; lastName: string; email: string | null; phone: string | null }[];
+    groupName?: string;
+  };
+  if (!Array.isArray(contacts) || contacts.length === 0) {
+    res.status(400).json({ error: 'No contacts provided' });
+    return;
+  }
+
+  const group = (groupName?.trim() || 'Gmail Contacts');
+
+  function normalizePhone(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return null;
+    return digits.length === 10 ? `+1${digits}` : `+${digits}`;
+  }
+
+  // Filter out contacts with no identifier at all
+  const validContacts = contacts.filter(c => c.email || c.phone);
+
+  const emailList = validContacts.filter(c => c.email).map(c => c.email!.toLowerCase().trim());
+  const phoneList = validContacts.map(c => normalizePhone(c.phone)).filter(Boolean) as string[];
+
+  // Look up existing contacts by phone (need id + email so we know if they're missing an email)
+  // Look up existing contacts by email (to detect true duplicates)
+  const [existByEmail, existByPhone] = await Promise.all([
+    emailList.length
+      ? db.contact.findMany({ where: { email: { in: emailList } }, select: { id: true, email: true } })
+      : Promise.resolve([] as { id: string; email: string | null }[]),
+    phoneList.length
+      ? db.contact.findMany({ where: { phone: { in: phoneList } }, select: { id: true, phone: true, email: true } })
+      : Promise.resolve([] as { id: string; phone: string | null; email: string | null }[]),
+  ]);
+
+  // Map existing emails (true duplicates — skip these)
+  const emailDupes = new Set<string>(
+    (existByEmail as { email: string | null }[])
+      .map(c => c.email?.toLowerCase().trim() ?? '').filter(Boolean)
+  );
+
+  // Map phone → existing contact (for enrichment)
+  const phoneToExisting = new Map<string, { id: string; email: string | null }>();
+  for (const c of existByPhone as { id: string; phone: string | null; email: string | null }[]) {
+    if (c.phone) phoneToExisting.set(c.phone, { id: c.id, email: c.email });
+  }
+
+  const toCreate: any[]   = [];
+  const toEnrich: { id: string; email: string }[] = [];
+  let   trueSkipped = 0;
+
+  for (const c of validContacts) {
+    const email = c.email?.toLowerCase().trim() || null;
+    const phone = normalizePhone(c.phone);
+
+    // 1. Email already in DB → true duplicate, skip
+    if (email && emailDupes.has(email)) { trueSkipped++; continue; }
+
+    // 2. Phone matches an existing contact
+    if (phone && phoneToExisting.has(phone)) {
+      const existing = phoneToExisting.get(phone)!;
+      if (email && !existing.email) {
+        // Existing contact has no email → enrich it
+        toEnrich.push({ id: existing.id, email: c.email!.trim() });
+      } else {
+        // Existing contact already has email or Gmail contact has no email → skip
+        trueSkipped++;
+      }
+      continue;
+    }
+
+    // 3. Genuinely new contact → create
+    toCreate.push({
+      firstName:    c.firstName?.trim() || '',
+      lastName:     c.lastName?.trim()  || '',
+      phone,
+      email:        c.email?.trim()     || null,
+      source:       'gmail',
+      contactGroup: group,
+      status:       'new',
+    });
+  }
+
+  // Run enrichments (patch email onto existing phone contacts)
+  let enriched = 0;
+  if (toEnrich.length > 0) {
+    await Promise.all(
+      toEnrich.map(({ id, email }) =>
+        db.contact.update({ where: { id }, data: { email } }).then(() => { enriched++; }).catch(() => {})
+      )
+    );
+  }
+
+  // Bulk create new contacts
+  let created = 0;
+  if (toCreate.length > 0) {
+    try {
+      const result = await db.contact.createMany({ data: toCreate, skipDuplicates: true });
+      created = result.count;
+    } catch (e: any) {
+      console.error('[Gmail] import-contacts createMany error:', e.message);
+    }
+  }
+
+  console.log(`[Gmail] import-contacts: created=${created}, enriched=${enriched}, skipped=${trueSkipped} (group="${group}")`);
+  res.json({
+    imported:  created,
+    enriched,
+    skipped:   trueSkipped,
+    total:     validContacts.length,
+  });
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function delay(ms: number) {

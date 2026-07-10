@@ -46,10 +46,12 @@ router.post('/', async (req: Request, res: Response) => {
   if (!await checkContactLimit(req, res)) return;
   try {
     const { name: _name, ...body } = req.body;
-    // Auto-format phone to E.164
-    if (body.phone) {
-      const digits = body.phone.replace(/\D/g, '');
-      body.phone = digits.length === 10 ? `+1${digits}` : `+${digits}`;
+    // Auto-format phone to E.164, or null if empty
+    if (body.phone && String(body.phone).trim()) {
+      const digits = String(body.phone).replace(/\D/g, '');
+      body.phone = digits.length === 10 ? `+1${digits}` : (digits ? `+${digits}` : null);
+    } else {
+      body.phone = null;
     }
     const contact = await prisma.contact.create({ data: body });
     res.status(201).json(contact);
@@ -71,19 +73,27 @@ router.post('/import', async (req: Request, res: Response) => {
       : [];
   if (!rows.length) { res.status(400).json({ error: 'No contacts provided' }); return; }
 
-  const data = rows.map(r => ({
-    firstName: r.firstName || r.first_name || r['First Name'] || '',
-    lastName:  r.lastName  || r.last_name  || r['Last Name']  || '',
-    phone:     r.phone     || r.Phone      || r['Phone Number'] || '',
-    address:   r.address   || r.Address    || '',
-    city:      r.city      || r.City       || '',
-    state:     r.state     || r.State      || '',
-    zip:       r.zip       || r.Zip        || '',
-    email:     r.email     || r.Email      || '',
-    source:    r.source    || 'manual',
-  })).filter(c => c.phone);
+  const data = rows.map(r => {
+    const rawPhone = r.phone || r.Phone || r['Phone Number'] || '';
+    const digits = rawPhone.replace(/\D/g, '');
+    const phone = digits.length === 10 ? `+1${digits}` : (digits ? `+${digits}` : null);
+    return {
+      firstName: r.firstName || r.first_name || r['First Name'] || '',
+      lastName:  r.lastName  || r.last_name  || r['Last Name']  || '',
+      phone,
+      address:   r.address   || r.Address    || '',
+      city:      r.city      || r.City       || '',
+      state:     r.state     || r.State      || '',
+      zip:       r.zip       || r.Zip        || '',
+      email:     r.email     || r.Email      || '',
+      source:    r.source    || 'manual',
+    };
+  }).filter(c => c.phone || c.email); // require at least phone OR email
 
-  const existing = await prisma.contact.count({ where: { phone: { in: data.map(c => c.phone) } } });
+  const phones = data.map(c => c.phone).filter(Boolean) as string[];
+  const existing = phones.length
+    ? await prisma.contact.count({ where: { phone: { in: phones } } })
+    : 0;
   const result = await (prisma as any).contact.createMany({ data, skipDuplicates: true });
   res.json({ count: result.count, imported: result.count, skipped: existing });
 });

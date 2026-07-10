@@ -88,9 +88,9 @@ router.post('/start', async (req: Request, res: Response) => {
     if (!b || b.status === 'stopped') return;
 
     try {
-      const callerId = await pickCallerId(contact.phone).catch(() => TWILIO_CALLER_ID!);
+      const callerId = await pickCallerId(contact.phone!).catch(() => TWILIO_CALLER_ID!);
       await client.calls.create({
-        to:   contact.phone,
+        to:   contact.phone!,
         from: callerId,
         // On answer: immediately hang up if human, drop VM if machine
         url:    `${NGROK_URL}/api/voicemail-blast/twiml?human=${humanTwiml}`,

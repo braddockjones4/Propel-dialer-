@@ -32,7 +32,8 @@ function twilioClient() {
 }
 
 /** Send an SMS now. Falls back to "simulated" send when Twilio isn't configured. */
-export async function sendSmsNow(contact: { id: string; phone: string }, body: string) {
+export async function sendSmsNow(contact: { id: string; phone: string | null }, body: string) {
+  if (!contact.phone) throw new Error('Contact has no phone number — cannot send SMS');
   const from = process.env.TWILIO_CALLER_ID || process.env.AGENT_PHONE || '';
   const client = twilioClient();
   let twilioSid: string | undefined;

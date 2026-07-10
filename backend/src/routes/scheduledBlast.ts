@@ -50,7 +50,7 @@ export async function fireScheduledBlast(blastId: string): Promise<void> {
       const msg = await client.messages.create({
         body,
         from: TWILIO_CALLER_ID,
-        to:   contact.phone,
+        to:   contact.phone!,
         statusCallback: `${NGROK_URL}/api/twilio/sms-status`,
       });
 
@@ -60,7 +60,7 @@ export async function fireScheduledBlast(blastId: string): Promise<void> {
           direction:  'outbound',
           body,
           fromNumber: TWILIO_CALLER_ID,
-          toNumber:   contact.phone,
+          toNumber:   contact.phone!,
           twilioSid:  msg.sid,
           status:     'sent',
         },

@@ -56,7 +56,7 @@ router.post('/:contactId/reply', async (req: Request, res: Response) => {
   const msg = await client.messages.create({
     body,
     from: TWILIO_CALLER_ID!,
-    to:   contact.phone,
+    to:   contact.phone!,
   });
 
   const saved = await prisma.message.create({
@@ -65,7 +65,7 @@ router.post('/:contactId/reply', async (req: Request, res: Response) => {
       direction:  'outbound',
       body,
       fromNumber: TWILIO_CALLER_ID!,
-      toNumber:   contact.phone,
+      toNumber:   contact.phone!,
       twilioSid:  msg.sid,
       status:     'sent',
     },

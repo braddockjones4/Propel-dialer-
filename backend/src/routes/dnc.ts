@@ -124,7 +124,7 @@ router.post('/scrub-all', async (_req: Request, res: Response) => {
 
   let marked = 0;
   for (const c of contacts) {
-    if (manualDncNumbers.has(normalizePhone(c.phone))) {
+    if (manualDncNumbers.has(normalizePhone(c.phone ?? ''))) {
       await prisma.contact.update({ where: { id: c.id }, data: { status: 'dnc' } });
       marked++;
     }

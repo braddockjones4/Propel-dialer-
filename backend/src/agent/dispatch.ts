@@ -11,7 +11,7 @@ const OUTBOUND = new Set(['sms', 'followup', 'appointment']);
 const MUTATING = new Set(['status', 'dnc']);
 
 export interface DispatchCtx {
-  contact: { id: string; phone: string; status?: string | null; agentPaused?: boolean; timezone?: string | null };
+  contact: { id: string; phone: string | null; status?: string | null; agentPaused?: boolean; timezone?: string | null };
   cfg: AgentConfig;
   source: 'inbox-agent' | 'followup-agent' | 'manual';
 }

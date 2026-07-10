@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import CsvImportModal from './CsvImportModal';
 import { useToast } from './Toast';
 import { API_BASE, SOCKET_URL, authFetch } from '../config';
@@ -37,12 +37,12 @@ interface Contact {
   id: string;
   firstName: string;
   lastName: string;
-  phone: string;
+  phone: string | null;
   address?: string;
   city?: string;
   state?: string;
   zip?: string;
-  email?: string;
+  email?: string | null;
   source: string;
   status: string;
   notes?: string;
@@ -57,7 +57,8 @@ interface ContactsProps {
   sharedVcfText?: string;
 }
 
-function fmtPhone(p: string) {
+function fmtPhone(p: string | null | undefined) {
+  if (!p) return '';
   const d = p.replace(/\D/g, '').replace(/^1/, '');
   if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
   return p;
@@ -222,26 +223,28 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
     const selected = gmailContacts.filter((_, i) => gmailSelectedIds.has(i));
     if (!selected.length) return;
     setGmailImporting(true);
+    setGmailError(null);
     try {
-      let imported = 0;
-      let skipped  = 0;
-      for (const c of selected) {
-        const r = await authFetch(`${API_BASE}/contacts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            firstName:    c.firstName || '',
-            lastName:     c.lastName  || '',
-            phone:        c.phone     || '',
-            email:        c.email     || '',
-            contactGroup: gmailGroupName.trim() || 'Gmail Contacts',
-            source:       'manual',
-          }),
-        });
-        if (r.ok) imported++;
-        else skipped++;
+      const r = await authFetch(`${API_BASE}/gmail/import-contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contacts: selected,
+          groupName: gmailGroupName.trim() || 'Gmail Contacts',
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) {
+        setGmailError(j.error || 'Import failed');
+        return;
       }
-      toast.success(`✓ ${imported} contacts imported${skipped ? `, ${skipped} skipped` : ''}`);
+      const { imported, enriched, skipped } = j as { imported: number; enriched: number; skipped: number };
+      const parts: string[] = [];
+      if (imported > 0)  parts.push(`${imported} new contacts added`);
+      if (enriched > 0)  parts.push(`${enriched} existing contacts got email added`);
+      if (skipped > 0)   parts.push(`${skipped} already in address book`);
+      const base = parts.join(' · ') || 'All contacts already in your address book';
+      toast.success(`✓ ${base} — check Email Contacts section`);
       setShowGmailImport(false);
       loadContacts();
       loadGroups();
@@ -341,6 +344,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const contactsInGroup = useCallback((groupName: string): Contact[] => {
     const q = search.toLowerCase();
     return contacts.filter(c => {
+      if (!c.phone) return false; // phone-less (email-only) contacts shown in Email section
       const matchGroup = groupName === UNGROUPED
         ? !c.contactGroup || c.contactGroup === ''
         : c.contactGroup === groupName;
@@ -348,8 +352,22 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
       if (!q) return true;
       return (
         `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) ||
-        c.phone.includes(q) ||
+        (c.phone || '').includes(q) ||
         (c.address || '').toLowerCase().includes(q)
+      );
+    });
+  }, [contacts, search]);
+
+  // Email contacts — shown in dedicated section; includes any contact with an email address
+  const gmailContactsList = useMemo(() => {
+    const q = search.toLowerCase();
+    return contacts.filter(c => {
+      if (!c.email || c.email.trim() === '') return false;
+      if (!q) return true;
+      return (
+        `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.phone || '').includes(q)
       );
     });
   }, [contacts, search]);
@@ -550,7 +568,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
 
   // Contacts visible in the current mobile group
   const mobileCards = contactsInGroup(mobileGroup).filter(c =>
-    !search || `${c.firstName} ${c.lastName} ${c.phone}`.toLowerCase().includes(search.toLowerCase())
+    !search || `${c.firstName} ${c.lastName} ${c.phone || ''}`.toLowerCase().includes(search.toLowerCase())
   );
   const mobileGroupObj = groups.find(g => g.name === mobileGroup) ?? null;
   const mobileAccent = mobileGroupObj?.color || '#9ca3af';
@@ -678,6 +696,21 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
               </button>
             );
           })}
+          {/* Gmail tab */}
+          {gmailContactsList.length > 0 && (
+            <button onClick={() => setMobileGroup('__gmail__')} style={{
+              flexShrink: 0, padding: '10px 14px', background: 'none', border: 'none',
+              borderBottom: `2px solid ${mobileGroup === '__gmail__' ? '#ea4335' : 'transparent'}`,
+              cursor: 'pointer', textAlign: 'center', marginBottom: -1,
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: mobileGroup === '__gmail__' ? '#ea4335' : '#9ca3af', whiteSpace: 'nowrap' }}>
+                Email
+              </div>
+              <div style={{ fontSize: 10, color: mobileGroup === '__gmail__' ? '#ea4335' : '#d1d5db', marginTop: 1 }}>
+                {gmailContactsList.length}
+              </div>
+            </button>
+          )}
         </div>
 
         {/* Dial group button */}
@@ -759,6 +792,57 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
           {isInitialising ? (
             <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af', fontSize: 13 }}>Loading…</div>
+
+          ) : mobileGroup === '__gmail__' ? (
+            /* ── Gmail tab ── */
+            gmailContactsList.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+                <div style={{ fontSize: 32, opacity: 0.25 }}>✉️</div>
+                <div style={{ fontSize: 13, color: '#9ca3af' }}>No Gmail contacts yet</div>
+                <button onClick={openGmailImport} style={{ padding: '12px 24px', borderRadius: 10, border: 'none', background: '#ea4335', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                  Import Gmail Contacts
+                </button>
+              </div>
+            ) : (
+              <>
+                <button onClick={openGmailImport} style={{ width: '100%', marginBottom: 10, padding: '10px', borderRadius: 8, border: '1.5px dashed rgba(234,67,53,0.4)', fontSize: 12, fontWeight: 600, color: '#ea4335', background: 'transparent', cursor: 'pointer' }}>
+                  + Import More Gmail Contacts
+                </button>
+                {gmailContactsList.map(c => (
+                  <div
+                    key={c.id}
+                    onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
+                    style={{
+                      background: selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fff',
+                      borderRadius: 10,
+                      border: `1px solid ${selected?.id === c.id ? 'rgba(234,67,53,0.3)' : 'rgba(0,0,0,0.07)'}`,
+                      padding: '12px 14px', marginBottom: 8, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                    }}
+                  >
+                    <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#ea4335' }}>
+                      {(c.firstName?.[0] || '?').toUpperCase()}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.firstName} {c.lastName}
+                      </div>
+                      {c.email && (
+                        <div style={{ fontSize: 12, color: '#ea4335', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          ✉ {c.email}
+                        </div>
+                      )}
+                      {c.phone && (
+                        <div style={{ fontSize: 11, color: GOLD, fontFamily: 'monospace', marginTop: 1 }}>{fmtPhone(c.phone)}</div>
+                      )}
+                    </div>
+                    <span style={{ color: '#d1d5db', fontSize: 14 }}>›</span>
+                  </div>
+                ))}
+              </>
+            )
+
           ) : mobileCards.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
               <div style={{ fontSize: 32, opacity: 0.25 }}>📋</div>
@@ -797,7 +881,6 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                   boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                 }}
               >
-                {/* Checkbox (select mode) or Avatar */}
                 {selectMode ? (
                   <div style={{
                     width: 22, height: 22, borderRadius: 6, flexShrink: 0,
@@ -1077,6 +1160,68 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                 </div>
               );
             })}
+
+            {/* ── Email Contacts section — all contacts with email, separate from phone kanban ── */}
+            {gmailContactsList.length > 0 && (
+              <div style={{
+                width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column',
+                background: '#fff', borderRadius: 14,
+                border: '1.5px solid rgba(234,67,53,0.25)',
+                maxHeight: 'calc(100vh - 130px)', overflow: 'hidden',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+              }}>
+                <div style={{ height: 3, background: '#ea4335', borderRadius: '14px 14px 0 0', flexShrink: 0 }} />
+                <div style={{ padding: '12px 14px 10px', borderBottom: '1px solid rgba(0,0,0,0.05)', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: DARK }}>Email Contacts</span>
+                    <span style={{ fontSize: 10, color: '#ea4335', background: '#fef2f2', borderRadius: 10, padding: '1px 7px', fontWeight: 600 }}>
+                      {gmailContactsList.length}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>Email contacts · not mixed with phone list</div>
+                  <button
+                    onClick={openGmailImport}
+                    style={{
+                      marginTop: 8, width: '100%', padding: '5px 0', borderRadius: 6,
+                      border: '1.5px dashed rgba(234,67,53,0.4)', fontSize: 10, fontWeight: 600,
+                      letterSpacing: '0.06em', textTransform: 'uppercase',
+                      color: '#ea4335', background: 'transparent', cursor: 'pointer',
+                    }}
+                  >
+                    + Import More
+                  </button>
+                </div>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
+                  {gmailContactsList.map(c => (
+                    <div
+                      key={c.id}
+                      onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
+                      style={{
+                        background: selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fafafa',
+                        borderRadius: 9,
+                        border: `1px solid ${selected?.id === c.id ? 'rgba(234,67,53,0.3)' : 'rgba(0,0,0,0.06)'}`,
+                        padding: '10px 12px', marginBottom: 6, cursor: 'pointer',
+                        transition: 'border-color 0.1s, background 0.1s',
+                      }}
+                    >
+                      <div style={{ fontWeight: 600, fontSize: 12, color: DARK, marginBottom: 3 }}>
+                        {c.firstName} {c.lastName}
+                      </div>
+                      {c.email && (
+                        <div style={{ fontSize: 11, color: '#ea4335', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          ✉ {c.email}
+                        </div>
+                      )}
+                      {c.phone && (
+                        <div style={{ fontSize: 11, color: GOLD, fontFamily: 'monospace', marginTop: 2 }}>
+                          {fmtPhone(c.phone)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* ── New group creation column ──── */}
             {creatingGroup && (

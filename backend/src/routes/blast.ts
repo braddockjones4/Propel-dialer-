@@ -58,7 +58,7 @@ router.post('/send', async (req: Request, res: Response) => {
       const msgParams: any = {
         body,
         from: TWILIO_CALLER_ID,
-        to:   contact.phone,
+        to:   contact.phone!,
         statusCallback: `${process.env.NGROK_URL}/api/twilio/sms-status`,
       };
       if (mediaUrl) msgParams.mediaUrl = [mediaUrl];
@@ -72,7 +72,7 @@ router.post('/send', async (req: Request, res: Response) => {
           direction:  'outbound',
           body,
           fromNumber: TWILIO_CALLER_ID,
-          toNumber:   contact.phone,
+          toNumber:   contact.phone!,
           twilioSid:  msg.sid,
           status:     'sent',
         },
@@ -139,12 +139,12 @@ router.post('/ab-send', async (req: Request, res: Response) => {
           agentName: AGENT_NAME || 'Braddock',
           agentPhone: AGENT_PHONE || TWILIO_CALLER_ID,
         });
-        const params: any = { body, from: TWILIO_CALLER_ID, to: contact.phone };
+        const params: any = { body, from: TWILIO_CALLER_ID, to: contact.phone! };
         if (mediaUrl) params.mediaUrl = [mediaUrl];
         const msg = await client.messages.create(params);
         await prisma.message.create({
           data: { contactId: contact.id, direction: 'outbound', body,
-                  fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone,
+                  fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone!,
                   twilioSid: msg.sid, status: 'sent' },
         });
         sent++;

@@ -178,9 +178,9 @@ router.post('/:contactId/execute', async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Twilio not configured' }); return;
       }
       const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-      await client.messages.create({ to: contact.phone, from: TWILIO_CALLER_ID, body: message });
+      await client.messages.create({ to: contact.phone!, from: TWILIO_CALLER_ID, body: message });
       await prisma.message.create({
-        data: { contactId, direction: 'outbound', body: message, fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone },
+        data: { contactId, direction: 'outbound', body: message, fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone! },
       });
       res.json({ executed: true, action });
       break;
