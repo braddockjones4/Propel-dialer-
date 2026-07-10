@@ -114,6 +114,16 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const [icloudConnected, setIcloudConnected] = useState(false);
   const [icloudSyncing,   setIcloudSyncing]   = useState(false);
 
+  // Gmail contacts import
+  const [showGmailImport,    setShowGmailImport]    = useState(false);
+  const [gmailContacts,      setGmailContacts]      = useState<{ firstName: string; lastName: string; email: string | null; phone: string | null }[]>([]);
+  const [gmailSelectedIds,   setGmailSelectedIds]   = useState<Set<number>>(new Set());
+  const [gmailGroupName,     setGmailGroupName]     = useState('Gmail Contacts');
+  const [gmailLoading,       setGmailLoading]       = useState(false);
+  const [gmailImporting,     setGmailImporting]     = useState(false);
+  const [gmailError,         setGmailError]         = useState<string | null>(null);
+  const [gmailNeedsReauth,   setGmailNeedsReauth]   = useState(false);
+
   // Multi-select
   const [selectMode,    setSelectMode]    = useState(false);
   const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set());
@@ -166,6 +176,73 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
       loadContacts();
     } catch { toast.error('Sync failed — try again'); }
     finally { setIcloudSyncing(false); }
+  };
+
+  // ── Gmail contacts import ────────────────────────────────────────────────
+  const openGmailImport = async () => {
+    setShowGmailImport(true);
+    setGmailError(null);
+    setGmailNeedsReauth(false);
+    setGmailContacts([]);
+    setGmailSelectedIds(new Set());
+    setGmailGroupName('Gmail Contacts');
+    setGmailLoading(true);
+    try {
+      const r = await authFetch(`${API_BASE}/gmail/contacts`);
+      if (r.status === 403) {
+        setGmailNeedsReauth(true);
+        setGmailLoading(false);
+        return;
+      }
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        setGmailError(j.error || 'Failed to fetch Gmail contacts');
+        setGmailLoading(false);
+        return;
+      }
+      const j = await r.json();
+      setGmailContacts(j.contacts || []);
+      // Select all by default
+      setGmailSelectedIds(new Set((j.contacts || []).map((_: any, i: number) => i)));
+    } catch {
+      setGmailError('Could not reach server — try again');
+    } finally {
+      setGmailLoading(false);
+    }
+  };
+
+  const handleGmailImport = async () => {
+    const selected = gmailContacts.filter((_, i) => gmailSelectedIds.has(i));
+    if (!selected.length) return;
+    setGmailImporting(true);
+    try {
+      let imported = 0;
+      let skipped  = 0;
+      for (const c of selected) {
+        const r = await authFetch(`${API_BASE}/contacts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            firstName:    c.firstName || '',
+            lastName:     c.lastName  || '',
+            phone:        c.phone     || '',
+            email:        c.email     || '',
+            contactGroup: gmailGroupName.trim() || 'Gmail Contacts',
+            source:       'manual',
+          }),
+        });
+        if (r.ok) imported++;
+        else skipped++;
+      }
+      toast.success(`✓ ${imported} contacts imported${skipped ? `, ${skipped} skipped` : ''}`);
+      setShowGmailImport(false);
+      loadContacts();
+      loadGroups();
+    } catch {
+      setGmailError('Import failed — try again');
+    } finally {
+      setGmailImporting(false);
+    }
   };
 
   const handleQuickAdd = async () => {
@@ -513,6 +590,13 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
           </button>
         )}
         <button
+          onClick={openGmailImport}
+          className="hidden md:flex"
+          style={{ padding: '6px 12px', borderRadius: 7, border: '1.5px solid #ea4335', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', background: '#fff8f7', color: '#ea4335', cursor: 'pointer', whiteSpace: 'nowrap', alignItems: 'center', gap: 5 }}
+        >
+          <span>G</span> Gmail
+        </button>
+        <button
           onClick={() => setShowImport(true)}
           className="hidden md:block"
           style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid #e5e7eb', fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', background: 'transparent', color: '#6b7280', cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -629,6 +713,16 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             }}
           >
             + Add
+          </button>
+          <button
+            onClick={openGmailImport}
+            style={{
+              padding: '10px 14px', borderRadius: 8, border: '1.5px solid #ea4335',
+              fontSize: 12, fontWeight: 700,
+              color: '#ea4335', background: '#fff8f7', cursor: 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            G
           </button>
           <button
             onClick={() => setShowImport(true)}
@@ -1446,8 +1540,135 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
         <CsvImportModal onClose={() => setShowImport(false)} onImported={() => { loadContacts(); loadGroups(); setIcloudConnected(true); }} preloadedVcfText={sharedVcfText} />
       )}
 
+      {/* ── Gmail Import Modal ─────────────────────────────────────────────── */}
+      {showGmailImport && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowGmailImport(false); }}>
+          <div style={{ background: '#fff', borderRadius: '18px 18px 0 0', width: '100%', maxWidth: 560, maxHeight: '88vh', display: 'flex', flexDirection: 'column', padding: '20px 20px 32px', overflow: 'hidden' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: DARK }}>Import Gmail Contacts</div>
+                {!gmailLoading && !gmailError && !gmailNeedsReauth && gmailContacts.length > 0 && (
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{gmailContacts.length} contacts found · {gmailSelectedIds.size} selected</div>
+                )}
+              </div>
+              <button onClick={() => setShowGmailImport(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#9ca3af', padding: '4px 8px' }}>✕</button>
+            </div>
+
+            {/* Loading */}
+            {gmailLoading && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '40px 0' }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', border: `3px solid #ea4335`, borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
+                <div style={{ fontSize: 13, color: '#6b7280' }}>Fetching your Google contacts…</div>
+              </div>
+            )}
+
+            {/* Needs reauth */}
+            {!gmailLoading && gmailNeedsReauth && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '32px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 32 }}>🔐</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: DARK }}>Contacts permission needed</div>
+                <div style={{ fontSize: 13, color: '#6b7280' }}>Your Gmail is connected for sending, but we need one more permission to read your contacts. Click below to re-authorize.</div>
+                <button
+                  onClick={() => { window.location.href = `${API_BASE}/gmail/auth?token=${localStorage.getItem('token') || ''}`; }}
+                  style={{ padding: '12px 28px', borderRadius: 10, border: 'none', background: '#ea4335', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+                >
+                  Re-authorize Gmail
+                </button>
+              </div>
+            )}
+
+            {/* Error */}
+            {!gmailLoading && gmailError && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '32px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: 32 }}>⚠️</div>
+                <div style={{ fontSize: 14, color: '#dc2626' }}>{gmailError}</div>
+                <button onClick={openGmailImport} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: DARK, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Try again</button>
+              </div>
+            )}
+
+            {/* Contacts list */}
+            {!gmailLoading && !gmailError && !gmailNeedsReauth && gmailContacts.length > 0 && (
+              <>
+                {/* Group name + select all */}
+                <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center' }}>
+                  <input
+                    value={gmailGroupName}
+                    onChange={e => setGmailGroupName(e.target.value)}
+                    placeholder="Group name"
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 13, outline: 'none' }}
+                  />
+                  <button
+                    onClick={() => {
+                      if (gmailSelectedIds.size === gmailContacts.length) setGmailSelectedIds(new Set());
+                      else setGmailSelectedIds(new Set(gmailContacts.map((_, i) => i)));
+                    }}
+                    style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #e5e7eb', fontSize: 12, fontWeight: 600, background: '#f9fafb', color: DARK, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                  >
+                    {gmailSelectedIds.size === gmailContacts.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                </div>
+
+                {/* Scrollable list */}
+                <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #f3f4f6', borderRadius: 10 }}>
+                  {gmailContacts.map((c, i) => (
+                    <label key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid #f9fafb', cursor: 'pointer', background: gmailSelectedIds.has(i) ? '#fef8f0' : '#fff' }}>
+                      <input
+                        type="checkbox"
+                        checked={gmailSelectedIds.has(i)}
+                        onChange={() => {
+                          setGmailSelectedIds(prev => {
+                            const next = new Set(prev);
+                            next.has(i) ? next.delete(i) : next.add(i);
+                            return next;
+                          });
+                        }}
+                        style={{ accentColor: GOLD, width: 15, height: 15, flexShrink: 0 }}
+                      />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {[c.firstName, c.lastName].filter(Boolean).join(' ') || '(No name)'}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {[c.email, c.phone].filter(Boolean).join(' · ') || 'No contact info'}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Import button */}
+                <button
+                  onClick={handleGmailImport}
+                  disabled={gmailImporting || gmailSelectedIds.size === 0}
+                  style={{
+                    marginTop: 14, width: '100%', padding: '14px', borderRadius: 12, border: 'none',
+                    background: gmailSelectedIds.size === 0 ? '#f3f4f6' : '#ea4335',
+                    color: gmailSelectedIds.size === 0 ? '#9ca3af' : '#fff',
+                    fontSize: 15, fontWeight: 700, cursor: gmailSelectedIds.size === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {gmailImporting ? 'Importing…' : `Import ${gmailSelectedIds.size} Contact${gmailSelectedIds.size !== 1 ? 's' : ''} → "${gmailGroupName || 'Gmail Contacts'}"`}
+                </button>
+              </>
+            )}
+
+            {/* Empty state */}
+            {!gmailLoading && !gmailError && !gmailNeedsReauth && gmailContacts.length === 0 && (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '40px 0' }}>
+                <div style={{ fontSize: 32 }}>📭</div>
+                <div style={{ fontSize: 14, color: '#6b7280' }}>No contacts with email or phone found in your Google account.</div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );

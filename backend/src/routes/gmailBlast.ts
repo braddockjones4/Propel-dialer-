@@ -40,6 +40,7 @@ router.get('/auth', requireAuth, (req: any, res: Response) => {
     scope: [
       'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/contacts.readonly',
     ],
     state: req.user.id,              // passed back in callback
   });
@@ -209,6 +210,80 @@ router.post('/blast', requireAuth, async (req: any, res: Response) => {
     res.json({ ok: true, sent, failed, total: withEmail.length, errors, errorDetails });
   } catch (e: any) {
     console.error('[Gmail] blast error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/gmail/contacts ───────────────────────────────────────────────────
+// Fetch the user's Google Contacts via the People API.
+// Returns an array of { firstName, lastName, email, phone } objects.
+// Requires contacts.readonly scope — user may need to re-authorize if they
+// connected Gmail before this scope was added.
+router.get('/contacts', requireAuth, async (req: any, res: Response) => {
+  try {
+    const user = await db.user.findUnique({ where: { id: req.user.id } });
+
+    if (!user?.gmailAccessToken) {
+      res.status(400).json({ error: 'Gmail not connected.', needsAuth: true });
+      return;
+    }
+
+    const oauth2Client = getOAuthClient();
+    oauth2Client.setCredentials({
+      access_token:  user.gmailAccessToken,
+      refresh_token: user.gmailRefreshToken,
+    });
+
+    oauth2Client.on('tokens', async (newTokens: any) => {
+      await db.user.update({
+        where: { id: user.id },
+        data: {
+          gmailAccessToken: newTokens.access_token || user.gmailAccessToken,
+          gmailTokenExpiry: newTokens.expiry_date ? new Date(newTokens.expiry_date) : undefined,
+          ...(newTokens.refresh_token ? { gmailRefreshToken: newTokens.refresh_token } : {}),
+        },
+      });
+    });
+
+    const people = google.people({ version: 'v1', auth: oauth2Client });
+
+    // Page through all connections (max 1000 per page, up to 3 pages = 3000 contacts)
+    const allContacts: any[] = [];
+    let pageToken: string | undefined;
+
+    for (let page = 0; page < 3; page++) {
+      const { data } = await people.people.connections.list({
+        resourceName: 'people/me',
+        pageSize: 1000,
+        personFields: 'names,emailAddresses,phoneNumbers',
+        ...(pageToken ? { pageToken } : {}),
+      });
+
+      for (const person of data.connections || []) {
+        const name      = person.names?.[0];
+        const emailObj  = person.emailAddresses?.[0];
+        const phoneObj  = person.phoneNumbers?.[0];
+        const email     = emailObj?.value?.trim() || null;
+        const phone     = phoneObj?.value?.replace(/[^\d+]/g, '') || null;
+        const firstName = name?.givenName?.trim()  || (name?.displayName?.split(' ')[0] ?? '');
+        const lastName  = name?.familyName?.trim() || (name?.displayName?.split(' ').slice(1).join(' ') ?? '');
+        allContacts.push({ firstName, lastName, email, phone });
+      }
+
+      pageToken = data.nextPageToken ?? undefined;
+      if (!pageToken) break;
+    }
+
+    // Only return contacts that have at least an email or phone
+    const useful = allContacts.filter(c => c.email || c.phone);
+    res.json({ contacts: useful, total: useful.length });
+  } catch (e: any) {
+    // 403 / insufficient scope → user needs to re-authorize
+    if (e?.response?.status === 403 || e?.message?.includes('insufficient')) {
+      res.status(403).json({ error: 'Contacts permission not granted. Please reconnect Gmail.', needsReauth: true });
+      return;
+    }
+    console.error('[Gmail] contacts fetch error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
