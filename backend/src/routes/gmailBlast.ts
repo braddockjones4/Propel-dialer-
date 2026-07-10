@@ -285,6 +285,7 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
 
     // 2. "Other contacts" — auto-created by Gmail from email history (contacts.other.readonly)
     let otherPageToken: string | undefined;
+    let otherScopeMissing = false;
     for (let page = 0; page < 10; page++) {
       try {
         const { data } = await (people as any).otherContacts.list({
@@ -295,7 +296,18 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
         for (const person of data.otherContacts || []) addUnique(parsePerson(person));
         otherPageToken = data.nextPageToken ?? undefined;
         if (!otherPageToken) break;
-      } catch { break; }
+      } catch (e: any) {
+        const status = e?.response?.status;
+        if (status === 403 || status === 401) { otherScopeMissing = true; }
+        console.error('[Gmail] otherContacts error:', status, e?.response?.data?.error?.message || e?.message);
+        break;
+      }
+    }
+
+    // If otherContacts failed due to missing scope and we have nothing, prompt re-auth
+    if (otherScopeMissing && allContacts.length === 0) {
+      res.status(403).json({ error: 'Please re-authorize Gmail to load your full contact list.', needsReauth: true });
+      return;
     }
 
     // Only return contacts that have at least an email or phone
