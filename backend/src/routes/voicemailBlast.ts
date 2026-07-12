@@ -46,14 +46,19 @@ router.post('/start', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
 
-  const contacts = await prisma.contact.findMany({
-    where: {
-      NOT: { status: 'dnc' },
-      ...(filter?.source ? { source: filter.source } : {}),
-      ...(filter?.status ? { status: filter.status } : {}),
-    },
-    take: 500,
-  });
+  let contacts;
+  try {
+    contacts = await prisma.contact.findMany({
+      where: {
+        NOT: { status: 'dnc' },
+        ...(filter?.source ? { source: filter.source } : {}),
+        ...(filter?.status ? { status: filter.status } : {}),
+      },
+      take: 500,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message }); return;
+  }
 
   if (contacts.length === 0) { res.status(400).json({ error: 'No eligible contacts' }); return; }
 

@@ -241,21 +241,19 @@ router.post('/call-status', async (req: Request, res: Response) => {
   const { CallSid, CallStatus, CallDuration, To } = req.body;
   console.log(`[Call] SID: ${CallSid} | Status: ${CallStatus} | Duration: ${CallDuration}s | To: ${To}`);
 
-  const contact: ContactContext = {
-    firstName: 'there',
-    fullName: To,
-    address: 'your property',
-    phone: To,
-  };
+  try {
+    const contact: ContactContext = { firstName: 'there', fullName: To, address: 'your property', phone: To };
+    const duration = parseInt(CallDuration || '0', 10);
 
-  const duration = parseInt(CallDuration || '0', 10);
-
-  if (CallStatus === 'no-answer' || CallStatus === 'busy') {
-    console.log(`[Follow-up] No answer for ${To} — firing no-answer sequence`);
-    await runFollowUpSequence('no-answer', contact);
-  } else if (CallStatus === 'completed' && duration > 0 && duration < 30) {
-    console.log(`[Follow-up] Short call (${duration}s) for ${To} — firing short-call sequence`);
-    await runFollowUpSequence('short-call', contact);
+    if (CallStatus === 'no-answer' || CallStatus === 'busy') {
+      console.log(`[Follow-up] No answer for ${To} — firing no-answer sequence`);
+      await runFollowUpSequence('no-answer', contact);
+    } else if (CallStatus === 'completed' && duration > 0 && duration < 30) {
+      console.log(`[Follow-up] Short call (${duration}s) for ${To} — firing short-call sequence`);
+      await runFollowUpSequence('short-call', contact);
+    }
+  } catch (e: any) {
+    console.error('[call-status] error:', e.message);
   }
 
   res.sendStatus(204);
@@ -338,8 +336,13 @@ router.post('/disposition', async (req: Request, res: Response) => {
     return;
   }
 
-  await runFollowUpSequence(disposition, contact);
-  res.json({ sent: true, disposition });
+  try {
+    await runFollowUpSequence(disposition, contact);
+    res.json({ sent: true, disposition });
+  } catch (e: any) {
+    console.error('[disposition] sequence error:', e.message);
+    res.json({ sent: false, reason: e.message });
+  }
 });
 
 export default router;
