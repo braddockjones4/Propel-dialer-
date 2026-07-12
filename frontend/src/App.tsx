@@ -32,14 +32,16 @@ import Voicemails from './components/Voicemails';
 import Dashboard from './components/Dashboard';
 import AgentChat from './components/AgentChat';
 import EmailBlast from './components/EmailBlast';
+import Inbox from './components/Inbox';
 
-type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'email' | 'settings';
+type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'email' | 'inbox' | 'settings';
 
 const NAV: { id: Page; label: string }[] = [
   { id: 'dashboard',    label: 'Home'        },
   { id: 'dialer',       label: 'Dialer'      },
   { id: 'voicemails',   label: 'Voicemails'  },
   { id: 'email',        label: 'Email Blast' },
+  { id: 'inbox',        label: 'Inbox'       },
   { id: 'contacts',     label: 'Contacts'    },
   { id: 'agent',        label: 'AI Agent'    },
   { id: 'pipeline',     label: 'Pipeline'    },
@@ -277,6 +279,7 @@ function AppInner() {
         {page === 'analytics'    && <Analytics />}
         {page === 'agent'        && <AgentChat />}
         {page === 'email'        && <EmailBlast />}
+        {page === 'inbox'        && <Inbox />}
         {page === 'settings'     && <Settings />}
       </div>
 
