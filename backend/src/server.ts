@@ -57,7 +57,9 @@ initSocket(http);
 initAgentScheduler();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors({ origin: '*', credentials: false }));
+// CORS: allow any origin in dev; in prod set FRONTEND_URL=https://yourdomain.com
+const allowedOrigin = process.env.FRONTEND_URL || '*';
+app.use(cors({ origin: allowedOrigin, credentials: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 

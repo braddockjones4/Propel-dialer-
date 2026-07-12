@@ -148,6 +148,16 @@ export default function Dialer() {
     startCall, endCall, muteCall, resetCallStatus, isMuted,
   } = useTwilioDevice();
 
+  // Twilio configuration status
+  const [twilioReady, setTwilioReady]   = useState<boolean | null>(null);
+
+  useEffect(() => {
+    authFetch(`${API_BASE}/settings/status`)
+      .then(r => r.json())
+      .then(d => setTwilioReady(!!d.twilio))
+      .catch(() => setTwilioReady(false));
+  }, []);
+
   // Views & session
   const [view, setView]                 = useState<SessionView>('setup');
   const [contacts, setContacts]         = useState<DialerContact[]>([]);
@@ -657,6 +667,19 @@ export default function Dialer() {
             </div>
             <h1 style={{ fontSize: 26, fontWeight: 300, color: DARK, margin: 0 }}>New Session</h1>
           </div>
+
+          {/* ── Twilio not configured warning ── */}
+          {twilioReady === false && (
+            <div style={{ background: '#fff8ed', border: '1px solid #f5c87a', borderRadius: 10, padding: '14px 16px', marginBottom: 20, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e', marginBottom: 3 }}>Twilio not configured</div>
+                <div style={{ fontSize: 12, color: '#b45309', lineHeight: 1.5 }}>
+                  Add <code style={{ background: '#fef3c7', padding: '1px 4px', borderRadius: 3 }}>TWILIO_ACCOUNT_SID</code>, <code style={{ background: '#fef3c7', padding: '1px 4px', borderRadius: 3 }}>TWILIO_AUTH_TOKEN</code>, and <code style={{ background: '#fef3c7', padding: '1px 4px', borderRadius: 3 }}>TWILIO_CALLER_ID</code> to your <code style={{ background: '#fef3c7', padding: '1px 4px', borderRadius: 3 }}>backend/.env</code> file, then restart the server. Calls will not work until this is set up.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Who to call ── */}
           <Card title="Who to call" mb={14}>
