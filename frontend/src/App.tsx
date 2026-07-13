@@ -21,7 +21,6 @@ import { ToastProvider } from './components/Toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import Landing from './components/Landing';
-import NotificationBell from './components/NotificationBell';
 import Dialer from './components/Dialer';
 import Contacts from './components/Contacts';
 import Analytics from './components/Analytics';
@@ -167,7 +166,6 @@ function AppInner() {
         <div className="flex items-center gap-3 pl-4 flex-shrink-0">
 
 
-          <NotificationBell onNavigate={(p) => setPage(p as any)} />
 
           <div style={{ fontSize: 10, color: '#9ca3af', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {user.name || user.email}
@@ -200,7 +198,6 @@ function AppInner() {
           </span>
         </button>
         <div className="flex items-center gap-2">
-          <NotificationBell onNavigate={(p) => setPage(p as any)} />
           <button onClick={() => setMobileNavOpen(o => !o)}
             style={{ padding: '6px 8px', borderRadius: 7, border: '1px solid #e5e7eb', background: mobileNavOpen ? '#f9f9f9' : 'transparent', color: '#374151', fontSize: 15, lineHeight: 1, cursor: 'pointer' }}>
             {mobileNavOpen ? '✕' : '☰'}
