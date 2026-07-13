@@ -424,44 +424,54 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
   // Look up existing contacts by email (to detect true duplicates)
   const [existByEmail, existByPhone] = await Promise.all([
     emailList.length
-      ? db.contact.findMany({ where: { email: { in: emailList } }, select: { id: true, email: true } })
+      ? db.contact.findMany({ where: { email: { in: emailList } }, select: { id: true, email: true, phone: true } })
       : Promise.resolve([] as { id: string; email: string | null }[]),
     phoneList.length
       ? db.contact.findMany({ where: { phone: { in: phoneList } }, select: { id: true, phone: true, email: true } })
       : Promise.resolve([] as { id: string; phone: string | null; email: string | null }[]),
   ]);
 
-  // Map existing emails (true duplicates — skip these)
-  const emailDupes = new Set<string>(
-    (existByEmail as { email: string | null }[])
-      .map(c => c.email?.toLowerCase().trim() ?? '').filter(Boolean)
-  );
+  // Map email → existing contact (for email-based enrichment + dedup)
+  const emailToExisting = new Map<string, { id: string; phone: string | null }>();
+  for (const c of existByEmail as { id: string; email: string | null; phone?: string | null }[]) {
+    if (c.email) emailToExisting.set(c.email.toLowerCase().trim(), { id: c.id, phone: (c as any).phone ?? null });
+  }
 
-  // Map phone → existing contact (for enrichment)
+  // Map phone → existing contact (for phone-based enrichment)
   const phoneToExisting = new Map<string, { id: string; email: string | null }>();
   for (const c of existByPhone as { id: string; phone: string | null; email: string | null }[]) {
     if (c.phone) phoneToExisting.set(c.phone, { id: c.id, email: c.email });
   }
 
   const toCreate: any[]   = [];
-  const toEnrich: { id: string; email: string }[] = [];
+  const toEnrich: { id: string; email?: string; phone?: string }[] = [];
   let   trueSkipped = 0;
 
   for (const c of validContacts) {
     const email = c.email?.toLowerCase().trim() || null;
     const phone = normalizePhone(c.phone);
 
-    // 1. Email already in DB → true duplicate, skip
-    if (email && emailDupes.has(email)) { trueSkipped++; continue; }
+    // 1. Email matches an existing contact
+    if (email && emailToExisting.has(email)) {
+      const existing = emailToExisting.get(email)!;
+      if (phone && !existing.phone) {
+        // Existing contact has no phone → enrich it with Gmail phone
+        toEnrich.push({ id: existing.id, phone });
+      } else {
+        // Full duplicate — skip
+        trueSkipped++;
+      }
+      continue;
+    }
 
     // 2. Phone matches an existing contact
     if (phone && phoneToExisting.has(phone)) {
       const existing = phoneToExisting.get(phone)!;
       if (email && !existing.email) {
-        // Existing contact has no email → enrich it
+        // Existing contact has no email → enrich it with Gmail email
         toEnrich.push({ id: existing.id, email: c.email!.trim() });
       } else {
-        // Existing contact already has email or Gmail contact has no email → skip
+        // Full duplicate — skip
         trueSkipped++;
       }
       continue;
@@ -479,13 +489,16 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
     });
   }
 
-  // Run enrichments (patch email onto existing phone contacts)
+  // Run enrichments — patch missing email or phone onto existing contacts
   let enriched = 0;
   if (toEnrich.length > 0) {
     await Promise.all(
-      toEnrich.map(({ id, email }) =>
-        db.contact.update({ where: { id }, data: { email } }).then(() => { enriched++; }).catch(() => {})
-      )
+      toEnrich.map(({ id, email, phone }) => {
+        const data: any = {};
+        if (email) data.email = email;
+        if (phone) data.phone = phone;
+        return db.contact.update({ where: { id }, data }).then(() => { enriched++; }).catch(() => {});
+      })
     );
   }
 
