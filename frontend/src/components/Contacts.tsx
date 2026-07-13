@@ -79,10 +79,14 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
 
   // Selected contact detail panel
-  const [selected,  setSelected]  = useState<Contact | null>(null);
-  const [editNotes, setEditNotes] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [saving,    setSaving]    = useState(false);
+  const [selected,     setSelected]     = useState<Contact | null>(null);
+  const [editNotes,    setEditNotes]    = useState('');
+  const [editEmail,    setEditEmail]    = useState('');
+  const [editFirstName,setEditFirstName]= useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editPhone,    setEditPhone]    = useState('');
+  const [editAddress,  setEditAddress]  = useState('');
+  const [saving,       setSaving]       = useState(false);
 
   // New group creation
   const [creatingGroup,  setCreatingGroup]  = useState(false);
@@ -831,7 +835,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                 {gmailContactsList.map(c => (
                   <div
                     key={c.id}
-                    onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
+                    onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }}
                     style={{
                       background: selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fff',
                       borderRadius: 10,
@@ -888,7 +892,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                 key={c.id}
                 onClick={() => {
                   if (selectMode) { toggleSelect(c.id); }
-                  else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }
+                  else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }
                 }}
                 style={{
                   background: selectedIds.has(c.id) ? 'rgba(201,168,76,0.08)' : selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fff',
@@ -1108,7 +1112,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                             onDragEnd={onDragEnd}
                             onClick={() => {
                               if (selectMode) { toggleSelect(c.id); }
-                              else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }
+                              else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }
                             }}
                             style={{
                               background: selectedIds.has(c.id) ? 'rgba(201,168,76,0.08)' : selected?.id === c.id ? 'rgba(201,168,76,0.06)' : '#fafafa',
@@ -1215,7 +1219,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                   {gmailContactsList.map(c => (
                     <div
                       key={c.id}
-                      onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); }}
+                      onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }}
                       style={{
                         background: selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fafafa',
                         borderRadius: 9,
@@ -1439,40 +1443,48 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px', display: 'flex', flexDirection: 'column', gap: 22 }}>
 
-              {/* Info rows */}
+              {/* Fully editable contact fields */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {[
-                  { label: 'Phone',   value: selected.phone,   mono: true },
-                  selected.address ? { label: 'Address', value: [selected.address, selected.city, selected.state].filter(Boolean).join(', '), mono: false } : null,
-                  selected.source  ? { label: 'Source',  value: selected.source,  mono: false } : null,
-                ].filter(Boolean).map((row: any) => (
-                  <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-                    <span style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', flexShrink: 0, marginTop: 2 }}>{row.label}</span>
-                    <span style={{ fontSize: 13, fontWeight: 500, textAlign: 'right', color: row.mono ? GOLD : DARK, fontFamily: row.mono ? 'monospace' : undefined }}>
-                      {row.value}
-                    </span>
+                  { label: 'First Name', value: editFirstName, setter: setEditFirstName, field: 'firstName', type: 'text', mono: false },
+                  { label: 'Last Name',  value: editLastName,  setter: setEditLastName,  field: 'lastName',  type: 'text', mono: false },
+                  { label: 'Phone',      value: editPhone,     setter: setEditPhone,     field: 'phone',     type: 'tel',  mono: true  },
+                  { label: 'Email',      value: editEmail,     setter: setEditEmail,     field: 'email',     type: 'email',mono: false },
+                  { label: 'Address',    value: editAddress,   setter: setEditAddress,   field: 'address',   type: 'text', mono: false },
+                ].map(({ label, value, setter, field, type, mono }) => (
+                  <div key={field} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', flexShrink: 0 }}>{label}</span>
+                    <input
+                      type={type}
+                      value={value}
+                      onChange={e => setter(e.target.value)}
+                      onBlur={async () => {
+                        const original = field === 'firstName' ? (selected.firstName || '')
+                          : field === 'lastName'  ? (selected.lastName  || '')
+                          : field === 'phone'     ? (selected.phone     || '')
+                          : field === 'email'     ? (selected.email     || '')
+                          : [selected.address, selected.city, selected.state].filter(Boolean).join(', ');
+                        if (value === original) return;
+                        const patch: any = field === 'address' ? { address: value } : { [field]: value };
+                        await authFetch(`${API_BASE}/contacts/${selected.id}`, {
+                          method: 'PATCH',
+                          body: JSON.stringify(patch),
+                        });
+                        setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, ...patch } : c));
+                        setSelected(prev => prev ? { ...prev, ...patch } : null);
+                        toast.success(`${label} updated`);
+                      }}
+                      placeholder={`Add ${label.toLowerCase()}…`}
+                      style={{ flex: 1, textAlign: 'right', border: 'none', borderBottom: '1px dashed #e5e7eb', background: 'transparent', fontSize: 12, color: mono ? GOLD : DARK, fontFamily: mono ? 'monospace' : undefined, outline: 'none', padding: '2px 0', minWidth: 0 }}
+                    />
                   </div>
                 ))}
-                {/* Editable email */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', flexShrink: 0 }}>Email</span>
-                  <input
-                    type="email"
-                    value={editEmail}
-                    onChange={e => setEditEmail(e.target.value)}
-                    onBlur={async () => {
-                      if (editEmail === (selected.email || '')) return;
-                      await authFetch(`${API_BASE}/contacts/${selected.id}`, {
-                        method: 'PATCH',
-                        body: JSON.stringify({ email: editEmail }),
-                      });
-                      setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, email: editEmail } : c));
-                      setSelected(prev => prev ? { ...prev, email: editEmail } : null);
-                    }}
-                    placeholder="Add email…"
-                    style={{ flex: 1, textAlign: 'right', border: 'none', borderBottom: '1px dashed #e5e7eb', background: 'transparent', fontSize: 12, color: DARK, outline: 'none', padding: '2px 0', minWidth: 0 }}
-                  />
-                </div>
+                {selected.source && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 9, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', flexShrink: 0 }}>Source</span>
+                    <span style={{ fontSize: 12, color: '#9ca3af' }}>{selected.source}</span>
+                  </div>
+                )}
               </div>
 
               {/* Status pills */}
