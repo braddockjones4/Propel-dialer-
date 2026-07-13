@@ -835,19 +835,33 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                 {gmailContactsList.map(c => (
                   <div
                     key={c.id}
-                    onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }}
+                    onClick={() => {
+                      if (selectMode) { toggleSelect(c.id); }
+                      else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }
+                    }}
                     style={{
-                      background: selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fff',
+                      background: selectedIds.has(c.id) ? 'rgba(201,168,76,0.08)' : selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fff',
                       borderRadius: 10,
-                      border: `1px solid ${selected?.id === c.id ? 'rgba(234,67,53,0.3)' : 'rgba(0,0,0,0.07)'}`,
+                      border: `1px solid ${selectedIds.has(c.id) ? 'rgba(201,168,76,0.45)' : selected?.id === c.id ? 'rgba(234,67,53,0.3)' : 'rgba(0,0,0,0.07)'}`,
                       padding: '12px 14px', marginBottom: 8, cursor: 'pointer',
                       display: 'flex', alignItems: 'center', gap: 12,
                       boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                     }}
                   >
-                    <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#ea4335' }}>
-                      {(c.firstName?.[0] || '?').toUpperCase()}
-                    </div>
+                    {selectMode ? (
+                      <div style={{
+                        width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                        border: `2px solid ${selectedIds.has(c.id) ? GOLD : '#d1d5db'}`,
+                        background: selectedIds.has(c.id) ? GOLD : '#fff',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {selectedIds.has(c.id) && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                      </div>
+                    ) : (
+                      <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: '#ea4335' }}>
+                        {(c.firstName?.[0] || '?').toUpperCase()}
+                      </div>
+                    )}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 14, color: DARK, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {c.firstName} {c.lastName}
@@ -861,7 +875,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                         <div style={{ fontSize: 11, color: GOLD, fontFamily: 'monospace', marginTop: 1 }}>{fmtPhone(c.phone)}</div>
                       )}
                     </div>
-                    <span style={{ color: '#d1d5db', fontSize: 14 }}>›</span>
+                    {!selectMode && <span style={{ color: '#d1d5db', fontSize: 14 }}>›</span>}
                   </div>
                 ))}
               </>
@@ -1219,28 +1233,44 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                   {gmailContactsList.map(c => (
                     <div
                       key={c.id}
-                      onClick={() => { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }}
+                      onClick={() => {
+                        if (selectMode) { toggleSelect(c.id); }
+                        else { setSelected(c); setEditNotes(c.notes || ''); setEditEmail(c.email || ''); setEditFirstName(c.firstName || ''); setEditLastName(c.lastName || ''); setEditPhone(c.phone || ''); setEditAddress([c.address, c.city, c.state].filter(Boolean).join(', ')); }
+                      }}
                       style={{
-                        background: selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fafafa',
+                        background: selectedIds.has(c.id) ? 'rgba(201,168,76,0.08)' : selected?.id === c.id ? 'rgba(234,67,53,0.04)' : '#fafafa',
                         borderRadius: 9,
-                        border: `1px solid ${selected?.id === c.id ? 'rgba(234,67,53,0.3)' : 'rgba(0,0,0,0.06)'}`,
+                        border: `1px solid ${selectedIds.has(c.id) ? 'rgba(201,168,76,0.45)' : selected?.id === c.id ? 'rgba(234,67,53,0.3)' : 'rgba(0,0,0,0.06)'}`,
                         padding: '10px 12px', marginBottom: 6, cursor: 'pointer',
                         transition: 'border-color 0.1s, background 0.1s',
+                        display: 'flex', alignItems: 'center', gap: 8,
                       }}
                     >
-                      <div style={{ fontWeight: 600, fontSize: 12, color: DARK, marginBottom: 3 }}>
-                        {c.firstName} {c.lastName}
+                      {selectMode && (
+                        <div style={{
+                          width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                          border: `2px solid ${selectedIds.has(c.id) ? GOLD : '#d1d5db'}`,
+                          background: selectedIds.has(c.id) ? GOLD : '#fff',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {selectedIds.has(c.id) && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 12, color: DARK, marginBottom: 3 }}>
+                          {c.firstName} {c.lastName}
+                        </div>
+                        {c.email && (
+                          <div style={{ fontSize: 11, color: '#ea4335', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            ✉ {c.email}
+                          </div>
+                        )}
+                        {c.phone && (
+                          <div style={{ fontSize: 11, color: GOLD, fontFamily: 'monospace', marginTop: 2 }}>
+                            {fmtPhone(c.phone)}
+                          </div>
+                        )}
                       </div>
-                      {c.email && (
-                        <div style={{ fontSize: 11, color: '#ea4335', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          ✉ {c.email}
-                        </div>
-                      )}
-                      {c.phone && (
-                        <div style={{ fontSize: 11, color: GOLD, fontFamily: 'monospace', marginTop: 2 }}>
-                          {fmtPhone(c.phone)}
-                        </div>
-                      )}
                     </div>
                   ))}
                 </div>
