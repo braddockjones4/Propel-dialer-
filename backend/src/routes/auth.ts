@@ -8,10 +8,35 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import prisma from '../db';
 
 const router = Router();
 const db = prisma as any;
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  message: { error: 'Too many login attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  message: { error: 'Too many registration attempts. Please try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const forgotLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many password reset requests. Please try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const JWT_SECRET  = process.env.JWT_SECRET || 'propel-dialer-dev-secret-change-in-prod';
 const JWT_EXPIRES = '30d';
@@ -64,7 +89,7 @@ export function requirePlan(...allowed: string[]) {
 }
 
 // ── POST /api/auth/register ───────────────────────────────────────────────────
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', registerLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password, name } = req.body;
     if (!email || !password) { res.status(400).json({ error: 'email and password required' }); return; }
@@ -92,7 +117,7 @@ router.post('/register', async (req: Request, res: Response) => {
 });
 
 // ── POST /api/auth/login ──────────────────────────────────────────────────────
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) { res.status(400).json({ error: 'email and password required' }); return; }
@@ -178,7 +203,7 @@ router.get('/demo', async (_req: Request, res: Response) => {
 });
 
 // ── POST /api/auth/forgot-password ───────────────────────────────────────────
-router.post('/forgot-password', async (req: Request, res: Response) => {
+router.post('/forgot-password', forgotLimiter, async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
     if (!email) { res.status(400).json({ error: 'Email required' }); return; }
