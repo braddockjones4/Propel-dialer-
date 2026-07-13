@@ -196,22 +196,26 @@ router.post('/status-update', (req: Request, res: Response) => {
 // ─── POST /api/triple-dial/cancel ────────────────────────────────────────────
 // Cancel all calls in a session (agent skips)
 router.post('/cancel', async (req: Request, res: Response) => {
-  const { sessionId } = req.body;
-  const session = sessions.get(sessionId);
-  if (!session) { res.sendStatus(204); return; }
+  try {
+    const { sessionId } = req.body;
+    const session = sessions.get(sessionId);
+    if (!session) { res.sendStatus(204); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-  const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 
-  for (const c of session.calls) {
-    if (!c.sid.startsWith('failed') && c.status !== 'cancelled') {
-      c.status = 'cancelled';
-      client.calls(c.sid).update({ status: 'completed' }).catch(() => {});
+    for (const c of session.calls) {
+      if (!c.sid.startsWith('failed') && c.status !== 'cancelled') {
+        c.status = 'cancelled';
+        client.calls(c.sid).update({ status: 'completed' }).catch(() => {});
+      }
     }
-  }
 
-  sessions.delete(sessionId);
-  res.json({ cancelled: true });
+    sessions.delete(sessionId);
+    res.json({ cancelled: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;

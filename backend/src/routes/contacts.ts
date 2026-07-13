@@ -96,38 +96,42 @@ router.post('/', async (req: Request, res: Response) => {
 // POST /api/contacts/import
 // Accepts either a raw array [ {...}, ... ] or { contacts: [ {...}, ... ] }
 router.post('/import', async (req: Request, res: Response) => {
-  if (!await checkContactLimit(req, res)) return;
-  const body = req.body;
-  const rows: Array<Record<string, string>> = Array.isArray(body)
-    ? body
-    : Array.isArray(body?.contacts)
-      ? body.contacts
-      : [];
-  if (!rows.length) { res.status(400).json({ error: 'No contacts provided' }); return; }
+  try {
+    if (!await checkContactLimit(req, res)) return;
+    const body = req.body;
+    const rows: Array<Record<string, string>> = Array.isArray(body)
+      ? body
+      : Array.isArray(body?.contacts)
+        ? body.contacts
+        : [];
+    if (!rows.length) { res.status(400).json({ error: 'No contacts provided' }); return; }
 
-  const data = rows.map(r => {
-    const rawPhone = r.phone || r.Phone || r['Phone Number'] || '';
-    const digits = rawPhone.replace(/\D/g, '');
-    const phone = digits.length === 10 ? `+1${digits}` : (digits ? `+${digits}` : null);
-    return {
-      firstName: r.firstName || r.first_name || r['First Name'] || '',
-      lastName:  r.lastName  || r.last_name  || r['Last Name']  || '',
-      phone,
-      address:   r.address   || r.Address    || '',
-      city:      r.city      || r.City       || '',
-      state:     r.state     || r.State      || '',
-      zip:       r.zip       || r.Zip        || '',
-      email:     r.email     || r.Email      || '',
-      source:    r.source    || 'manual',
-    };
-  }).filter(c => c.phone || c.email); // require at least phone OR email
+    const data = rows.map(r => {
+      const rawPhone = r.phone || r.Phone || r['Phone Number'] || '';
+      const digits = rawPhone.replace(/\D/g, '');
+      const phone = digits.length === 10 ? `+1${digits}` : (digits ? `+${digits}` : null);
+      return {
+        firstName: r.firstName || r.first_name || r['First Name'] || '',
+        lastName:  r.lastName  || r.last_name  || r['Last Name']  || '',
+        phone,
+        address:   r.address   || r.Address    || '',
+        city:      r.city      || r.City       || '',
+        state:     r.state     || r.State      || '',
+        zip:       r.zip       || r.Zip        || '',
+        email:     r.email     || r.Email      || '',
+        source:    r.source    || 'manual',
+      };
+    }).filter(c => c.phone || c.email);
 
-  const phones = data.map(c => c.phone).filter(Boolean) as string[];
-  const existing = phones.length
-    ? await prisma.contact.count({ where: { phone: { in: phones } } })
-    : 0;
-  const result = await (prisma as any).contact.createMany({ data, skipDuplicates: true });
-  res.json({ count: result.count, imported: result.count, skipped: existing });
+    const phones = data.map(c => c.phone).filter(Boolean) as string[];
+    const existing = phones.length
+      ? await prisma.contact.count({ where: { phone: { in: phones } } })
+      : 0;
+    const result = await (prisma as any).contact.createMany({ data, skipDuplicates: true });
+    res.json({ count: result.count, imported: result.count, skipped: existing });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // PATCH /api/contacts/:id
@@ -161,44 +165,49 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
 // POST /api/contacts/:id/calls
 router.post('/:id/calls', async (req: Request, res: Response) => {
-  const { duration, disposition, notes, recordingUrl, twilioSid } = req.body;
+  try {
+    const { duration, disposition, notes, recordingUrl, twilioSid } = req.body;
 
-  const call = await prisma.call.create({
-    data: {
-      contactId: req.params.id,
-      duration: Number(duration) || 0,
-      disposition,
-      notes,
-      recordingUrl,
-      twilioSid,
-    },
-  });
-
-  const statusMap: Record<string, string> = {
-    'hot-lead':          'hot',
-    'callback':          'callback',
-    'callback-scheduled':'callback',
-    'dnc':               'dnc',
-    'not-interested':    'contacted',
-    'left-voicemail':    'contacted',
-    'not-home':          'contacted',
-    'appointment':       'appointment',
-    'closed':            'closed',
-  };
-
-  if (disposition && statusMap[disposition]) {
-    await prisma.contact.update({
-      where: { id: req.params.id },
-      data: { status: statusMap[disposition] },
+    const call = await prisma.call.create({
+      data: {
+        contactId: req.params.id,
+        duration: Number(duration) || 0,
+        disposition,
+        notes,
+        recordingUrl,
+        twilioSid,
+      },
     });
+
+    const statusMap: Record<string, string> = {
+      'hot-lead':          'hot',
+      'callback':          'callback',
+      'callback-scheduled':'callback',
+      'dnc':               'dnc',
+      'not-interested':    'contacted',
+      'left-voicemail':    'contacted',
+      'not-home':          'contacted',
+      'appointment':       'appointment',
+      'closed':            'closed',
+    };
+
+    if (disposition && statusMap[disposition]) {
+      await prisma.contact.update({
+        where: { id: req.params.id },
+        data: { status: statusMap[disposition] },
+      });
+    }
+
+    res.status(201).json(call);
+
+    // Recompute lead score async after each call
+    computeLeadScore(req.params.id)
+      .then(score => prisma.contact.update({ where: { id: req.params.id }, data: { leadScore: score } }))
+      .catch(console.error);
+  } catch (e: any) {
+    if (e.code === 'P2025') { res.status(404).json({ error: 'Contact not found' }); return; }
+    res.status(500).json({ error: e.message });
   }
-
-  res.status(201).json(call);
-
-  // Recompute lead score async after each call
-  computeLeadScore(req.params.id)
-    .then(score => prisma.contact.update({ where: { id: req.params.id }, data: { leadScore: score } }))
-    .catch(console.error);
 });
 
 // POST /api/contacts/score-all — recompute all lead scores
@@ -210,28 +219,31 @@ router.post('/score-all', async (_req: Request, res: Response) => {
 
 // POST /api/contacts/bulk — bulk operations
 router.post('/bulk', async (req: Request, res: Response) => {
-  const { ids, action, value } = req.body as {
-    ids: string[];
-    action: 'setStatus' | 'setGroup' | 'delete';
-    value?: string;
-  };
+  try {
+    const { ids, action, value } = req.body as {
+      ids: string[];
+      action: 'setStatus' | 'setGroup' | 'delete';
+      value?: string;
+    };
 
-  if (!ids || !ids.length) { res.status(400).json({ error: 'ids required' }); return; }
+    if (!ids || !ids.length) { res.status(400).json({ error: 'ids required' }); return; }
 
-  if (action === 'setStatus' && value) {
-    await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { status: value } });
-    res.json({ updated: ids.length });
-  } else if (action === 'setGroup') {
-    await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { contactGroup: value || null } });
-    res.json({ updated: ids.length });
-  } else if (action === 'delete') {
-    // Delete related required-FK records first (schema has no cascade)
-    await prisma.call.deleteMany({ where: { contactId: { in: ids } } });
-    await prisma.appointment.deleteMany({ where: { contactId: { in: ids } } });
-    await prisma.contact.deleteMany({ where: { id: { in: ids } } });
-    res.json({ deleted: ids.length });
-  } else {
-    res.status(400).json({ error: 'Invalid action' });
+    if (action === 'setStatus' && value) {
+      await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { status: value } });
+      res.json({ updated: ids.length });
+    } else if (action === 'setGroup') {
+      await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { contactGroup: value || null } });
+      res.json({ updated: ids.length });
+    } else if (action === 'delete') {
+      await prisma.call.deleteMany({ where: { contactId: { in: ids } } });
+      await prisma.appointment.deleteMany({ where: { contactId: { in: ids } } });
+      await prisma.contact.deleteMany({ where: { id: { in: ids } } });
+      res.json({ deleted: ids.length });
+    } else {
+      res.status(400).json({ error: 'Invalid action' });
+    }
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

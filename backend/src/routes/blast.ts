@@ -10,6 +10,7 @@ function interpolate(template: string, vars: Record<string, string>): string {
 
 // POST /api/blast/send
 router.post('/send', async (req: Request, res: Response) => {
+  try {
   const { message, contactIds, filter, mediaUrl } = req.body as {
     message: string;
     contactIds?: string[];
@@ -88,10 +89,14 @@ router.post('/send', async (req: Request, res: Response) => {
   }
 
   res.json({ ...results, total: contacts.length });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/blast/ab-send — A/B test two message variants (50/50 split)
 router.post('/ab-send', async (req: Request, res: Response) => {
+  try {
   const { messageA, messageB, filter, mediaUrl } = req.body as {
     messageA: string;
     messageB: string;
@@ -163,40 +168,45 @@ router.post('/ab-send', async (req: Request, res: Response) => {
     a: { ...resultsA, total: groupA.length, message: messageA },
     b: { ...resultsB, total: groupB.length, message: messageB },
   });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // GET /api/blast/preview
 router.post('/preview', async (req: Request, res: Response) => {
-  const { message, filter } = req.body;
-  const { AGENT_NAME, AGENT_PHONE, TWILIO_CALLER_ID } = process.env;
+  try {
+    const { message, filter } = req.body;
+    const { AGENT_NAME, AGENT_PHONE, TWILIO_CALLER_ID } = process.env;
 
-  // Get count
-  const count = await prisma.contact.count({
-    where: {
-      NOT: { status: 'dnc' },
-      ...(filter?.source ? { source: filter.source } : {}),
-      ...(filter?.status ? { status: filter.status } : {}),
-    },
-  });
+    const count = await prisma.contact.count({
+      where: {
+        NOT: { status: 'dnc' },
+        ...(filter?.source ? { source: filter.source } : {}),
+        ...(filter?.status ? { status: filter.status } : {}),
+      },
+    });
 
-  // Preview with first contact
-  const sample = await prisma.contact.findFirst({
-    where: { NOT: { status: 'dnc' } },
-  });
+    const sample = await prisma.contact.findFirst({
+      where: { NOT: { status: 'dnc' } },
+    });
 
-  const preview = sample
-    ? interpolate(message, {
-        firstName:  sample.firstName,
-        fullName:   `${sample.firstName} ${sample.lastName}`.trim(),
-        lastName:   sample.lastName,
-        address:    sample.address || 'your property',
-        city:       sample.city || '',
-        agentName:  AGENT_NAME || 'Braddock',
-        agentPhone: AGENT_PHONE || TWILIO_CALLER_ID || '',
-      })
-    : message;
+    const preview = sample
+      ? interpolate(message, {
+          firstName:  sample.firstName,
+          fullName:   `${sample.firstName} ${sample.lastName}`.trim(),
+          lastName:   sample.lastName,
+          address:    sample.address || 'your property',
+          city:       sample.city || '',
+          agentName:  AGENT_NAME || 'Braddock',
+          agentPhone: AGENT_PHONE || TWILIO_CALLER_ID || '',
+        })
+      : message;
 
-  res.json({ count, preview });
+    res.json({ count, preview });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 export default router;
