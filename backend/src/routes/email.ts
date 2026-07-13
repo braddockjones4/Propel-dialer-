@@ -6,13 +6,14 @@
  */
 import { Router, Request, Response } from 'express';
 import prisma from '../db';
+import { getAgentName } from '../agent/settings';
 
 const router = Router();
 const db = prisma as any;
 
 // ── Send a single email ───────────────────────────────────────────────────────
 async function sendEmail(to: string, subject: string, htmlBody: string, contactId?: string): Promise<{ success: boolean; messageId?: string }> {
-  const { SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, AGENT_NAME } = process.env;
+  const { SENDGRID_API_KEY, SENDGRID_FROM_EMAIL } = process.env;
 
   // Log to DB first so we have a record to track
   const log = await db.emailLog.create({
@@ -29,7 +30,7 @@ async function sendEmail(to: string, subject: string, htmlBody: string, contactI
   }
 
   try {
-    const fromName = AGENT_NAME || 'Braddock';
+    const fromName = await getAgentName();
     const resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
       method: 'POST',
       headers: {
@@ -90,7 +91,7 @@ router.post('/send', async (req: Request, res: Response) => {
         firstName: contact.firstName, lastName: contact.lastName,
         fullName: `${contact.firstName} ${contact.lastName}`,
         address: contact.address || '', city: contact.city || '',
-        phone: contact.phone || '', agentName: process.env.AGENT_NAME || 'Braddock',
+        phone: contact.phone || '', agentName: await getAgentName(),
       };
       finalSubject = interpolate(finalSubject, vars);
       finalBody    = interpolate(finalBody, vars);
@@ -123,7 +124,7 @@ router.post('/blast', async (req: Request, res: Response) => {
         firstName: contact.firstName, lastName: contact.lastName,
         fullName: `${contact.firstName} ${contact.lastName}`,
         address: contact.address || '', city: contact.city || '',
-        agentName: process.env.AGENT_NAME || 'Braddock',
+        agentName: await getAgentName(),
       };
       const result = await sendEmail(contact.email!, interpolate(tpl.subject, vars), interpolate(tpl.body, vars), contact.id);
       result.success ? sent++ : failed++;

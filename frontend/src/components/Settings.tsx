@@ -33,6 +33,7 @@ export default function Settings() {
 
   // ── Account fields ──────────────────────────────────────────────────────────
   const [name,        setName]        = useState(user?.name || '');
+  const [agentName,   setAgentName]   = useState('');
   const [password,    setPassword]    = useState('');
   const [savingAcct,  setSavingAcct]  = useState(false);
 
@@ -55,6 +56,7 @@ export default function Settings() {
     authFetch(`${API_BASE}/local-presence`).then(r => r.json()).then(setNumbers).catch(() => {});
     authFetch(`${API_BASE}/settings/status`).then(r => r.json()).then(setStatus).catch(() => {});
     authFetch(`${API_BASE}/settings/ngrok`).then(r => r.json()).then(d => setNgrok(d.ngrokUrl || '')).catch(() => {});
+    authFetch(`${API_BASE}/agent/settings`).then(r => r.json()).then(d => setAgentName(d.agentName || '')).catch(() => {});
   }, []);
 
   // ── Account save ────────────────────────────────────────────────────────────
@@ -64,15 +66,32 @@ export default function Settings() {
     const body: any = {};
     if (name !== user?.name) body.name = name;
     if (password) body.password = password;
-    if (!Object.keys(body).length) { setSavingAcct(false); toast.info('Nothing changed'); return; }
-    const r = await authFetch(`${API_BASE}/auth/me`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
+    const hasProfileChanges = Object.keys(body).length > 0;
+    if (hasProfileChanges) {
+      const r = await authFetch(`${API_BASE}/auth/me`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) {
+        const d = await r.json();
+        setSavingAcct(false);
+        toast.error(d.error || 'Update failed');
+        return;
+      }
+      setPassword('');
+      refresh();
+    }
+    if (agentName) {
+      await authFetch(`${API_BASE}/agent/settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ agentName }),
+      });
+    }
     setSavingAcct(false);
-    if (r.ok) { toast.success('Account updated'); setPassword(''); refresh(); }
-    else { const d = await r.json(); toast.error(d.error || 'Update failed'); }
+    if (hasProfileChanges || agentName) { toast.success('Account updated'); }
+    else { toast.info('Nothing changed'); }
   };
 
   // ── Buy number ──────────────────────────────────────────────────────────────
@@ -185,6 +204,9 @@ export default function Settings() {
           <Section title="Profile">
             <Field label="Full Name">
               <input value={name} onChange={e => setName(e.target.value)} style={inputSt} />
+            </Field>
+            <Field label="Agent Name">
+              <input value={agentName} onChange={e => setAgentName(e.target.value)} placeholder="Name used in SMS and emails" style={inputSt} />
             </Field>
             <Field label="Email">
               <input value={user?.email || ''} disabled style={{ ...inputSt, color: '#9ca3af', background: '#f9fafb' }} />

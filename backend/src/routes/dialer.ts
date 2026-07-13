@@ -24,6 +24,7 @@ import crypto from 'crypto';
 import prisma from '../db';
 import { pickCallerId } from './localPresence';
 import { io } from '../socket';
+import { getAgentName } from '../agent/settings';
 
 const router = Router();       // auth-protected endpoints
 export const webhooks = Router(); // public Twilio webhook endpoints (no auth)
@@ -226,7 +227,7 @@ webhooks.post('/vm-play-twiml/:userId', async (req: Request, res: Response) => {
   const { userId } = req.params;
   const twiml = new twilio.twiml.VoiceResponse();
   const fallbackText = process.env.VOICEMAIL_SCRIPT ||
-    `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+    `Hi, this is ${await getAgentName()} calling about your property. ` +
     `Please give me a call back when you get a chance. Thank you!`;
 
   try {
@@ -635,7 +636,7 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
   // Build voicemail TwiML INLINE (no URL fetch = no Render cold-start timeout).
   // Check voicemailData format from DB to decide Play vs TTS.
   const fallbackText = process.env.VOICEMAIL_SCRIPT ||
-    `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+    `Hi, this is ${await getAgentName()} calling about your property. ` +
     `Please give me a call back when you get a chance. Thank you!`;
 
   let vmTwiml: string;
@@ -792,7 +793,7 @@ router.post('/manual-vm-drop', async (req: Request, res: Response) => {
   }
 
   const fallbackText = process.env.VOICEMAIL_SCRIPT ||
-    `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+    `Hi, this is ${await getAgentName()} calling about your property. ` +
     `Please give me a call back when you get a chance. Thank you!`;
 
   let vmTwiml: string;

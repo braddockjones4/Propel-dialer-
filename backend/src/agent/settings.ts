@@ -36,6 +36,15 @@ export async function getAgentSettings(force = false): Promise<AgentConfig> {
   return cache;
 }
 
+export async function getAgentName(): Promise<string> {
+  try {
+    const cfg = await getAgentSettings();
+    return cfg.agentName || process.env.AGENT_NAME || 'your agent';
+  } catch {
+    return process.env.AGENT_NAME || 'your agent';
+  }
+}
+
 export async function updateAgentSettings(patch: Partial<AgentConfig>): Promise<AgentConfig> {
   // Whitelist writable fields
   const allowed: (keyof AgentConfig)[] = [

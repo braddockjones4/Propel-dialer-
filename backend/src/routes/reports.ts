@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../db';
+import { getAgentName } from '../agent/settings';
 
 const router = Router();
 const db = prisma as any;
@@ -119,7 +120,7 @@ router.get('/daily', async (req: Request, res: Response) => {
 
     res.json({
       date:      start.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
-      agentName: process.env.AGENT_NAME || 'Braddock',
+      agentName: await getAgentName(),
       summary: { totalCalls: calls.length, totalDuration, avgDuration, hotLeads, callbacks, textsSent: messages.length, newContacts, appointments: appointments.length, avgAiScore: avgScore },
       dispositions,
       calls: calls.map((c: any) => ({

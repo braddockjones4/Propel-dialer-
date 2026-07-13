@@ -3,6 +3,7 @@
 
 import twilio from 'twilio';
 import { getSequenceByTrigger, SequenceTrigger } from './sequenceStore';
+import { getAgentName } from './agent/settings';
 
 // Stub — in production this comes from your CRM/contacts database
 export interface ContactContext {
@@ -12,10 +13,9 @@ export interface ContactContext {
   phone: string; // prospect's phone
 }
 
-// Agent info from env
-function getAgentContext() {
+async function getAgentContext() {
   return {
-    agentName: process.env.AGENT_NAME || 'Your Agent',
+    agentName: await getAgentName(),
     agentPhone: process.env.AGENT_PHONE || process.env.TWILIO_CALLER_ID || '',
   };
 }
@@ -43,7 +43,7 @@ export async function runFollowUpSequence(
     firstName: contact.firstName,
     fullName: contact.fullName,
     address: contact.address,
-    ...getAgentContext(),
+    ...await getAgentContext(),
   };
 
   for (const step of sequence.steps) {

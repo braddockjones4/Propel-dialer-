@@ -8,6 +8,7 @@
 
 import { Router, Request, Response } from 'express';
 import prisma from '../db';
+import { getAgentName } from '../agent/settings';
 
 const router = Router();
 
@@ -22,8 +23,6 @@ interface AiScript {
   tip: string;
 }
 
-const AGENT_NAME = process.env.AGENT_NAME || 'Braddock';
-
 async function generateScript(contactId: string): Promise<AiScript> {
   const contact = await prisma.contact.findUnique({
     where:   { id: contactId },
@@ -36,10 +35,11 @@ async function generateScript(contactId: string): Promise<AiScript> {
   if (!contact) throw new Error('Contact not found');
 
   const { ANTHROPIC_API_KEY } = process.env;
+  const agentName = await getAgentName();
 
   // Fallback scripts if no Anthropic key
   if (!ANTHROPIC_API_KEY) {
-    return getStaticScript(contact.source, contact.firstName, contact.address ?? undefined);
+    return getStaticScript(contact.source, contact.firstName, agentName, contact.address ?? undefined);
   }
 
   const callHistory = contact.calls
@@ -48,7 +48,7 @@ async function generateScript(contactId: string): Promise<AiScript> {
 
   const textReplies = contact.messages.map(m => `"${m.body}"`).join(', ') || 'None';
 
-  const prompt = `You are an elite real estate sales coach writing a personalized call script for agent ${AGENT_NAME}.
+  const prompt = `You are an elite real estate sales coach writing a personalized call script for agent ${agentName}.
 
 CONTACT PROFILE:
 - Name: ${contact.firstName} ${contact.lastName}
@@ -96,7 +96,7 @@ Return ONLY valid JSON:
     return parsed as AiScript;
   } catch (err: any) {
     console.warn('[AIScript] Anthropic error, using static script:', err.message);
-    return getStaticScript(contact.source, contact.firstName, contact.address ?? undefined);
+    return getStaticScript(contact.source, contact.firstName, agentName, contact.address ?? undefined);
   }
 }
 
@@ -111,10 +111,10 @@ function getSourceDescription(source: string): string {
   return map[source] || source;
 }
 
-function getStaticScript(source: string, firstName: string, address?: string): AiScript {
+function getStaticScript(source: string, firstName: string, agentName: string, address?: string): AiScript {
   const scripts: Record<string, AiScript> = {
     expired: {
-      opener: `Hi ${firstName}, this is ${AGENT_NAME} calling about ${address || 'your property'}. I noticed your listing came off the market and I had a few ideas I wanted to share with you real quick. Do you have just two minutes?`,
+      opener: `Hi ${firstName}, this is ${agentName} calling about ${address || 'your property'}. I noticed your listing came off the market and I had a few ideas I wanted to share with you real quick. Do you have just two minutes?`,
       objections: [
         { trigger: 'Not interested', response: `I completely understand. Before you go, can I ask — are you still hoping to sell, or have your plans changed?` },
         { trigger: 'Taking a break', response: `That makes a lot of sense. When you\'re ready to move forward, what would be most important to you in the agent you choose?` },
@@ -124,7 +124,7 @@ function getStaticScript(source: string, firstName: string, address?: string): A
       tip: `Expired listings are frustrated — acknowledge their pain first before pitching solutions.`,
     },
     fsbo: {
-      opener: `Hi ${firstName}, my name\'s ${AGENT_NAME} and I work with a lot of buyers actively searching in your area. I saw your home at ${address || 'your address'} for sale and wanted to reach out — would you be open to working with a buyer\'s agent?`,
+      opener: `Hi ${firstName}, my name\'s ${agentName} and I work with a lot of buyers actively searching in your area. I saw your home at ${address || 'your address'} for sale and wanted to reach out — would you be open to working with a buyer\'s agent?`,
       objections: [
         { trigger: 'Don\'t want to pay commission', response: `Totally fair. If I brought you a pre-qualified buyer who\'d pay your full asking price, would saving time and stress be worth a conversation?` },
         { trigger: 'Already have showings', response: `That\'s great news! My buyers are very serious and move fast. Could I schedule a showing this week?` },
@@ -134,7 +134,7 @@ function getStaticScript(source: string, firstName: string, address?: string): A
       tip: `FSBOs care about money, not service. Lead with buyer access and net proceeds, not your credentials.`,
     },
     circle: {
-      opener: `Hi ${firstName}, this is ${AGENT_NAME}, I\'m a real estate agent who just helped a neighbor sell nearby. I\'m calling because I have buyers who love this neighborhood and not enough homes for them. Have you thought at all about selling in the next 6-12 months?`,
+      opener: `Hi ${firstName}, this is ${agentName}, I\'m a real estate agent who just helped a neighbor sell nearby. I\'m calling because I have buyers who love this neighborhood and not enough homes for them. Have you thought at all about selling in the next 6-12 months?`,
       objections: [
         { trigger: 'Not thinking about it', response: `No problem! Out of curiosity, if prices were right, would it even be something you\'d consider? Home values in your area have moved a lot.` },
         { trigger: 'Maybe in a few years', response: `That makes sense. Would it help to know what your home is worth now so you can plan? I can give you a quick estimate at no cost.` },

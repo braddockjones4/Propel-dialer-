@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
 import prisma from '../db';
+import { getAgentName } from '../agent/settings';
 
 const router = Router();
 
@@ -29,8 +30,8 @@ async function computeNextAction(contactId: string): Promise<NextAction> {
 
   if (!contact) throw new Error('Contact not found');
 
-  const { OPENAI_API_KEY, AGENT_NAME } = process.env;
-  const agentName = AGENT_NAME || 'Braddock';
+  const { OPENAI_API_KEY } = process.env;
+  const agentName = await getAgentName();
 
   const lastCall = contact.calls[0];
   const lastDisp = lastCall?.disposition || 'none';

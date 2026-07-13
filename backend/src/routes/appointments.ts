@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
 import prisma from '../db';
+import { getAgentName } from '../agent/settings';
 
 const router = Router();
 const db = prisma as any; // cast so missing models don't cause TS errors before prisma generate
@@ -62,7 +63,7 @@ router.post('/', async (req: Request, res: Response) => {
         try {
           const date = new Date(scheduledAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
           const time = new Date(scheduledAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-          const agentName = process.env.AGENT_NAME || 'Braddock';
+          const agentName = await getAgentName();
           const msg = `Hi ${appt.contact.firstName}! This confirms your appointment with ${agentName} on ${date} at ${time}${location ? ` at ${location}` : ''}. Reply STOP to opt out.`;
           const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
           await client.messages.create({ to: appt.contact.phone, from: TWILIO_CALLER_ID, body: msg });

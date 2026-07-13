@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
 import prisma from '../db';
+import { getAgentName } from '../agent/settings';
 
 const router = Router();
 
@@ -20,10 +21,12 @@ router.post('/send', async (req: Request, res: Response) => {
 
   if (!message?.trim()) { res.status(400).json({ error: 'Message is required' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, AGENT_NAME, AGENT_PHONE } = process.env;
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, AGENT_PHONE } = process.env;
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
+
+  const agentDisplayName = await getAgentName();
 
   // Resolve contacts
   let contacts;
@@ -52,7 +55,7 @@ router.post('/send', async (req: Request, res: Response) => {
         lastName:   contact.lastName,
         address:    contact.address || 'your property',
         city:       contact.city || '',
-        agentName:  AGENT_NAME || 'Braddock',
+        agentName:  agentDisplayName,
         agentPhone: AGENT_PHONE || TWILIO_CALLER_ID,
       });
 
@@ -108,10 +111,12 @@ router.post('/ab-send', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Both message variants required' }); return;
   }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, AGENT_NAME, AGENT_PHONE } = process.env;
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, AGENT_PHONE } = process.env;
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
+
+  const agentDisplayName = await getAgentName();
 
   const contacts = await prisma.contact.findMany({
     where: {
@@ -141,7 +146,7 @@ router.post('/ab-send', async (req: Request, res: Response) => {
           lastName:  contact.lastName,
           address:   contact.address || 'your property',
           city:      contact.city || '',
-          agentName: AGENT_NAME || 'Braddock',
+          agentName: agentDisplayName,
           agentPhone: AGENT_PHONE || TWILIO_CALLER_ID,
         });
         const params: any = { body, from: TWILIO_CALLER_ID, to: contact.phone! };
@@ -177,7 +182,8 @@ router.post('/ab-send', async (req: Request, res: Response) => {
 router.post('/preview', async (req: Request, res: Response) => {
   try {
     const { message, filter } = req.body;
-    const { AGENT_NAME, AGENT_PHONE, TWILIO_CALLER_ID } = process.env;
+    const { AGENT_PHONE, TWILIO_CALLER_ID } = process.env;
+    const agentDisplayName = await getAgentName();
 
     const count = await prisma.contact.count({
       where: {
@@ -198,7 +204,7 @@ router.post('/preview', async (req: Request, res: Response) => {
           lastName:   sample.lastName,
           address:    sample.address || 'your property',
           city:       sample.city || '',
-          agentName:  AGENT_NAME || 'Braddock',
+          agentName:  agentDisplayName,
           agentPhone: AGENT_PHONE || TWILIO_CALLER_ID || '',
         })
       : message;
