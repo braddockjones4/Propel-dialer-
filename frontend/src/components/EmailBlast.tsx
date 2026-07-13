@@ -11,6 +11,7 @@ interface Contact {
   lastName: string;
   email?: string;
   contactGroup?: string;
+  source?: string;
 }
 
 interface GmailStatus {
@@ -42,6 +43,8 @@ export default function EmailBlast() {
   const [recipientMode, setRecipientMode] = useState<RecipientMode>('all');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set());
+  const [selectSearch,  setSelectSearch]  = useState('');
+  const [gmailOnly,     setGmailOnly]     = useState(false);
   const [subject, setSubject]             = useState('');
   const [body, setBody]                   = useState('');
   const [result, setResult]               = useState<BlastResult | null>(null);
@@ -371,30 +374,71 @@ export default function EmailBlast() {
               </div>
             )}
 
-            {recipientMode === 'select' && (
-              <div style={{ maxHeight: 220, overflowY: 'auto', border: '1.5px solid rgba(0,0,0,0.08)', borderRadius: 8 }}>
-                {withEmail.length === 0 ? (
-                  <div style={{ padding: '20px', textAlign: 'center', fontSize: 13, color: GRAY }}>No contacts with email addresses</div>
-                ) : withEmail.map(c => (
-                  <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid rgba(0,0,0,0.04)', cursor: 'pointer' }}>
+            {recipientMode === 'select' && (() => {
+              const filtered = withEmail.filter(c => {
+                const matchesGmail = !gmailOnly || c.source === 'gmail';
+                const q = selectSearch.toLowerCase();
+                const matchesSearch = !q || `${c.firstName} ${c.lastName} ${c.email}`.toLowerCase().includes(q);
+                return matchesGmail && matchesSearch;
+              });
+              return (
+                <div>
+                  {/* Search + filters */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
                     <input
-                      type="checkbox"
-                      checked={selectedIds.has(c.id)}
-                      onChange={e => {
+                      value={selectSearch}
+                      onChange={e => setSelectSearch(e.target.value)}
+                      placeholder="Search by name or email…"
+                      style={{ flex: 1, padding: '7px 12px', borderRadius: 8, border: '1.5px solid rgba(0,0,0,0.1)', fontSize: 12, outline: 'none', fontFamily: 'inherit' }}
+                    />
+                    <button
+                      onClick={() => setGmailOnly(g => !g)}
+                      style={{ padding: '7px 12px', borderRadius: 8, border: `1.5px solid ${gmailOnly ? '#ea4335' : 'rgba(0,0,0,0.1)'}`, background: gmailOnly ? '#fef2f2' : 'transparent', color: gmailOnly ? '#ea4335' : GRAY, fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}
+                    >
+                      Gmail only
+                    </button>
+                    <button
+                      onClick={() => {
                         const next = new Set(selectedIds);
-                        e.target.checked ? next.add(c.id) : next.delete(c.id);
+                        if (filtered.every(c => next.has(c.id))) filtered.forEach(c => next.delete(c.id));
+                        else filtered.forEach(c => next.add(c.id));
                         setSelectedIds(next);
                       }}
-                      style={{ accentColor: GOLD, width: 14, height: 14 }}
-                    />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: BLACK }}>{c.firstName} {c.lastName}</div>
-                      <div style={{ fontSize: 11, color: GRAY }}>{c.email}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
+                      style={{ padding: '7px 12px', borderRadius: 8, border: '1.5px solid rgba(0,0,0,0.1)', background: '#f9fafb', color: BLACK, fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: 'inherit' }}
+                    >
+                      {filtered.length > 0 && filtered.every(c => selectedIds.has(c.id)) ? 'Deselect All' : 'Select All'}
+                    </button>
+                  </div>
+                  {/* List */}
+                  <div style={{ maxHeight: 240, overflowY: 'auto', border: '1.5px solid rgba(0,0,0,0.08)', borderRadius: 8 }}>
+                    {filtered.length === 0 ? (
+                      <div style={{ padding: '20px', textAlign: 'center', fontSize: 13, color: GRAY }}>
+                        {withEmail.length === 0 ? 'No contacts with email addresses' : 'No contacts match your search'}
+                      </div>
+                    ) : filtered.map(c => (
+                      <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid rgba(0,0,0,0.04)', cursor: 'pointer', background: selectedIds.has(c.id) ? 'rgba(201,168,76,0.05)' : '#fff' }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(c.id)}
+                          onChange={e => {
+                            const next = new Set(selectedIds);
+                            e.target.checked ? next.add(c.id) : next.delete(c.id);
+                            setSelectedIds(next);
+                          }}
+                          style={{ accentColor: GOLD, width: 14, height: 14, flexShrink: 0 }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: BLACK }}>{c.firstName} {c.lastName}
+                            {c.source === 'gmail' && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: '#ea4335', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Gmail</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: GRAY, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.email}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Recipient count */}
             <div style={{ marginTop: 14, padding: '10px 14px', background: recipients.length > 0 ? 'rgba(201,168,76,0.06)' : '#fef2f2', borderRadius: 6, border: `1px solid ${recipients.length > 0 ? 'rgba(201,168,76,0.2)' : '#fecaca'}` }}>
