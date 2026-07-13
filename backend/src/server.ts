@@ -57,10 +57,25 @@ initSocket(http);
 initAgentScheduler();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-// CORS: comma-separate multiple origins in FRONTEND_URL (e.g. https://propeldialer.com,https://www.propeldialer.com)
-const rawOrigin = process.env.FRONTEND_URL || '*';
-const allowedOrigin = rawOrigin === '*' ? '*' : rawOrigin.split(',').map(s => s.trim());
-app.use(cors({ origin: allowedOrigin, credentials: false }));
+// CORS: auto-expand FRONTEND_URL to include both www and non-www variants
+function buildCorsOrigins(env: string | undefined): string | string[] {
+  if (!env || env === '*') return '*';
+  const origins = new Set<string>();
+  for (const raw of env.split(',')) {
+    const o = raw.trim();
+    origins.add(o);
+    try {
+      const u = new URL(o);
+      if (u.hostname.startsWith('www.')) {
+        origins.add(`${u.protocol}//${u.hostname.slice(4)}`);
+      } else {
+        origins.add(`${u.protocol}//www.${u.hostname}`);
+      }
+    } catch {}
+  }
+  return [...origins];
+}
+app.use(cors({ origin: buildCorsOrigins(process.env.FRONTEND_URL), credentials: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
