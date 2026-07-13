@@ -672,7 +672,7 @@ export default function Dialer() {
           {/* ── Twilio not configured warning ── */}
           {twilioReady === false && (
             <div style={{ background: '#fff8ed', border: '1px solid #f5c87a', borderRadius: 10, padding: '14px 16px', marginBottom: 20, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-              <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+              <span style={{ width:18,height:18,flexShrink:0,borderRadius:4,background:"rgba(239,68,68,0.12)",display:"inline-flex",alignItems:"center",justifyContent:"center" }}><svg width="12" height="12" fill="none" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="#dc2626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#92400e', marginBottom: 3 }}>Twilio not configured</div>
                 <div style={{ fontSize: 12, color: '#b45309', lineHeight: 1.5 }}>
@@ -832,7 +832,7 @@ export default function Dialer() {
                 {/* voicemailReady=false means stored as webm (pre-WAV fix) — Twilio can't play it */}
                 {settings.voicemailReady === false ? (
                   <div style={{ padding: '10px 14px', background: '#fef9c3', borderRadius: 10, marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#854d0e' }}>⚠️ Re-record needed</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#854d0e' }}>Re-record needed</span>
                     <span style={{ fontSize: 12, color: '#713f12', lineHeight: 1.5 }}>
                       Your saved voicemail is in a format that Twilio can't play. Please re-record it so automatic drops work correctly.
                     </span>
@@ -1022,7 +1022,7 @@ export default function Dialer() {
         <span style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>{index + 1} / {contacts.length}</span>
         <button onClick={() => setVmModalOpen(true)} title="Re-record voicemail"
           style={{ fontSize: 14, color: settings.voicemailReady === false ? '#f59e0b' : '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>
-          🎙
+          
         </button>
         <button onClick={() => setView('setup')}
           style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}>
@@ -1160,16 +1160,16 @@ export default function Dialer() {
             {(() => {
               const outcome: Record<string, { icon: string; text: string; bg: string; color: string }> = {
                 'no-answer':   { icon: '📵', text: 'No answer — contact did not pick up', bg: '#f3f4f6', color: '#374151' },
-                'call-ended':  { icon: '📞', text: 'Call ended — contact answered and hung up', bg: '#f0fdf4', color: '#15803d' },
+                'call-ended':  { icon: '', text: 'Call ended — contact answered and hung up', bg: '#f0fdf4', color: '#15803d' },
                 'vm-dropped':  { icon: '📨', text: 'Voicemail dropped successfully', bg: '#fefce8', color: '#92400e' },
-                ended:         { icon: '📞', text: 'Call ended', bg: '#f3f4f6', color: '#374151' },
-                error:         { icon: '⚠️', text: 'Call failed to connect', bg: '#fef2f2', color: '#dc2626' },
+                ended:         { icon: '', text: 'Call ended', bg: '#f3f4f6', color: '#374151' },
+                error:         { icon: '', text: 'Call failed to connect', bg: '#fef2f2', color: '#dc2626' },
               };
-              const o = outcome[bridgeStatus] || (callStatus === 'completed' ? { icon: '📞', text: 'Call ended', bg: '#f3f4f6', color: '#374151' } : null);
+              const o = outcome[bridgeStatus] || (callStatus === 'completed' ? { icon: '', text: 'Call ended', bg: '#f3f4f6', color: '#374151' } : null);
               if (!o) return null;
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, background: o.bg, marginBottom: 14 }}>
-                  <span style={{ fontSize: 16 }}>{o.icon}</span>
+                  {o.icon ? <span style={{ fontSize: 16 }}>{o.icon}</span> : null}
                   <span style={{ fontSize: 13, fontWeight: 500, color: o.color }}>{o.text}</span>
                 </div>
               );
@@ -1277,7 +1277,7 @@ export default function Dialer() {
             {settings.voicemailReady === false && recState === 'idle' && (
               <>
                 <div style={{ padding: '10px 14px', background: '#fef9c3', borderRadius: 10, marginBottom: 14 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#854d0e', marginBottom: 4 }}>⚠️ Re-record needed</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#854d0e', marginBottom: 4 }}>Re-record needed</div>
                   <div style={{ fontSize: 12, color: '#713f12', lineHeight: 1.5 }}>Your saved voicemail is in a format Twilio can't play. Re-record it to enable automatic drops.</div>
                 </div>
                 <button onClick={startRecording}

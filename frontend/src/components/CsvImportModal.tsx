@@ -313,7 +313,7 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
         <div style={{ display: 'flex', borderBottom: '1px solid #f3f4f6', padding: '0 16px', overflowX: 'auto' }}
              className="hide-scrollbar">
           {([
-            { id: 'vcf' as Mode, label: '📱 From Phone', sub: 'iPhone or Android contacts' },
+            { id: 'vcf' as Mode, label: 'From Phone', sub: 'iPhone or Android contacts' },
             { id: 'csv' as Mode, label: '📄 From CSV',   sub: 'Spreadsheet or list export'  },
           ] as { id: Mode; label: string; sub: string }[]).map(tab => (
             <button key={tab.id} onClick={() => switchMode(tab.id)} style={{
@@ -349,7 +349,7 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
                     cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14,
                   }}
                 >
-                  <span style={{ fontSize: 28, flexShrink: 0 }}>☁️</span>
+                  <span style={{ width:36,height:36,flexShrink:0,borderRadius:8,background:"rgba(0,122,255,0.08)",display:"inline-flex",alignItems:"center",justifyContent:"center" }}><svg width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" stroke="#007aff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
                   <div style={{ textAlign: 'left', flex: 1 }}>
                     <div style={{ fontSize: 15, fontWeight: 700, color: '#0071e3', letterSpacing: '0.01em' }}>
                       Connect iCloud Directly
@@ -438,7 +438,7 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
                         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                       }}
                     >
-                      {icloudLoading ? '⏳  Connecting to iCloud…' : '☁️  Import All iCloud Contacts'}
+                      {icloudLoading ? 'Connecting to iCloud…' : 'Import All iCloud Contacts'}
                     </button>
                   </div>
                 )}
@@ -494,11 +494,11 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
                   textDecoration: 'none', color: '#0369a1', boxSizing: 'border-box',
                 }}
               >
-                <span style={{ fontSize: 20 }}>☁️</span>
+                <span style={{ width:28,height:28,borderRadius:6,background:"rgba(0,122,255,0.08)",display:"inline-flex",alignItems:"center",justifyContent:"center" }}><svg width="14" height="14" fill="none" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" stroke="#007aff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>Export ALL contacts at once — iCloud.com</div>
                   <div style={{ fontSize: 11, color: '#0ea5e9', marginTop: 2, lineHeight: 1.5 }}>
-                    Contacts → ⚙️ → Select All → Export vCard → tap "Select .vcf File" above
+                    Contacts → Settings → Select All → Export vCard → tap "Select .vcf File" above
                   </div>
                 </div>
                 <span style={{ fontSize: 16, color: '#7dd3fc', flexShrink: 0 }}>↗</span>
@@ -512,7 +512,7 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
                 {[
                   { icon: '💻', text: 'On Mac: Open Contacts → File → Export → Export vCard → import here (exports ALL contacts including "On My iPhone")' },
                   { icon: '📲', text: 'On iPhone: Open the Contacts app → tap a contact → scroll down → "Share Contact"' },
-                  { icon: '🗂️', text: 'Tap "Save to Files" → this saves a .vcf file' },
+                  { icon: '', text: 'Tap "Save to Files" — this saves a .vcf file' },
                   { icon: '📂', text: 'Tap "Select .vcf File" above and choose it' },
                 ].map((s, i) => (
                   <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: i < 3 ? 10 : 0 }}>
@@ -634,7 +634,7 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
               </div>
               {!Object.values(mapping).includes('phone') && (
                 <div style={{ fontSize: 11, color: '#ef4444', marginTop: 10, display: 'flex', gap: 6 }}>
-                  <span>⚠</span> Map a column to Phone before continuing
+                  Map a Phone column before continuing
                 </div>
               )}
             </div>
@@ -685,12 +685,12 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
               )}
               {result.noPhone != null && result.noPhone > 0 && (
                 <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 6 }}>
-                  ⚠️ {result.noPhone} contacts skipped — no phone number in iCloud
+                  {result.noPhone} contacts skipped — no phone number found
                 </div>
               )}
               {result.fromIcloud && (result.totalFetched ?? 0) < 100 && (
                 <div style={{ marginTop: 20, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 14px', textAlign: 'left' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>📱 Missing contacts?</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>Missing contacts?</div>
                   <div style={{ fontSize: 12, color: '#78350f', lineHeight: 1.6 }}>
                     iCloud only syncs contacts you've chosen to store there. Contacts saved as <strong>"On My iPhone"</strong> (local storage) are not accessible via iCloud.
                   </div>

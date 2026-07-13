@@ -635,7 +635,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             className="hidden md:flex"
             style={{ padding: '6px 12px', borderRadius: 7, border: '1.5px solid #0071e3', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', background: icloudSyncing ? '#e8f2fd' : '#f0f7ff', color: '#0071e3', cursor: icloudSyncing ? 'default' : 'pointer', whiteSpace: 'nowrap', alignItems: 'center', gap: 5 }}
           >
-            {icloudSyncing ? '⏳' : '☁️'} {icloudSyncing ? 'Syncing…' : 'Sync iCloud'}
+            {icloudSyncing ? 'Syncing…' : 'Sync iCloud'}
           </button>
         )}
         <button
@@ -765,7 +765,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                 background: '#f0f7ff', cursor: icloudSyncing ? 'default' : 'pointer', whiteSpace: 'nowrap',
               }}
             >
-              {icloudSyncing ? '⏳' : '☁️'}
+              
             </button>
           )}
           <button
@@ -821,7 +821,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             /* ── Gmail tab ── */
             gmailContactsList.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '48px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-                <div style={{ fontSize: 32, opacity: 0.25 }}>✉️</div>
+                <div style={{ width:36,height:36,borderRadius:8,background:"rgba(234,67,53,0.08)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto" }}><svg width="18" height="18" fill="none" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2" stroke="#ea4335" strokeWidth="1.5"/><path d="M2 7l10 7 10-7" stroke="#ea4335" strokeWidth="1.5"/></svg></div>
                 <div style={{ fontSize: 13, color: '#9ca3af' }}>No Gmail contacts yet</div>
                 <button onClick={openGmailImport} style={{ padding: '12px 24px', borderRadius: 10, border: 'none', background: '#ea4335', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                   Import Gmail Contacts
@@ -830,7 +830,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             ) : (
               <>
                 <button onClick={openGmailImport} style={{ width: '100%', marginBottom: 10, padding: '10px', borderRadius: 8, border: '1.5px dashed rgba(234,67,53,0.4)', fontSize: 12, fontWeight: 600, color: '#ea4335', background: 'transparent', cursor: 'pointer' }}>
-                  + Import More Gmail Contacts
+                  Import More
                 </button>
                 {gmailContactsList.map(c => (
                   <div
@@ -868,7 +868,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                       </div>
                       {c.email && (
                         <div style={{ fontSize: 12, color: '#ea4335', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          ✉ {c.email}
+                          {c.email}
                         </div>
                       )}
                       {c.phone && (
@@ -883,7 +883,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
 
           ) : mobileCards.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '48px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
-              <div style={{ fontSize: 32, opacity: 0.25 }}>📋</div>
+              <div style={{ width:36,height:36,borderRadius:8,background:"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto" }}><svg width="18" height="18" fill="none" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2" stroke="#9ca3af" strokeWidth="1.5"/><path d="M8 7h8M8 11h8M8 15h5" stroke="#9ca3af" strokeWidth="1.5" strokeLinecap="round"/></svg></div>
               <div style={{ fontSize: 13, color: '#9ca3af' }}>
                 {search ? 'No contacts match your search' : 'No contacts in this group yet'}
               </div>
@@ -1061,7 +1061,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                             onClick={() => startRename(groupObj)}
                             title="Rename / recolor"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', padding: '2px 5px', borderRadius: 4, fontSize: 12, lineHeight: 1 }}
-                          >✏️</button>
+                          >Edit</button>
                           <button
                             onClick={() => deleteGroup(groupObj)}
                             title="Delete group"
@@ -1181,7 +1181,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
                               {c.calls && c.calls.length > 0 && (
                                 <span style={{ fontSize: 10, color: '#9ca3af' }}>
-                                  📞 {c.calls.length}
+                                  {c.calls.length} calls
                                 </span>
                               )}
                               {c.leadScore != null && (
@@ -1226,7 +1226,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                       color: '#ea4335', background: 'transparent', cursor: 'pointer',
                     }}
                   >
-                    + Import More
+                    Import More
                   </button>
                 </div>
                 <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
@@ -1262,7 +1262,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
                         </div>
                         {c.email && (
                           <div style={{ fontSize: 11, color: '#ea4335', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            ✉ {c.email}
+                            {c.email}
                           </div>
                         )}
                         {c.phone && (
@@ -1787,7 +1787,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             {/* People API not enabled */}
             {!gmailLoading && gmailNeedsPeopleApi && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '32px 0', textAlign: 'center' }}>
-                <div style={{ fontSize: 32 }}>⚙️</div>
+                <div style={{ width:40,height:40,borderRadius:10,background:"rgba(0,0,0,0.05)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto" }}><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" stroke="#6b7280" strokeWidth="1.5"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="#6b7280" strokeWidth="1.5" strokeLinecap="round"/></svg></div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: DARK }}>Enable the Google People API</div>
                 <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
                   Your Google Cloud project needs the People API enabled to read contacts. It takes 30 seconds:
@@ -1821,7 +1821,7 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             {/* Error */}
             {!gmailLoading && gmailError && (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '32px 0', textAlign: 'center' }}>
-                <div style={{ fontSize: 32 }}>⚠️</div>
+                <div style={{ width:40,height:40,borderRadius:10,background:"rgba(239,68,68,0.08)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto" }}><svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></div>
                 <div style={{ fontSize: 14, color: '#dc2626' }}>{gmailError}</div>
                 <button onClick={openGmailImport} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: DARK, color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Try again</button>
               </div>

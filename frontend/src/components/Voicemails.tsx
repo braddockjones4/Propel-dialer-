@@ -179,7 +179,7 @@ export default function Voicemails() {
         {/* Status banner */}
         {voicemailReady === false && recState === 'idle' && (
           <div style={{ background: '#fef9c3', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+            <span style={{ width:20,height:20,flexShrink:0,display:"inline-flex",alignItems:"center",justifyContent:"center" }}><svg width="14" height="14" fill="none" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#854d0e', marginBottom: 3 }}>Re-record needed</div>
               <div style={{ fontSize: 12, color: '#713f12', lineHeight: 1.5 }}>
@@ -291,8 +291,8 @@ export default function Voicemails() {
             {[
               { icon: '⏱', text: 'Keep it under 30 seconds — shorter is better' },
               { icon: '🗣', text: 'State your name and why you\'re calling right away' },
-              { icon: '📞', text: 'Include your callback number clearly, spoken slowly' },
-              { icon: '🏠', text: 'Reference the property or area to personalize it' },
+              { icon: '', text: 'Include your callback number clearly, spoken slowly' },
+              { icon: '', text: 'Reference the property or area to personalize it' },
               { icon: '😊', text: 'Sound warm and confident — energy transfers through voice' },
             ].map(({ icon, text }) => (
               <div key={text} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>

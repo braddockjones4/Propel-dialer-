@@ -24,14 +24,14 @@ function persistConversations(convs: Conversation[]): void {
 
 // ── Suggestions ────────────────────────────────────────────────────────────────
 const SUGGESTIONS = [
-  { icon: '📊', text: 'What does my pipeline look like right now?' },
-  { icon: '🗂️', text: 'Show me all my contact groups' },
-  { icon: '🔥', text: 'Find all my hot leads' },
-  { icon: '➕', text: 'Create a group called "Top Prospects"' },
-  { icon: '📌', text: 'Assign all Gmail contacts to an Email List group' },
-  { icon: '💡', text: 'What should I focus on today?' },
-  { icon: '📞', text: 'Group all 410 area code contacts together' },
-  { icon: '📝', text: 'Add a note to a contact' },
+  { icon: '', text: 'What does my pipeline look like right now?' },
+  { icon: '', text: 'Show me all my contact groups' },
+  { icon: '', text: 'Find all my hot leads' },
+  { icon: '', text: 'Create a group called "Top Prospects"' },
+  { icon: '', text: 'Assign all Gmail contacts to an Email List group' },
+  { icon: '', text: 'What should I focus on today?' },
+  { icon: '', text: 'Group all 410 area code contacts together' },
+  { icon: '', text: 'Add a note to a contact' },
 ];
 
 function uid() { return Math.random().toString(36).slice(2,10); }
@@ -126,7 +126,7 @@ export default function AgentChat() {
       const r = await authFetch(`${API_BASE}/agent/chat`, { method:'POST', body:JSON.stringify({ messages:history }) });
       if (!r.ok) {
         const err = await r.json().catch(()=>({ error:'Network error' }));
-        setMessages(prev=>prev.map(m=>m.thinking ? { ...m, thinking:false, content:`⚠️ ${err.error||'Something went wrong.'}` } : m));
+        setMessages(prev=>prev.map(m=>m.thinking ? { ...m, thinking:false, content:`${err.error||'Something went wrong. Please try again.'}` } : m));
         return;
       }
       const data = await r.json() as { reply:string; actions:AgentAction[]; usedLlm:boolean };
@@ -135,7 +135,7 @@ export default function AgentChat() {
       const savedId = saveMessages(finalMsgs.filter(m=>!m.thinking), currentId, firstUser);
       if (!currentId) setCurrentId(savedId);
     } catch {
-      setMessages(prev=>prev.map(m=>m.thinking ? { ...m, thinking:false, content:'⚠️ Network error. Please try again.' } : m));
+      setMessages(prev=>prev.map(m=>m.thinking ? { ...m, thinking:false, content:'Network error — please try again.' } : m));
     } finally {
       setLoading(false);
     }
@@ -296,7 +296,7 @@ export default function AgentChat() {
                     onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.borderColor='rgba(201,168,76,0.4)';(e.currentTarget as HTMLElement).style.background='rgba(201,168,76,0.02)';}}
                     onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.borderColor='rgba(0,0,0,0.08)';(e.currentTarget as HTMLElement).style.background='#fff';}}
                   >
-                    <span style={{ fontSize:isMobile?20:17, flexShrink:0 }}>{s.icon}</span>
+                    {s.icon && <span style={{ fontSize:16, flexShrink:0 }}>{s.icon}</span>}
                     <span style={{ fontSize:isMobile?13.5:12, color:'#374151', lineHeight:1.45, fontWeight:400 }}>{s.text}</span>
                   </button>
                 ))}
@@ -319,7 +319,7 @@ export default function AgentChat() {
                   <div style={{ display:'flex', flexDirection:'column', gap:4, width:'100%' }}>
                     {msg.actions.map((a,i) => (
                       <div key={i} style={{ display:'flex', alignItems:'center', gap:7, padding:'6px 11px', borderRadius:8, background:`${a.badge?.color||'#9ca3af'}12`, border:`1px solid ${a.badge?.color||'#9ca3af'}28` }}>
-                        <span style={{ fontSize:13, flexShrink:0 }}>{a.badge?.icon||'⚡'}</span>
+                        {a.badge?.icon ? <span style={{ fontSize:13, flexShrink:0 }}>{a.badge.icon}</span> : null}
                         <span style={{ fontSize:11.5, color:'#374151', fontWeight:500, flex:1 }}>{a.badge?.label||a.summary}</span>
                         <span style={{ fontSize:9, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase', color:a.success?'#22c55e':'#ef4444', background:a.success?'#dcfce7':'#fee2e2', borderRadius:5, padding:'2px 7px' }}>{a.success?'Done':'Failed'}</span>
                       </div>

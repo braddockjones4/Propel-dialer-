@@ -19,11 +19,11 @@ const US_STATES = [
 type Tab = 'account' | 'numbers' | 'integrations' | 'billing' | 'team';
 
 const TAB_LABELS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'account',      label: 'Account',      icon: '👤' },
-  { id: 'numbers',      label: 'Phone Numbers', icon: '📱' },
-  { id: 'integrations', label: 'Integrations',  icon: '🔌' },
-  { id: 'billing',      label: 'Billing',       icon: '💳' },
-  { id: 'team',         label: 'Team',          icon: '👥' },
+  { id: 'account',      label: 'Account',      icon: '' },
+  { id: 'numbers',      label: 'Phone Numbers', icon: '' },
+  { id: 'integrations', label: 'Integrations',  icon: '' },
+  { id: 'billing',      label: 'Billing',       icon: '' },
+  { id: 'team',         label: 'Team',          icon: '' },
 ];
 
 export default function Settings() {
@@ -193,7 +193,7 @@ export default function Settings() {
               marginBottom: -1, whiteSpace: 'nowrap',
             }}
           >
-            {icon} {label}
+            {icon ? `${icon} ` : ''}{label}
           </button>
         ))}
       </div>
