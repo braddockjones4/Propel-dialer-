@@ -167,7 +167,7 @@ export default function AgentChat() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ height: CHAT_HEIGHT, display:'flex', overflow:'hidden', background:'#f7f7f7', position:'relative' }}>
+    <div className="full-page-h" style={{ display:'flex', overflow:'hidden', background:'#f7f7f7', position:'relative' }}>
 
       {/* Backdrop */}
       {sidebarOpen && isMobile && (
