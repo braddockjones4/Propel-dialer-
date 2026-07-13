@@ -28,9 +28,9 @@ const SUGGESTIONS = [
   { icon: '🗂️', text: 'Show me all my contact groups' },
   { icon: '🔥', text: 'Find all my hot leads' },
   { icon: '➕', text: 'Create a group called "Top Prospects"' },
-  { icon: '📌', text: 'Assign all hot leads to "Hot Leads" group' },
-  { icon: '💬', text: 'Send a follow-up text to a contact' },
-  { icon: '📅', text: 'Book an appointment for tomorrow at 2pm' },
+  { icon: '📌', text: 'Assign all Gmail contacts to an Email List group' },
+  { icon: '💡', text: 'What should I focus on today?' },
+  { icon: '📞', text: 'Group all 410 area code contacts together' },
   { icon: '📝', text: 'Add a note to a contact' },
 ];
 
@@ -286,7 +286,7 @@ export default function AgentChat() {
                 </div>
                 <div style={{ fontSize:isMobile?20:22, fontWeight:300, color:DARK, letterSpacing:'0.04em', fontFamily:'"Cormorant Garamond",serif', marginBottom:8 }}>Propel AI</div>
                 <div style={{ fontSize:13, color:'#6b7280', lineHeight:1.65, maxWidth:300, margin:'0 auto' }}>
-                  I take real action in your database — create groups, assign contacts, send texts, and more.
+                  I organize your contacts, answer questions about Propel, and recommend what to do next.
                 </div>
               </div>
               <div style={{ display:'grid', gridTemplateColumns:isMobile?'1fr':'repeat(2, 1fr)', gap:isMobile?7:8 }}>
