@@ -57,8 +57,9 @@ initSocket(http);
 initAgentScheduler();
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-// CORS: allow any origin in dev; in prod set FRONTEND_URL=https://yourdomain.com
-const allowedOrigin = process.env.FRONTEND_URL || '*';
+// CORS: comma-separate multiple origins in FRONTEND_URL (e.g. https://propeldialer.com,https://www.propeldialer.com)
+const rawOrigin = process.env.FRONTEND_URL || '*';
+const allowedOrigin = rawOrigin === '*' ? '*' : rawOrigin.split(',').map(s => s.trim());
 app.use(cors({ origin: allowedOrigin, credentials: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
