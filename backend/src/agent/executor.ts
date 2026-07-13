@@ -142,19 +142,24 @@ export async function executeActionSpec(spec: ActionSpec, contactId: string): Pr
       const groupName = spec.payload.groupName?.trim();
       if (!groupName) throw new Error('groupName required');
 
-      // Upsert the group in ContactGroup table (creates it if new)
-      const existingLast = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
-      const nextPos = (existingLast?.position ?? -1) + 1;
-
-      const group = await (prisma as any).contactGroup.upsert({
-        where: { name: groupName },
-        create: {
-          name: groupName,
-          color: spec.payload.groupColor || '#9ca3af',
-          position: nextPos,
-        },
-        update: {},  // already exists — keep current settings
-      });
+      // Find or create the group — avoids race condition when assigning multiple contacts at once
+      let group = await (prisma as any).contactGroup.findFirst({ where: { name: groupName } });
+      if (!group) {
+        try {
+          const existingLast = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
+          const nextPos = (existingLast?.position ?? -1) + 1;
+          group = await (prisma as any).contactGroup.create({
+            data: {
+              name: groupName,
+              color: spec.payload.groupColor || '#9ca3af',
+              position: nextPos,
+            },
+          });
+        } catch {
+          // Another concurrent request created it — fetch it now
+          group = await (prisma as any).contactGroup.findFirst({ where: { name: groupName } });
+        }
+      }
 
       // Assign the contact to this group
       await prisma.contact.update({

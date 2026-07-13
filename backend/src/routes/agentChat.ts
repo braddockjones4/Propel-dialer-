@@ -11,7 +11,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../db';
 import { llmChat, llmConfigured, activeProvider, LlmMessage } from '../agent/llm';
-import { sendSmsNow } from '../agent/executor';
 import { io } from '../socket';
 
 const router = Router();
@@ -70,15 +69,18 @@ const CHAT_TOOLS = [
   },
   {
     name: 'assign_to_group',
-    description: 'Assign one or more contacts to a group. Creates the group if it does not exist. PREFERRED: use filter_query with the contact name rather than looking up the ID first.',
+    description: 'Assign one or more contacts to a group. Creates the group if it does not exist. Can filter by name, phone pattern, email domain, status, or source.',
     parameters: {
       type: 'object',
       properties: {
-        group_name:    { type: 'string', description: 'Name of the target group.' },
-        contact_ids:   { type: 'array',  items: { type: 'string' }, description: 'Specific contact IDs to assign. Leave empty to use filter_query instead.' },
-        filter_status: { type: 'string', description: 'Assign all contacts matching this status.' },
-        filter_source: { type: 'string', description: 'Assign all contacts matching this source.' },
-        filter_query:  { type: 'string', description: 'Name or phone search — assign all matching contacts to the group. Use this instead of looking up the contact first.' },
+        group_name:           { type: 'string', description: 'Name of the target group.' },
+        contact_ids:          { type: 'array',  items: { type: 'string' }, description: 'Specific contact IDs to assign. Leave empty to use a filter instead.' },
+        filter_status:        { type: 'string', description: 'Assign all contacts matching this pipeline status.' },
+        filter_source:        { type: 'string', description: 'Assign all contacts matching this source (expired, fsbo, gmail, manual, etc.).' },
+        filter_query:         { type: 'string', description: 'Name search — assign all contacts whose name matches. Use this for "add John Smith to group".' },
+        filter_phone_pattern: { type: 'string', description: 'Assign contacts whose phone number contains this pattern. E.g. "410" for Maryland area code.' },
+        filter_email_domain:  { type: 'string', description: 'Assign contacts whose email matches this domain. E.g. "gmail.com" for Gmail contacts.' },
+        filter_has_email:     { type: 'boolean', description: 'If true, only assign contacts that have an email address.' },
       },
       required: ['group_name'],
     },
@@ -95,18 +97,7 @@ const CHAT_TOOLS = [
       required: ['contact_ids', 'status'],
     },
   },
-  {
-    name: 'send_sms',
-    description: 'Send an SMS message to one or more contacts. Use when the user explicitly asks to send a text or message.',
-    parameters: {
-      type: 'object',
-      properties: {
-        contact_ids: { type: 'array', items: { type: 'string' }, description: 'Contact IDs to message.' },
-        message:     { type: 'string', description: 'The SMS text to send.' },
-      },
-      required: ['contact_ids', 'message'],
-    },
-  },
+
   {
     name: 'add_note',
     description: 'Add an internal note to a contact record.',
@@ -141,6 +132,11 @@ const CHAT_TOOLS = [
       },
       required: ['old_name', 'new_name'],
     },
+  },
+  {
+    name: 'get_recommendations',
+    description: 'Analyze the contact database and return personalized recommendations for what the agent should do next to maximize productivity.',
+    parameters: { type: 'object', properties: {}, required: [] },
   },
   {
     name: 'book_appointment',
@@ -272,22 +268,29 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
     }
 
     case 'assign_to_group': {
-      const { group_name, contact_ids, filter_status, filter_source, filter_query } = args as {
-        group_name: string; contact_ids?: string[]; filter_status?: string; filter_source?: string; filter_query?: string;
+      const { group_name, contact_ids, filter_status, filter_source, filter_query, filter_phone_pattern, filter_email_domain, filter_has_email } = args as {
+        group_name: string; contact_ids?: string[]; filter_status?: string; filter_source?: string;
+        filter_query?: string; filter_phone_pattern?: string; filter_email_domain?: string; filter_has_email?: boolean;
       };
-      // Ensure group exists
-      const last = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
-      await (prisma as any).contactGroup.upsert({
-        where: { name: group_name.trim() },
-        create: { name: group_name.trim(), color: '#9ca3af', position: (last?.position ?? -1) + 1 },
-        update: {},
-      });
+      // Ensure group exists (find-or-create to avoid race conditions)
+      let grp = await (prisma as any).contactGroup.findFirst({ where: { name: group_name.trim() } });
+      if (!grp) {
+        try {
+          const last = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
+          grp = await (prisma as any).contactGroup.create({ data: { name: group_name.trim(), color: '#9ca3af', position: (last?.position ?? -1) + 1 } });
+        } catch {
+          grp = await (prisma as any).contactGroup.findFirst({ where: { name: group_name.trim() } });
+        }
+      }
 
       let ids: string[] = contact_ids && contact_ids.length > 0 ? contact_ids : [];
       if (ids.length === 0) {
         const where: any = {};
         if (filter_status) where.status = filter_status;
         if (filter_source) where.source = filter_source;
+        if (filter_has_email) where.email = { not: null };
+        if (filter_email_domain) where.email = { contains: filter_email_domain, mode: 'insensitive' };
+        if (filter_phone_pattern) where.phone = { contains: filter_phone_pattern };
         if (filter_query) {
           const parts = filter_query.trim().split(/\s+/);
           where.OR = parts.length > 1
@@ -296,16 +299,21 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
                 { firstName: { contains: filter_query, mode: 'insensitive' } },
                 { lastName:  { contains: filter_query, mode: 'insensitive' } },
                 { phone:     { contains: filter_query } },
+                { email:     { contains: filter_query, mode: 'insensitive' } },
               ]
             : [
                 { firstName: { contains: filter_query, mode: 'insensitive' } },
                 { lastName:  { contains: filter_query, mode: 'insensitive' } },
                 { phone:     { contains: filter_query } },
+                { email:     { contains: filter_query, mode: 'insensitive' } },
               ];
         }
         const matches = await prisma.contact.findMany({ where, select: { id: true, firstName: true, lastName: true } });
         ids = matches.map((c) => c.id);
-        if (ids.length === 0) return { tool: name, success: false, summary: `No contacts matched "${filter_query || filter_status || filter_source}"`, badge: { icon: '⚠️', label: 'No matches', color: '#f97316' } };
+        if (ids.length === 0) {
+          const filterDesc = filter_query || filter_phone_pattern || filter_email_domain || filter_status || filter_source || 'given criteria';
+          return { tool: name, success: false, summary: `No contacts matched "${filterDesc}"`, badge: { icon: '⚠️', label: 'No matches', color: '#f97316' } };
+        }
       }
 
       const { count } = await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { contactGroup: group_name.trim() } });
@@ -326,22 +334,6 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
         summary: `Updated ${count} contact${count !== 1 ? 's' : ''} → ${status}`,
         data: { count, status },
         badge: { icon: '🔄', label: `${count} → ${status}`, color: '#3b82f6' },
-      };
-    }
-
-    case 'send_sms': {
-      const { contact_ids, message } = args as { contact_ids: string[]; message: string };
-      const contacts = await prisma.contact.findMany({ where: { id: { in: contact_ids } }, select: { id: true, phone: true, firstName: true } });
-      let sent = 0; let failed = 0;
-      for (const c of contacts) {
-        try { await sendSmsNow(c, message); sent++; } catch { failed++; }
-      }
-      const summary = failed > 0 ? `Sent ${sent}, failed ${failed}` : `Sent SMS to ${sent} contact${sent !== 1 ? 's' : ''}`;
-      return {
-        tool: name, success: sent > 0,
-        summary,
-        data: { sent, failed, message },
-        badge: { icon: '💬', label: summary, color: sent > 0 ? '#22c55e' : '#ef4444' },
       };
     }
 
@@ -399,16 +391,32 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
         data: { contactId: contact_id, title: title || 'Listing Appointment', scheduledAt: when, duration: 60, location: location || null, status: 'confirmed' },
       });
       await prisma.contact.update({ where: { id: contact_id }, data: { status: 'appointment' } });
-      if (send_confirmation) {
-        const msg = `You're confirmed for ${when.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}. Looking forward to it! — Propel`;
-        try { await sendSmsNow(contact, msg); } catch {}
-      }
+      // Confirmation SMS removed — agent does not send messages
       try { io.emit('agent-appointment', { contactId: contact_id, apptId: appt.id, scheduledAt: when }); } catch {}
       return {
         tool: name, success: true,
         summary: `Booked appointment with ${contact.firstName} ${contact.lastName} for ${when.toLocaleDateString()}`,
         data: { appt, contact: { id: contact.id, firstName: contact.firstName, lastName: contact.lastName } },
         badge: { icon: '📅', label: `Appt: ${contact.firstName} ${contact.lastName}`, color: '#22c55e' },
+      };
+    }
+
+    case 'get_recommendations': {
+      const [total, hotCount, newCount, callbackCount, noGroup, noVM, recentCalls] = await Promise.all([
+        prisma.contact.count(),
+        prisma.contact.count({ where: { status: 'hot' } }),
+        prisma.contact.count({ where: { status: 'new' } }),
+        prisma.contact.count({ where: { status: 'callback' } }),
+        prisma.contact.count({ where: { contactGroup: null } }),
+        prisma.contact.count(),
+        prisma.call.count({ where: { calledAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } }),
+      ]);
+      const data = { total, hotCount, newCount, callbackCount, noGroup, recentCalls };
+      return {
+        tool: name, success: true,
+        summary: `Analysis complete: ${total} contacts, ${hotCount} hot, ${newCount} new, ${callbackCount} callbacks pending, ${noGroup} ungrouped`,
+        data,
+        badge: { icon: '💡', label: 'Recommendations ready', color: '#f59e0b' },
       };
     }
 
@@ -425,35 +433,141 @@ async function buildSystemPrompt(): Promise<string> {
     const groups = await (prisma as any).contactGroup.findMany({ select: { name: true }, orderBy: { position: 'asc' } });
     if (groups.length > 0) groupList = (groups as any[]).map((g: any) => `"${g.name}"`).join(', ');
   } catch {}
-  const totalContacts = await prisma.contact.count().catch(() => 0);
 
-  return `You are Propel AI, an elite real estate dialing assistant with direct access to the agent's contact database. You don't just answer questions — you take real action.
+  // Live database snapshot for context
+  let snapshot = '';
+  try {
+    const [total, hot, newC, callback, noGroup] = await Promise.all([
+      prisma.contact.count(),
+      prisma.contact.count({ where: { status: 'hot' } }),
+      prisma.contact.count({ where: { status: 'new' } }),
+      prisma.contact.count({ where: { status: 'callback' } }),
+      prisma.contact.count({ where: { contactGroup: null } }),
+    ]);
+    snapshot = `${total} total contacts | ${hot} hot | ${newC} new | ${callback} callbacks pending | ${noGroup} ungrouped`;
+  } catch {}
+
+  // Recent activity for learning/adaptation
+  let recentActivity = '(no recent activity)';
+  try {
+    const recent = await prisma.agentAction.findMany({
+      take: 8, orderBy: { createdAt: 'desc' },
+      where: { status: { in: ['sent', 'executed'] } },
+      include: { contact: { select: { firstName: true, lastName: true } } },
+    });
+    if (recent.length > 0) {
+      recentActivity = recent.map((a: any) =>
+        `• ${a.type} — ${a.contact?.firstName || '?'} ${a.contact?.lastName || ''} (${new Date(a.createdAt).toLocaleDateString()})`
+      ).join('\n');
+    }
+  } catch {}
+
+  return `You are Propel AI — the built-in intelligence for Propel Dialer, a real estate agent CRM and outreach platform. You serve two roles simultaneously:
+
+1. ORGANIZER: You take direct action on the contact database — create/manage groups, assign contacts, update pipeline statuses, add notes, book appointments.
+2. ADVISOR: You know every feature of Propel Dialer and help the agent use the app more effectively. You answer how-to questions, teach workflows, and proactively recommend next steps based on the live data.
 
 Current date/time: ${now.toISOString()} (${now.toLocaleString('en-US')})
-Total contacts in database: ${totalContacts}
-Existing contact groups: ${groupList}
+Database: ${snapshot}
+Contact groups: ${groupList}
+Recent agent activity:
+${recentActivity}
 
-CAPABILITIES — you can:
-• Search and retrieve contacts from the database
-• Create, rename, and delete contact groups
-• Assign contacts to groups (by ID list, or by filter: status/source/name search)
-• Update contact pipeline statuses
-• Send SMS messages to contacts
-• Add internal notes to contact records
-• Book listing appointments and send SMS confirmations
-• Retrieve pipeline stats and analytics
+━━━ PROPEL DIALER — COMPLETE FEATURE KNOWLEDGE ━━━
 
-TOOL STRATEGY — follow these rules exactly:
-• "Add/move/assign [person name] to [group]" → call assign_to_group with filter_query="[person's name]" and group_name="[group]". Do NOT call get_contact first — assign_to_group searches by name directly.
-• "Assign all [status/source] contacts to [group]" → call assign_to_group with filter_status or filter_source.
-• When a task needs multiple steps, call ALL required tools in a single response — don't split across replies.
-• NEVER say "I will now do X" or "Next I'll do Y" without calling the tool to actually do it in the same response. If you say you're going to do something, do it with a tool call right now.
-• After tool results return, give a crisp 1-2 sentence confirmation of what was done. Don't re-explain the plan.
+CONTACTS TAB:
+• Kanban board organized by groups. Contacts without a group appear in "All Contacts".
+• Quick Add button: add a contact instantly with name + phone.
+• Import options: CSV upload, VCF file (iPhone contacts), iCloud CardDAV sync, Gmail import.
+• Each contact has: name, phone, email, notes, pipeline status, lead score, group, full call history.
+• Bulk actions: select multiple → move to group, change status, delete.
+• Pipeline statuses: new → contacted → callback → hot → appointment → closed → dnc.
+• Groups appear as columns on the kanban board. Create any group you need (e.g. "Hot Leads", "Sellers 2026", "AYC").
 
-BEHAVIOR:
-• Be direct and action-oriented.
-• Never fabricate contact data. Only report what the tools return.
-• If a destructive action (mass SMS, delete group) seems risky, briefly confirm scope in your text — but still call the tool.`;
+DIALER TAB:
+• Two calling modes:
+  - Bridge Mode: Twilio calls the agent's personal phone first, then connects to the contact. Agent talks on their real phone.
+  - WebRTC Mode: Agent speaks through the browser (requires microphone access).
+• Voicemail Drop: record a VM message once; it auto-drops when AMD detects an answering machine.
+• AMD = Answering Machine Detection — Twilio automatically detects human vs machine answers.
+• Auto-advance: after saving a call disposition, automatically dials the next contact.
+• Disposition panel: after each call, pick an outcome (hot, callback, appointment, etc.) and add a note. This updates the contact's pipeline status.
+• Caller ID: agent can verify their personal phone number to use as the outbound caller ID.
+• Sessions: agent selects a group to dial, then works through it contact by contact.
+• Setup checklist before dialing: (1) choose calling mode, (2) enter personal phone (bridge) or grant mic (WebRTC), (3) upload voicemail recording.
+
+VOICEMAILS TAB:
+• Record a voicemail message directly in the browser — no external tools needed.
+• The recording is stored and auto-played when AMD detects a machine during a call.
+• Agents can listen to the recording before going live with it.
+
+EMAIL BLAST TAB:
+• Connect Gmail via OAuth to send emails from the agent's own Gmail account.
+• Import Gmail contacts into Propel with smart dedup (creates new contacts, enriches existing ones with email, skips full duplicates).
+• Send personalized HTML emails to selected contacts or entire groups.
+• Personalization tokens: {{firstName}}, {{lastName}}, {{fullName}} are replaced per contact.
+• Rate-limited automatically to stay within Gmail's sending limits.
+
+AI AGENT TAB (this tab):
+• Natural language interface to the entire CRM.
+• Perform any contact database operation by typing a command.
+• Ask any question about how to use Propel.
+• Get proactive recommendations based on your data.
+
+PIPELINE TAB:
+• View contacts organized by their pipeline status (new, contacted, hot, etc.).
+• See how many deals are in each stage at a glance.
+
+CALENDAR TAB:
+• View upcoming appointments booked through the dialer or agent.
+
+ANALYTICS TAB:
+• Call volume and outcome breakdown by day/week.
+• Connection rates, voicemail drop rates, lead score distributions.
+
+SETTINGS TAB:
+• Account: update full name, agent name (shown in automations), password.
+• Phone Numbers: buy new Twilio numbers or add an existing number.
+• Integrations: connect/disconnect Gmail, iCloud.
+• Team: invite and manage team members.
+
+━━━ TOOL STRATEGY — FOLLOW EXACTLY ━━━
+
+For CRM actions:
+• "Create group [X]" → create_group
+• "Add [name] to [group]" → assign_to_group with filter_query="[name]"
+• "Move all contacts with area code 410 to [group]" → assign_to_group with filter_phone_pattern="410"
+• "Assign all Gmail contacts to [group]" → assign_to_group with filter_email_domain="gmail.com"
+• "Assign all contacts with an email to [group]" → assign_to_group with filter_has_email=true
+• "Assign all hot contacts to [group]" → assign_to_group with filter_status="hot"
+• "What contacts are in [group]?" → search_contacts with group="[group]"
+• "What are my stats?" → get_stats
+• "What should I do next?" → get_recommendations THEN give advice based on the data returned
+• "Rename group [X] to [Y]" → rename_group
+• "Delete group [X]" → delete_group
+
+For how-to questions:
+• Answer directly from your Propel knowledge above. Give step-by-step instructions.
+• Examples: "How do I import my iPhone contacts?", "How does voicemail drop work?", "What is bridge mode?"
+
+Always:
+• Call ALL needed tools in a single response pass — never split across replies.
+• NEVER describe a future action without calling the tool right now. Say it and do it simultaneously.
+• After tools complete, give a 1-2 sentence confirmation. Be concise.
+• Never send SMS or email messages to contacts. You are a CRM organizer and advisor only.
+• Never fabricate contact data — only report what tools return.
+• If a request could affect many contacts, confirm the count in your reply.
+
+━━━ RECOMMENDATIONS ━━━
+
+When get_recommendations data is available, or when you notice patterns, proactively surface insights:
+• Many "new" contacts → suggest starting a dialing session with that group
+• Lots of ungrouped contacts → suggest creating an organizational structure
+• No hot leads → suggest identifying callback contacts that could be upgraded
+• Callbacks pending → remind agent to dial those first
+• No email on contacts → suggest importing Gmail contacts to enrich the database
+• Low call activity recently → encourage a dialing session
+• As you learn the agent's patterns over time, adapt your suggestions to what they respond to most.`;
 }
 
 // ── Multi-turn agentic loop ───────────────────────────────────────────────────

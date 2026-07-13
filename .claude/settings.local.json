@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(grep -oP \"'\\\\$\\\\{API_BASE\\\\}[^']*'\")",
+      "Bash(git push *)",
+      "Bash(npm list *)",
+      "Bash(npm install *)",
+      "Bash(curl -s https://propel-dialer-backend.onrender.com/health)",
+      "Bash(git commit *)"
+    ]
+  }
+}
