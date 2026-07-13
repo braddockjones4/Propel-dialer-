@@ -243,31 +243,6 @@ function AppInner() {
         </div>
       )}
 
-      {/* ── Mobile bottom tab bar — scrollable ──────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden bg-white border-t hide-scrollbar"
-           style={{ borderTopColor: 'rgba(201,168,76,0.15)', paddingBottom: 'env(safe-area-inset-bottom)', display: 'flex', overflowX: 'auto' }}>
-        {NAV.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setPage(id)}
-            style={{ height: 56, flexShrink: 0, minWidth: 64, padding: '0 10px', position: 'relative', background: 'transparent', border: 'none', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
-          >
-            {page === id && (
-              <span style={{
-                position: 'absolute', top: 0, left: '10%', right: '10%',
-                height: 2, borderRadius: '0 0 3px 3px', background: 'linear-gradient(90deg, #C9A84C, #e8c96e)',
-              }} />
-            )}
-            <span style={{
-              fontSize: 9.5, fontWeight: page === id ? 700 : 500,
-              letterSpacing: '0.06em', textTransform: 'uppercase',
-              color: page === id ? '#9A7A2E' : '#bbb',
-              transition: 'color 0.15s', whiteSpace: 'nowrap',
-            }}>{label}</span>
-          </button>
-        ))}
-      </div>
-
       {/* ── Page content ─────────────────────────────────────────────── */}
       <div className="pt-[49px]" id="page-content">
         {page === 'dashboard'    && <Dashboard onNavigate={(p) => setPage(p as Page)} />}
@@ -286,11 +261,8 @@ function AppInner() {
       <style>{`
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        /* Mobile: reserve space for bottom tab bar + safe area */
         @media (max-width: 767px) {
-          #page-content { padding-bottom: calc(56px + env(safe-area-inset-bottom)); }
-          /* Pages that want to fill exactly the visible viewport (no scroll) */
-          .full-page-h { height: calc(100dvh - 49px - 56px - env(safe-area-inset-bottom)) !important; }
+          .full-page-h { height: calc(100dvh - 49px) !important; }
         }
         @media (min-width: 768px) {
           .full-page-h { height: calc(100vh - 49px) !important; }
