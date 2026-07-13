@@ -285,36 +285,6 @@ export default function Voicemails() {
           )}
         </Card>
 
-        {/* Tips card */}
-        <Card title="Tips for a great voicemail">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {[
-              { icon: '⏱', text: 'Keep it under 30 seconds — shorter is better' },
-              { icon: '🗣', text: 'State your name and why you\'re calling right away' },
-              { icon: '', text: 'Include your callback number clearly, spoken slowly' },
-              { icon: '', text: 'Reference the property or area to personalize it' },
-              { icon: '😊', text: 'Sound warm and confident — energy transfers through voice' },
-            ].map(({ icon, text }) => (
-              <div key={text} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <span style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }}>{icon}</span>
-                <span style={{ fontSize: 13, color: '#374151', lineHeight: 1.55 }}>{text}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Example script */}
-        <Card title="Example script">
-          <div style={{ background: '#f9fafb', borderRadius: 10, padding: '14px 16px', borderLeft: `3px solid ${GOLD}` }}>
-            <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.7, margin: 0, fontStyle: 'italic' }}>
-              "Hi, this is [Your Name] with [Company]. I'm reaching out about your property
-              at [Address] — I have some buyers who may be interested and wanted to connect.
-              Please give me a call back at [Your Number] when you get a chance.
-              Thanks so much and have a great day!"
-            </p>
-          </div>
-        </Card>
-
         <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`}</style>
       </div>
     </div>
