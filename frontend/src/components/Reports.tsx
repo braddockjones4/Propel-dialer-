@@ -175,7 +175,7 @@ export default function Reports() {
                         <td className="py-2 text-xs text-gray-600 pr-3">{c.duration}s</td>
                         <td className="py-2 text-xs pr-3">
                           <span className="capitalize" style={{ color: c.disposition === 'hot-lead' ? '#9A7A2E' : '#6b7280' }}>
-                            {c.disposition.replace(/-/g, ' ')}
+                            {c.disposition?.replace(/-/g, ' ') || '—'}
                           </span>
                         </td>
                         <td className="py-2 text-xs pr-3">{c.aiScore ?? '—'}</td>

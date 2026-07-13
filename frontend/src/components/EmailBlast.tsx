@@ -515,9 +515,9 @@ export default function EmailBlast() {
             <div style={{ padding: '12px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
               <span style={{ fontSize: 12, color: GRAY, fontWeight: 500, display: 'block', marginBottom: 8 }}>Preview</span>
               <div style={{ fontSize: 13, color: BLACK, lineHeight: 1.75, whiteSpace: 'pre-wrap', background: '#fafaf8', padding: '14px 16px', borderRadius: 6, maxHeight: 180, overflowY: 'auto' }}>
-                {body.replace(/\{\{firstName\}\}/gi, recipients[0]?.firstName || 'Sarah')
-                     .replace(/\{\{lastName\}\}/gi, recipients[0]?.lastName || 'Chen')
-                     .replace(/\{\{fullName\}\}/gi, `${recipients[0]?.firstName || 'Sarah'} ${recipients[0]?.lastName || 'Chen'}`)}
+                {(body || '').replace(/\{\{firstName\}\}/gi, recipients[0]?.firstName || 'Sarah')
+                             .replace(/\{\{lastName\}\}/gi, recipients[0]?.lastName || 'Chen')
+                             .replace(/\{\{fullName\}\}/gi, `${recipients[0]?.firstName || 'Sarah'} ${recipients[0]?.lastName || 'Chen'}`)}
               </div>
               <div style={{ fontSize: 10, color: GRAY, marginTop: 6 }}>Showing with first recipient's name filled in</div>
             </div>
