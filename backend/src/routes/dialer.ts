@@ -60,6 +60,7 @@ setInterval(() => {
 
 // ─── GET /api/dialer/settings ─────────────────────────────────────────────────
 router.get('/settings', async (req: Request, res: Response) => {
+  try {
   const userId = (req as any).user?.id as string;
   const s = await prisma.dialerSettings.upsert({
     where: { userId },
@@ -83,10 +84,12 @@ router.get('/settings', async (req: Request, res: Response) => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { voicemailData: _omit, ...rest } = s as any;
   res.json({ ...rest, voicemailReady });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── PUT /api/dialer/settings ─────────────────────────────────────────────────
 router.put('/settings', async (req: Request, res: Response) => {
+  try {
   const userId = (req as any).user?.id as string;
   const { callMode, personalPhone, voicemailUrl, voicemailSid } = req.body;
   const s = await prisma.dialerSettings.upsert({
@@ -101,6 +104,7 @@ router.put('/settings', async (req: Request, res: Response) => {
     },
   });
   res.json(s);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── POST /api/dialer/verify-phone ───────────────────────────────────────────
@@ -177,15 +181,21 @@ router.post('/upload-vm',
   express.raw({ type: '*/*', limit: '20mb' }),
   async (req: Request, res: Response) => {
     const userId = (req as any).user?.id as string;
-    const mimeType = (req.headers['content-type'] || 'audio/webm').split(';')[0];
+    const rawMime = (req.headers['content-type'] || 'audio/webm').split(';')[0].trim();
+    const ALLOWED_AUDIO = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/mpeg', 'audio/x-wav'];
+    const mimeType = ALLOWED_AUDIO.includes(rawMime) ? rawMime : 'audio/webm';
     const buffer = req.body as Buffer;
 
     if (!buffer || buffer.length === 0) {
       res.status(400).json({ error: 'No audio data received' }); return;
     }
+    if (buffer.length > 10 * 1024 * 1024) {
+      res.status(400).json({ error: 'Voicemail too large (max 10 MB)' }); return;
+    }
 
     const voicemailData = `data:${mimeType};base64,${buffer.toString('base64')}`;
-    const voicemailUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}`;
+    const vmToken = makeVmToken(userId);
+    const voicemailUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}?token=${vmToken}`;
 
     try {
       await prisma.dialerSettings.upsert({
@@ -202,7 +212,20 @@ router.post('/upload-vm',
 );
 
 // ─── GET /api/dialer/vm-audio/:userId (public — called by Twilio to play VM) ──
+// C3: Protected with HMAC token to prevent unauthenticated enumeration
+function makeVmToken(userId: string): string {
+  return crypto.createHmac('sha256', process.env.JWT_SECRET || 'propel-dialer-dev-secret')
+    .update(userId).digest('hex').slice(0, 32);
+}
+function verifyVmToken(userId: string, token: string): boolean {
+  const expected = makeVmToken(userId);
+  return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(token.padEnd(32, '0').slice(0, 32), 'hex'));
+}
 webhooks.get('/vm-audio/:userId', async (req: Request, res: Response) => {
+  const { token } = req.query as { token?: string };
+  if (!token || !verifyVmToken(req.params.userId, token)) {
+    res.status(403).json({ error: 'Forbidden' }); return;
+  }
   const { userId } = req.params;
   const settings = await prisma.dialerSettings.findUnique({ where: { userId } }).catch(() => null);
   if (!settings?.voicemailData) { res.status(404).send('Not found'); return; }
@@ -240,7 +263,7 @@ webhooks.post('/vm-play-twiml/:userId', async (req: Request, res: Response) => {
 
       if (isPlayable) {
         // Valid format — serve the binary via vm-audio and let Twilio play it
-        const audioUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}`;
+        const audioUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}?token=${makeVmToken(userId)}`;
         console.log(`[vm-play-twiml] Playing recorded VM (${mimeType}) for userId=${userId}`);
         twiml.play(audioUrl);
       } else {
@@ -348,9 +371,10 @@ router.post('/call', async (req: Request, res: Response) => {
     const confName = `propel-${sessionId}`;
     const contactName = `${contact.firstName} ${contact.lastName}`.trim();
 
+    if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
     bridges.set(sessionId, {
       contactId,
-      contactPhone: contact.phone!,
+      contactPhone: contact.phone,
       contactName,
       confName,
       agentCallSid: null,
@@ -388,9 +412,10 @@ router.post('/call', async (req: Request, res: Response) => {
     const confName  = `propel-webrtc-${sessionId}`;
     const contactName = `${contact.firstName} ${contact.lastName}`.trim();
 
+    if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
     bridges.set(sessionId, {
       contactId,
-      contactPhone: contact.phone!,
+      contactPhone: contact.phone,
       contactName,
       confName,
       agentCallSid: null,   // set by /voice webhook when browser connects
@@ -887,7 +912,9 @@ router.post('/log-call', async (req: Request, res: Response) => {
 // Returns contacts for a session, ordered by lead score desc.
 // ?status=new,hot,callback,all  (comma-separated)
 router.get('/contacts', async (req: Request, res: Response) => {
+  try {
   const { status = 'all', limit = '200' } = req.query as { status?: string; limit?: string };
+  const cappedLimit = Math.min(parseInt(limit, 10) || 200, 500); // dial sessions capped at 500
 
   const where: any = { NOT: { status: 'dnc' } };
   if (status && status !== 'all') {
@@ -897,7 +924,7 @@ router.get('/contacts', async (req: Request, res: Response) => {
   const contacts = await prisma.contact.findMany({
     where,
     orderBy: [{ leadScore: 'desc' }, { updatedAt: 'desc' }],
-    take: parseInt(limit, 10),
+    take: cappedLimit,
     select: {
       id: true, firstName: true, lastName: true, phone: true,
       address: true, city: true, state: true, zip: true,
@@ -912,6 +939,7 @@ router.get('/contacts', async (req: Request, res: Response) => {
   });
 
   res.json(contacts);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 export default router;

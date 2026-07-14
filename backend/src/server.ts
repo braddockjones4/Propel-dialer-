@@ -8,6 +8,7 @@ process.on('uncaughtException', (err: Error) => {
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { initSocket } from './socket';
@@ -50,6 +51,19 @@ const app  = express();
 const http = createServer(app);
 const PORT = process.env.PORT || 3001;
 
+// H9: Warn on startup if critical env vars are missing
+(function checkEnv() {
+  const required = ['DATABASE_URL', 'JWT_SECRET', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'FRONTEND_URL'];
+  const missing = required.filter(k => !process.env[k]);
+  if (missing.length) console.warn('[startup] Missing env vars:', missing.join(', '));
+  if (!process.env.BACKEND_URL && !process.env.NGROK_URL) {
+    console.warn('[startup] BACKEND_URL not set — Twilio webhooks may not work correctly');
+  }
+  if (!process.env.ENCRYPTION_KEY) {
+    console.warn('[startup] ENCRYPTION_KEY not set — iCloud credentials using fallback key (insecure)');
+  }
+})();
+
 // ── Init Socket.io ────────────────────────────────────────────────────────────
 initSocket(http);
 
@@ -75,12 +89,18 @@ function buildCorsOrigins(env: string | undefined): string | string[] {
   }
   return [...origins];
 }
+app.use(helmet({
+  contentSecurityPolicy: false,   // CSP managed at CDN/reverse-proxy level
+  crossOriginEmbedderPolicy: false, // Twilio Voice SDK requires relaxed COEP
+}));
 app.use(cors({ origin: buildCorsOrigins(process.env.FRONTEND_URL), credentials: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-// Public Twilio webhooks (no auth — called by Twilio servers)
+// C1: Token endpoint requires auth — must be before the public webhook mount
+app.post('/api/twilio/token',  requireAuth, twilioRoutes);
+// Public Twilio webhooks (no auth — called by Twilio servers — Twilio calls these, not the browser)
 app.use('/api/twilio',         twilioRoutes);
 app.post('/api/twilio/sms-inbound', handleInboundSms);
 

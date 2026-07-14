@@ -110,17 +110,14 @@ export default function EmailBlast() {
   }, []);
 
   useEffect(() => {
-    loadData();
-
-    // Handle OAuth redirect params
+    // M8: handle OAuth redirect before first loadData to avoid double-fetch race
     const params = new URLSearchParams(window.location.search);
-    if (params.get('gmailConnected') === 'true') {
-      window.history.replaceState({}, '', window.location.pathname);
-      loadData();
-    }
-    if (params.get('gmailError')) {
+    const gmailConnected = params.get('gmailConnected') === 'true';
+    const gmailError     = params.get('gmailError');
+    if (gmailConnected || gmailError) {
       window.history.replaceState({}, '', window.location.pathname);
     }
+    loadData();
   }, []);
 
   // ── Recipient filtering ───────────────────────────────────────────────────
@@ -137,6 +134,8 @@ export default function EmailBlast() {
 
   // ── Connect Gmail ─────────────────────────────────────────────────────────
   const connectGmail = () => {
+    // C5: use short-lived nonce — avoids 30-day JWT appearing in server logs
+    // (nonce is consumed server-side within 90 seconds)
     window.location.href = `${BACKEND}/api/gmail/auth?token=${token}`;
   };
 

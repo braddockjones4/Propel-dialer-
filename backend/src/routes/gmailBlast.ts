@@ -84,20 +84,25 @@ router.get('/callback', async (req: Request, res: Response) => {
 
 // ── GET /api/gmail/status ─────────────────────────────────────────────────────
 router.get('/status', requireAuth, async (req: any, res: Response) => {
-  const user = await db.user.findUnique({ where: { id: req.user.id } });
-  res.json({
-    connected: !!user?.gmailAccessToken,
-    email:     user?.gmailEmail || null,
-  });
+  try {
+    const user = await db.user.findUnique({ where: { id: req.user.id } });
+    res.json({ connected: !!user?.gmailAccessToken, email: user?.gmailEmail || null });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── DELETE /api/gmail/disconnect ──────────────────────────────────────────────
 router.delete('/disconnect', requireAuth, async (req: any, res: Response) => {
-  await db.user.update({
-    where: { id: req.user.id },
-    data: { gmailAccessToken: null, gmailRefreshToken: null, gmailEmail: null, gmailTokenExpiry: null },
-  });
-  res.json({ ok: true });
+  try {
+    await db.user.update({
+      where: { id: req.user.id },
+      data: { gmailAccessToken: null, gmailRefreshToken: null, gmailEmail: null, gmailTokenExpiry: null },
+    });
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── POST /api/gmail/blast ─────────────────────────────────────────────────────

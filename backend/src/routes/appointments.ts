@@ -66,7 +66,8 @@ router.post('/', async (req: Request, res: Response) => {
           const agentName = await getAgentName();
           const msg = `Hi ${appt.contact.firstName}! This confirms your appointment with ${agentName} on ${date} at ${time}${location ? ` at ${location}` : ''}. Reply STOP to opt out.`;
           const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-          await client.messages.create({ to: appt.contact.phone, from: TWILIO_CALLER_ID, body: msg });
+          if (!appt.contact.phone) throw new Error('Contact has no phone number');
+          await client.messages.create({ to: appt.contact.phone!, from: TWILIO_CALLER_ID, body: msg });
           await db.appointment.update({ where: { id: appt.id }, data: { smsSent: true } });
         } catch (e: any) { console.error('[Appt] SMS failed:', e.message); }
       }

@@ -41,6 +41,21 @@ const forgotLimiter = rateLimit({
 const JWT_SECRET  = process.env.JWT_SECRET || 'propel-dialer-dev-secret-change-in-prod';
 const JWT_EXPIRES = '30d';
 
+// ── User cache (M11) — avoids a DB hit on every authenticated request ─────────
+const userCache = new Map<string, { user: any; exp: number }>();
+const USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getCachedUser(userId: string): Promise<any | null> {
+  const cached = userCache.get(userId);
+  if (cached && cached.exp > Date.now()) return cached.user;
+  const user = await db.user.findUnique({ where: { id: userId } });
+  if (user) userCache.set(userId, { user, exp: Date.now() + USER_CACHE_TTL });
+  else userCache.delete(userId);
+  return user;
+}
+
+export function invalidateUserCache(userId: string) { userCache.delete(userId); }
+
 // ── Middleware: verify JWT ────────────────────────────────────────────────────
 export async function requireAuth(req: any, res: Response, next: any) {
   const header = req.headers.authorization || '';
@@ -49,7 +64,7 @@ export async function requireAuth(req: any, res: Response, next: any) {
   if (!token) { res.status(401).json({ error: 'Unauthorized' }); return; }
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { userId: string };
-    const user = await db.user.findUnique({ where: { id: payload.userId } });
+    const user = await getCachedUser(payload.userId);
     if (!user) { res.status(401).json({ error: 'User not found' }); return; }
     req.user = user;
     next();
@@ -152,6 +167,7 @@ router.patch('/me', requireAuth, async (req: any, res: Response) => {
       data.passwordHash = await bcrypt.hash(password, 12);
     }
     const updated = await db.user.update({ where: { id: req.user.id }, data });
+    invalidateUserCache(req.user.id);
     res.json(safeUser(updated));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -163,9 +179,33 @@ function safeUser(u: any) {
   return rest;
 }
 
+// ── POST /api/auth/oauth-nonce ────────────────────────────────────────────────
+// Issues a 90-second single-use token for OAuth redirects (replaces long-lived JWT in URLs)
+import crypto from 'crypto';
+const nonceStore = new Map<string, { userId: string; exp: number }>();
+setInterval(() => { const now = Date.now(); for (const [k,v] of nonceStore) if (v.exp < now) nonceStore.delete(k); }, 60_000);
+
+router.post('/oauth-nonce', requireAuth, (req: any, res: Response) => {
+  const nonce = crypto.randomBytes(32).toString('hex');
+  nonceStore.set(nonce, { userId: req.user.id, exp: Date.now() + 90_000 });
+  res.json({ nonce });
+});
+
+export function consumeNonce(nonce: string): string | null {
+  const entry = nonceStore.get(nonce);
+  if (!entry || entry.exp < Date.now()) return null;
+  nonceStore.delete(nonce);
+  return entry.userId;
+}
+
 // ── GET /api/auth/demo ────────────────────────────────────────────────────────
-// Returns a JWT for the shared demo account. Creates it on first call.
-router.get('/demo', async (_req: Request, res: Response) => {
+const demoLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many demo requests. Try again later.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+router.get('/demo', demoLimiter, async (_req: Request, res: Response) => {
   try {
     const DEMO_EMAIL = 'demo@compasssolutions.com';
     const DEMO_NAME  = 'Demo User';

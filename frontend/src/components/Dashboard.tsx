@@ -32,16 +32,18 @@ export default function Dashboard({ onNavigate }: Props) {
   const firstName = user?.name?.split(' ')[0] || '';
 
   useEffect(() => {
-    authFetch(`${API_BASE}/contacts?limit=500`)
+    // M3: use analytics endpoint — avoids fetching 500 full contact records just to count
+    authFetch(`${API_BASE}/analytics`)
       .then(r => r.json())
-      .then((data: any[]) => {
-        const arr = Array.isArray(data) ? data : [];
+      .then((data: any) => {
+        const byStatus = data?.contacts?.byStatus || {};
+        const total = Object.values(byStatus).reduce((s: number, v: any) => s + (v || 0), 0) as number;
         setStats({
-          total:       arr.length,
-          new:         arr.filter(c => c.status === 'new').length,
-          hot:         arr.filter(c => c.status === 'hot').length,
-          appointment: arr.filter(c => c.status === 'appointment').length,
-          closed:      arr.filter(c => c.status === 'closed').length,
+          total,
+          new:         byStatus['new']         || 0,
+          hot:         byStatus['hot']          || 0,
+          appointment: byStatus['appointment']  || 0,
+          closed:      byStatus['closed']       || 0,
         });
         setLoading(false);
       })

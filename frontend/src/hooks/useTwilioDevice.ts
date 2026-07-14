@@ -3,12 +3,20 @@ import { Device, Call } from '@twilio/voice-sdk';
 import type { DeviceStatus, CallStatus } from '../types';
 import { API_BASE } from '../config';
 
+export interface IncomingCallState {
+  call: Call;
+  from: string;
+}
+
 interface UseTwilioDeviceReturn {
   deviceStatus: DeviceStatus;
   callStatus: CallStatus;
   activeCall: Call | null;
   callDuration: number;
+  incomingCall: IncomingCallState | null;
   startCall: (phoneNumber: string, callerId?: string, sessionId?: string, confName?: string) => Promise<void>;
+  acceptIncomingCall: () => void;
+  rejectIncomingCall: () => void;
   endCall: () => void;
   muteCall: (muted: boolean) => void;
   resetCallStatus: () => void;
@@ -28,6 +36,9 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
   const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // L4: pending incoming call — UI decides whether to accept or reject
+  const [incomingCall, setIncomingCall] = useState<IncomingCallState | null>(null);
+  const incomingCallRef = useRef<Call | null>(null);
 
   // ─── Initialize Twilio Device on mount ─────────────────────────────────────
   useEffect(() => {
@@ -69,9 +80,15 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
         });
 
         device.on('incoming', (call: Call) => {
-          // Auto-accept incoming calls (future: show accept/reject UI)
-          call.accept();
-          bindCallEvents(call);
+          // L4: surface to UI instead of auto-accepting
+          const from = call.parameters?.From || 'Unknown';
+          incomingCallRef.current = call;
+          setIncomingCall({ call, from });
+          // If the caller hangs up before agent answers, clear the prompt
+          call.on('cancel', () => {
+            incomingCallRef.current = null;
+            setIncomingCall(null);
+          });
         });
 
         await device.register();
@@ -151,6 +168,22 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
     });
   }, []);
 
+  // ─── Accept / Reject Incoming Call ─────────────────────────────────────────
+  const acceptIncomingCall = useCallback(() => {
+    const call = incomingCallRef.current;
+    if (!call) return;
+    incomingCallRef.current = null;
+    setIncomingCall(null);
+    bindCallEvents(call);
+    call.accept();
+  }, [bindCallEvents]);
+
+  const rejectIncomingCall = useCallback(() => {
+    incomingCallRef.current?.reject();
+    incomingCallRef.current = null;
+    setIncomingCall(null);
+  }, []);
+
   // ─── Start Call ─────────────────────────────────────────────────────────────
   const startCall = useCallback(async (
     phoneNumber: string,
@@ -214,7 +247,10 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
     callStatus,
     activeCall,
     callDuration,
+    incomingCall,
     startCall,
+    acceptIncomingCall,
+    rejectIncomingCall,
     endCall,
     muteCall,
     resetCallStatus,

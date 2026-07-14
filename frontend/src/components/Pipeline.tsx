@@ -68,12 +68,22 @@ export default function Pipeline() {
   useEffect(() => { loadContacts(); }, []);
 
   const moveContact = async (contactId: string, newStatus: string) => {
+    // M9: capture old status for rollback
+    const prevStatus = contacts.find(c => c.id === contactId)?.status;
     setContacts(prev => prev.map(c => c.id === contactId ? { ...c, status: newStatus } : c));
-    await authFetch(`${API_BASE}/contacts/${contactId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    });
+    try {
+      const r = await authFetch(`${API_BASE}/contacts/${contactId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!r.ok) throw new Error('Save failed');
+    } catch {
+      // rollback on failure
+      if (prevStatus !== undefined) {
+        setContacts(prev => prev.map(c => c.id === contactId ? { ...c, status: prevStatus } : c));
+      }
+    }
   };
 
   // Drag events

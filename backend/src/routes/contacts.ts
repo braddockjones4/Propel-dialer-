@@ -13,6 +13,7 @@ async function checkContactLimit(_req: any, _res: Response): Promise<boolean> {
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { status, source, limit = '100', offset = '0' } = req.query;
+    const cappedLimit = Math.min(Number(limit) || 100, 500); // never let a single call return >500
 
     // includeDnc=true bypasses the default DNC filter (used by Pipeline)
     const includeDnc = req.query.includeDnc === 'true';
@@ -24,7 +25,7 @@ router.get('/', async (req: Request, res: Response) => {
         ...(status ? { status: String(status) } : {}),
       },
       orderBy: { updatedAt: 'desc' },
-      take: Number(limit),
+      take: cappedLimit,
       skip: Number(offset),
       include: { calls: { orderBy: { calledAt: 'desc' }, take: 3 } },
     });
@@ -124,11 +125,19 @@ router.post('/import', async (req: Request, res: Response) => {
     }).filter(c => c.phone || c.email);
 
     const phones = data.map(c => c.phone).filter(Boolean) as string[];
-    const existing = phones.length
-      ? await prisma.contact.count({ where: { phone: { in: phones } } })
-      : 0;
-    const result = await (prisma as any).contact.createMany({ data, skipDuplicates: true });
-    res.json({ count: result.count, imported: result.count, skipped: existing });
+    // M10: chunk phone check to avoid PostgreSQL >65k parameter limit
+    let existing = 0;
+    const CHUNK = 1000;
+    for (let i = 0; i < phones.length; i += CHUNK) {
+      existing += await prisma.contact.count({ where: { phone: { in: phones.slice(i, i + CHUNK) } } });
+    }
+    // M10: chunk createMany to stay within DB parameter limits
+    let imported = 0;
+    for (let i = 0; i < data.length; i += CHUNK) {
+      const r = await (prisma as any).contact.createMany({ data: data.slice(i, i + CHUNK), skipDuplicates: true });
+      imported += r.count;
+    }
+    res.json({ count: imported, imported, skipped: existing });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -137,9 +146,26 @@ router.post('/import', async (req: Request, res: Response) => {
 // PATCH /api/contacts/:id
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
+    // H1: whitelist only UI-editable fields — never allow id, createdAt, leadScore, etc.
+    const { firstName, lastName, phone, address, city, state, zip, email,
+            source, status, notes, contactGroup, agentPaused } = req.body as any;
+    const data: any = {};
+    if (firstName   !== undefined) data.firstName   = firstName;
+    if (lastName    !== undefined) data.lastName    = lastName;
+    if (phone       !== undefined) data.phone       = phone || null;
+    if (address     !== undefined) data.address     = address;
+    if (city        !== undefined) data.city        = city;
+    if (state       !== undefined) data.state       = state;
+    if (zip         !== undefined) data.zip         = zip;
+    if (email       !== undefined) data.email       = email || null;
+    if (source      !== undefined) data.source      = source;
+    if (status      !== undefined) data.status      = status;
+    if (notes       !== undefined) data.notes       = notes;
+    if (contactGroup !== undefined) data.contactGroup = contactGroup;
+    if (agentPaused !== undefined) data.agentPaused = agentPaused;
     const contact = await prisma.contact.update({
       where: { id: req.params.id },
-      data: req.body,
+      data,
     });
     res.json(contact);
   } catch (e: any) {

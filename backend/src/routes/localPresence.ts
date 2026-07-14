@@ -73,13 +73,13 @@ router.post('/buy', async (req: Request, res: Response) => {
       res.status(404).json({ error: `No numbers available for area code ${areaCode}` }); return;
     }
 
-    const { NGROK_URL } = process.env;
+    const BACKEND_BASE = process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com';
 
     const purchased = await client.incomingPhoneNumbers.create({
       phoneNumber:   available[0].phoneNumber,
-      voiceUrl:      `${NGROK_URL}/api/twilio/voice`,
+      voiceUrl:      `${BACKEND_BASE}/api/twilio/voice`,
       voiceMethod:   'POST',
-      smsUrl:        `${NGROK_URL}/api/twilio/sms-inbound`,
+      smsUrl:        `${BACKEND_BASE}/api/twilio/sms-inbound`,
       smsMethod:     'POST',
       friendlyName:  label || `Propel Local — ${areaCode}`,
     });

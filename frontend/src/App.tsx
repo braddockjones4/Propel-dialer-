@@ -17,7 +17,7 @@ class ErrorBoundary extends Component<{children: React.ReactNode}, {error: strin
     return this.props.children;
   }
 }
-import { ToastProvider } from './components/Toast';
+import { ToastProvider, useToast } from './components/Toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import Landing from './components/Landing';
@@ -53,6 +53,7 @@ function AppInner() {
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
+  const { toast: addToast } = useToast();
   const [sharedVcfText, setSharedVcfText] = useState<string | undefined>(undefined);
 
   // PWA Web Share Target — detect when a .vcf was shared to the app
@@ -65,10 +66,10 @@ function AppInner() {
       window.history.replaceState({}, '', window.location.pathname);
       if (googleImported !== null) {
         const skipped = params.get('googleContactsSkipped') || '0';
-        alert(`✓ Google Contacts imported!\n\n${googleImported} contacts added.${parseInt(skipped) > 0 ? `\n${skipped} duplicates skipped.` : ''}`);
+        addToast(`${googleImported} contacts imported${parseInt(skipped) > 0 ? ` · ${skipped} duplicates skipped` : ''}.`);
         setPage('contacts');
       } else {
-        alert('Google Contacts import was cancelled or failed. Please try again.');
+        addToast('Google Contacts import failed. Please try again.');
       }
     }
 

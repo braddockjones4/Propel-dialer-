@@ -27,7 +27,10 @@ router.get('/ngrok', (_req: Request, res: Response) => {
 });
 
 // ── POST /api/settings/ngrok ──────────────────────────────────────────────────
-router.post('/ngrok', async (req: Request, res: Response) => {
+router.post('/ngrok', (req: any, res: Response, next: any) => {
+  if (req.user?.role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return; }
+  next();
+}, async (req: Request, res: Response) => {
   try {
     const { ngrokUrl } = req.body;
     if (!ngrokUrl) { res.status(400).json({ error: 'ngrokUrl required' }); return; }

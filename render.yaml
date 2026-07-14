@@ -40,17 +40,16 @@ services:
         sync: false
       - key: AGENT_MODEL
         sync: false
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
-      - key: STRIPE_PRICE_STARTER
-        sync: false
-      - key: STRIPE_PRICE_PRO
-        sync: false
-      - key: STRIPE_PRICE_ELITE
-        sync: false
+      # Stripe removed — per-client custom deployment, no SaaS billing
       - key: SENDGRID_API_KEY
         sync: false
       - key: SENDGRID_FROM_EMAIL
         sync: false
+      - key: BACKEND_URL
+        sync: false          # e.g. https://propel-dialer-backend.onrender.com — used for Twilio webhooks
+      - key: ENCRYPTION_KEY
+        generateValue: true  # C4: AES-256 key for iCloud credential encryption — auto-generated
+      - key: GOOGLE_CLIENT_ID
+        sync: false          # M1: Google OAuth app client ID (for Gmail connect)
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false          # M1: Google OAuth app client secret

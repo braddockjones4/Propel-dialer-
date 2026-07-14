@@ -1,5 +1,6 @@
-import { Router, Request, Response } from 'express';
-import twilio from 'twilio';
+import { Router, Request, Response, NextFunction } from 'express';
+import twilio, { validateRequest as twilioValidate } from 'twilio';
+
 import { runFollowUpSequence, ContactContext } from '../followUp';
 import { SequenceTrigger } from '../sequenceStore';
 import { pickCallerId } from './localPresence';
@@ -9,6 +10,18 @@ import { bridges } from './dialer';
 import { io } from '../socket';
 
 const router = Router();
+
+/** Validate that an inbound POST came from Twilio. Skipped in non-production. */
+function validateTwilioSig(req: Request, res: Response, next: NextFunction): void {
+  const { TWILIO_AUTH_TOKEN, NODE_ENV } = process.env;
+  if (!TWILIO_AUTH_TOKEN || NODE_ENV !== 'production') { next(); return; }
+  const signature = req.headers['x-twilio-signature'] as string | undefined;
+  if (!signature) { res.status(403).json({ error: 'Missing Twilio signature' }); return; }
+  const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+  const valid = twilioValidate(TWILIO_AUTH_TOKEN, signature, url, req.body || {});
+  if (!valid) { res.status(403).json({ error: 'Invalid Twilio signature' }); return; }
+  next();
+}
 
 // Track callSid → userId so AMD can use the user's recorded voicemail
 const callToUser = new Map<string, string>();
@@ -58,7 +71,7 @@ router.post('/token', (req: Request, res: Response) => {
 //
 // B) Legacy direct dial (fallback / inbound):
 //    Browser passes To → plain <Dial> to the number. No AMD in this path.
-router.post('/voice', async (req: Request, res: Response) => {
+router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => {
   const { TWILIO_CALLER_ID } = process.env;
   const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
   const twiml = new twilio.twiml.VoiceResponse();
@@ -163,7 +176,7 @@ router.post('/voice', async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/twilio/amd-status ─────────────────────────────────────────────
-router.post('/amd-status', async (req: Request, res: Response) => {
+router.post('/amd-status', validateTwilioSig, async (req: Request, res: Response) => {
   const { AnsweredBy, To, CallSid } = req.body;
   console.log(`[AMD] CallSid: ${CallSid} | AnsweredBy: ${AnsweredBy} | To: ${To}`);
 
@@ -215,7 +228,7 @@ router.post('/amd-status', async (req: Request, res: Response) => {
 
 // ─── POST /api/twilio/voicemail-drop ─────────────────────────────────────────
 // Manual voicemail drop — agent presses button mid-call
-router.post('/voicemail-drop', async (req: Request, res: Response) => {
+router.post('/voicemail-drop', validateTwilioSig, async (req: Request, res: Response) => {
   const { callSid } = req.body;
   if (!callSid) { res.status(400).json({ error: 'callSid required' }); return; }
 
@@ -237,7 +250,7 @@ router.post('/voicemail-drop', async (req: Request, res: Response) => {
 
 // ─── POST /api/twilio/call-status ────────────────────────────────────────────
 // Fires when call status changes. Used to detect no-answer and short calls.
-router.post('/call-status', async (req: Request, res: Response) => {
+router.post('/call-status', validateTwilioSig, async (req: Request, res: Response) => {
   const { CallSid, CallStatus, CallDuration, To } = req.body;
   console.log(`[Call] SID: ${CallSid} | Status: ${CallStatus} | Duration: ${CallDuration}s | To: ${To}`);
 
@@ -260,7 +273,7 @@ router.post('/call-status', async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/twilio/recording-status ───────────────────────────────────────
-router.post('/recording-status', async (req: Request, res: Response) => {
+router.post('/recording-status', validateTwilioSig, async (req: Request, res: Response) => {
   const { CallSid, RecordingUrl, RecordingSid, RecordingDuration } = req.body;
   console.log(`[Recording] Call: ${CallSid} | Sid: ${RecordingSid} | Duration: ${RecordingDuration}s`);
 
@@ -295,6 +308,15 @@ router.post('/recording-status', async (req: Request, res: Response) => {
 router.get('/recording-proxy', async (req: Request, res: Response) => {
   const { url } = req.query as { url: string };
   if (!url) { res.status(400).json({ error: 'url required' }); return; }
+
+  // C2 fix: validate URL is a Twilio domain before forwarding credentials
+  try {
+    const parsed = new URL(url);
+    const allowed = ['api.twilio.com', 'recordings.twilio.com', 'media.twiliocdn.com'];
+    if (!allowed.some(d => parsed.hostname === d || parsed.hostname.endsWith('.' + d))) {
+      res.status(400).json({ error: 'Invalid recording URL' }); return;
+    }
+  } catch { res.status(400).json({ error: 'Invalid URL' }); return; }
 
   const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {

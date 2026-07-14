@@ -335,38 +335,14 @@ export default function Settings() {
       {tab === 'billing' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <Section title="Current Plan">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 300, fontFamily: '"Cormorant Garamond", serif', color: '#1a1a1a', textTransform: 'capitalize', marginBottom: 4 }}>
-                  {user?.plan || 'Trial'} Plan
-                </div>
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>
-                  {user?.plan === 'trial' ? '7-day free trial' : user?.plan === 'starter' ? '$99/month' : user?.plan === 'pro' ? '$199/month' : '$399/month'}
-                </div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 500, color: '#1a1a1a', marginBottom: 4 }}>
+                Propel Dialer
               </div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={openPortal} style={btnOutline}>Manage / Cancel →</button>
-                <button onClick={() => window.open('https://propelsolutions.com', '_blank')} style={btnPrimary}>Upgrade Plan</button>
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                Managed by Compass Solutions · contact your account manager for billing questions
               </div>
             </div>
-          </Section>
-
-          <Section title="Plan Features">
-            {[
-              { plan: 'Starter', price: '$99/mo', features: ['Single-line dialing', 'SMS Blast', 'Inbox', '500 contacts'] },
-              { plan: 'Pro',     price: '$199/mo', features: ['Triple-line dialing', 'VM Blast', 'AI Script', 'Email sequences', '2,500 contacts'], badge: 'Most Popular' },
-              { plan: 'Elite',   price: '$399/mo', features: ['Everything in Pro', 'AI Next-Action', 'AI transcription', 'Unlimited contacts'] },
-            ].map(p => (
-              <div key={p.plan} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 0', borderBottom: '1px solid #f5f5f5' }}>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 4 }}>
-                    {p.plan} {p.badge && <span style={{ fontSize: 9, background: '#C9A84C', color: '#fff', padding: '1px 6px', borderRadius: 8, marginLeft: 6 }}>{p.badge}</span>}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{p.features.join(' · ')}</div>
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', flexShrink: 0 }}>{p.price}</span>
-              </div>
-            ))}
           </Section>
         </div>
       )}

@@ -31,6 +31,12 @@ model Contact {
   appointments Appointment[]
   agentActions AgentAction[]
   agentPaused  Boolean       @default(false) // exclude this contact from autonomous agent
+
+  @@index([status])
+  @@index([contactGroup])
+  @@index([leadScore, updatedAt])
+  @@index([source])
+  @@index([email])
 }
 
 model Call {
@@ -46,6 +52,9 @@ model Call {
   aiScore      Int?     // 0-100 call quality score
   aiNotes      String?  // AI coaching notes
   calledAt     DateTime @default(now())
+
+  @@index([contactId])
+  @@index([calledAt])
 }
 
 model Message {

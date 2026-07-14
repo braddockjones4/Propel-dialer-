@@ -602,7 +602,7 @@ async function runAgentLoop(
         },
         body: JSON.stringify({
           model: agentModel,
-          max_tokens: 1200,
+          max_tokens: 4096,
           temperature: 0.3,
           system: systemPrompt,
           tools: anthropicTools,
