@@ -220,7 +220,8 @@ export default function Voicemails() {
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }} />
                 <span style={{ fontSize: 13, fontWeight: 500, color: '#15803d' }}>Voicemail saved — ready to drop</span>
               </div>
-              <audio controls src={`${voicemailUrl}?t=${Date.now()}`}
+              <audio controls
+                src={voicemailUrl?.startsWith('blob:') ? voicemailUrl : `${voicemailUrl}?t=${Date.now()}`}
                 style={{ width: '100%', height: 40, borderRadius: 8 }} />
               <button onClick={startRecording}
                 style={{ padding: '11px', borderRadius: 12, fontSize: 13, fontWeight: 600, background: 'transparent', color: '#374151', border: '1px solid rgba(0,0,0,0.12)', cursor: 'pointer' }}>
