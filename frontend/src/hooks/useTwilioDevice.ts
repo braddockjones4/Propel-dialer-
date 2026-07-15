@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Device, Call } from '@twilio/voice-sdk';
 import type { DeviceStatus, CallStatus } from '../types';
-import { API_BASE } from '../config';
+import { API_BASE, authFetch } from '../config';
 
 export interface IncomingCallState {
   call: Call;
@@ -49,9 +49,8 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
       setErrorMessage(null);
 
       try {
-        const res = await fetch(`${API_BASE}/twilio/token`, {
+        const res = await authFetch(`${API_BASE}/twilio/token`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ identity: 'agent' }),
         });
 
