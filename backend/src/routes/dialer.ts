@@ -247,6 +247,7 @@ webhooks.get('/vm-audio/:userId', async (req: Request, res: Response) => {
   res.setHeader('Content-Type', mimeType);
   res.setHeader('Content-Length', buffer.length);
   res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // allow <audio> from frontend domain
   res.send(buffer);
 });
 

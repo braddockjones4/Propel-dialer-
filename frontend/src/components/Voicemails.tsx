@@ -155,11 +155,17 @@ export default function Voicemails() {
       });
       const d = await r.json();
       if (d.error) { alert(d.error); setRecState('preview'); return; }
+      // Keep a local blob URL for immediate playback preview — avoids cross-origin
+      // audio loading from the backend domain before CORP headers propagate.
+      const localPreviewUrl = URL.createObjectURL(new Blob([
+        Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+      ], { type: 'audio/wav' }));
       if (recObjectUrl) URL.revokeObjectURL(recObjectUrl);
       setRecBlob(null);
       setRecObjectUrl(null);
+      setVoicemailUrl(localPreviewUrl);
+      setVoicemailReady(true);
       setRecState('idle');
-      await loadSettings();
     } catch (e: any) {
       alert('Save failed: ' + e.message);
       setRecState('preview');
