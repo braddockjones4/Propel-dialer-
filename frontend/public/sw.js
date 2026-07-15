@@ -53,6 +53,8 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // ── 3. Pass all other requests through normally ───────────────────────────
-  e.respondWith(fetch(e.request));
+  // ── 3. All other requests — do NOT intercept ─────────────────────────────
+  // Calling e.respondWith(fetch(e.request)) re-issues cross-origin API calls
+  // through the SW context which breaks CORS and auth headers. Just return and
+  // let the browser handle them natively.
 });
