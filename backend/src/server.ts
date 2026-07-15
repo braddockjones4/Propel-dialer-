@@ -48,6 +48,7 @@ import { ensureAgentSchema } from './agent/ensureSchema';
 dotenv.config();
 
 const app  = express();
+app.set('trust proxy', 1); // Render runs behind a reverse proxy — trust X-Forwarded-Proto so req.protocol = 'https'
 const http = createServer(app);
 const PORT = process.env.PORT || 3001;
 
