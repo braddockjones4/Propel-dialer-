@@ -175,25 +175,35 @@ router.get('/verify-status', async (req: Request, res: Response) => {
 });
 
 // ─── POST /api/dialer/upload-vm ──────────────────────────────────────────────
-// Receives a browser-recorded voicemail as raw binary audio and stores in DB.
-// express.raw() handles the body — bypasses the JSON body-size limit entirely.
-router.post('/upload-vm',
-  express.raw({ type: '*/*', limit: '20mb' }),
-  async (req: Request, res: Response) => {
+// Receives a browser-recorded voicemail as base64-encoded JSON and stores in DB.
+// Using JSON (not raw binary) avoids conflicts with the global express.json() parser.
+router.post('/upload-vm', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id as string;
-    const rawMime = (req.headers['content-type'] || 'audio/webm').split(';')[0].trim();
-    const ALLOWED_AUDIO = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/mpeg', 'audio/x-wav'];
-    const mimeType = ALLOWED_AUDIO.includes(rawMime) ? rawMime : 'audio/webm';
-    const buffer = req.body as Buffer;
+    const { audio, mimeType: rawMime = 'audio/wav' } = req.body || {};
 
-    if (!buffer || buffer.length === 0) {
+    if (!audio || typeof audio !== 'string') {
       res.status(400).json({ error: 'No audio data received' }); return;
     }
-    if (buffer.length > 10 * 1024 * 1024) {
+
+    const ALLOWED_AUDIO = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/mpeg', 'audio/x-wav'];
+    const mimeType = ALLOWED_AUDIO.includes(rawMime) ? rawMime : 'audio/wav';
+
+    // Validate decoded size (base64 is ~4/3 raw size, so 10 MB raw ≈ 13.4 MB base64)
+    const estimatedBytes = Math.ceil(audio.length * 0.75);
+    if (estimatedBytes > 10 * 1024 * 1024) {
       res.status(400).json({ error: 'Voicemail too large (max 10 MB)' }); return;
     }
 
-    const voicemailData = `data:${mimeType};base64,${buffer.toString('base64')}`;
+    // Validate it's actually valid base64
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(audio, 'base64');
+      if (buffer.length === 0) throw new Error('empty');
+    } catch {
+      res.status(400).json({ error: 'Invalid audio data' }); return;
+    }
+
+    const voicemailData = `data:${mimeType};base64,${audio}`;
     const vmToken = makeVmToken(userId);
     const voicemailUrl = `${BACKEND()}/api/dialer/vm-audio/${userId}?token=${vmToken}`;
 

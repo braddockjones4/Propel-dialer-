@@ -124,6 +124,16 @@ async function blobToWav(blob: Blob): Promise<Blob> {
   return new Blob([wavBuf], { type: 'audio/wav' });
 }
 
+// ── Convert a Blob to base64 string (no data-URL prefix) ─────────────────────
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 function formatPhone(p: string | null | undefined) {
   if (!p) return '';
   const d = p.replace(/\D/g, '');
@@ -444,10 +454,10 @@ export default function Dialer() {
     try {
       // Convert to WAV so Twilio can <Play> it (webm/opus not supported by Twilio)
       const wavBlob = await blobToWav(recBlob);
+      const base64  = await blobToBase64(wavBlob);
       const r = await authFetch(`${API_BASE}/dialer/upload-vm`, {
         method: 'POST',
-        headers: { 'Content-Type': 'audio/wav' },
-        body: wavBlob,
+        body: JSON.stringify({ audio: base64, mimeType: 'audio/wav' }),
       });
       const d = await r.json();
       if (d.error) { alert(d.error); setRecState('preview'); return; }
