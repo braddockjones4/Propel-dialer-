@@ -36,14 +36,16 @@ export default function Dashboard({ onNavigate }: Props) {
     authFetch(`${API_BASE}/analytics`)
       .then(r => r.json())
       .then((data: any) => {
-        const byStatus = data?.contacts?.byStatus || {};
-        const total = Object.values(byStatus).reduce((s: number, v: any) => s + (v || 0), 0) as number;
+        // analytics returns: data.contacts.{total,hot,dnc} + data.contactsByStatus array
+        const byStatusArr: Array<{ label: string; count: number }> = data?.contactsByStatus || [];
+        const byStatus: Record<string, number> = {};
+        byStatusArr.forEach(s => { byStatus[s.label || ''] = s.count; });
         setStats({
-          total,
-          new:         byStatus['new']         || 0,
-          hot:         byStatus['hot']          || 0,
-          appointment: byStatus['appointment']  || 0,
-          closed:      byStatus['closed']       || 0,
+          total:       data?.contacts?.total       || 0,
+          new:         byStatus['new']             || 0,
+          hot:         data?.contacts?.hot         || 0,
+          appointment: byStatus['appointment']     || 0,
+          closed:      byStatus['closed']          || 0,
         });
         setLoading(false);
       })
