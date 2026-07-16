@@ -745,16 +745,12 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
                          : CallStatus === 'failed' ? 'call-failed'
                          : 'no-answer';
     b.status = 'no-answer';
-    io.emit('bridge-status', { sessionId, status: frontendStatus });
-    // Release agent
+    io.emit('bridge-status', { sessionId, status: frontendStatus, contactName: b.contactName });
+    // Release agent — just end the call cleanly. UI banner handles the notification.
+    // (TTS via calls.update({ twiml }) on a conference leg causes carrier voicemail prompts)
     try {
       if (b.agentCallSid) {
-        const msg = CallStatus === 'busy'   ? 'Contact declined the call.'
-                  : CallStatus === 'failed' ? 'Call failed. Number may be disconnected.'
-                  : 'No answer.';
-        await twilioClient().calls(b.agentCallSid).update({
-          twiml: `<Response><Say voice="Polly.Joanna">${msg} Moving to next contact.</Say><Hangup/></Response>`,
-        });
+        await twilioClient().calls(b.agentCallSid).update({ status: 'completed' });
       }
     } catch {}
   }

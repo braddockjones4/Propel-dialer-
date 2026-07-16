@@ -199,6 +199,7 @@ export default function Dialer() {
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('idle');
   const [contactAnswered, setContactAnswered] = useState(false); // true once Twilio reports contact's phone answered
   const [vmDropToast, setVmDropToast] = useState<string | null>(null); // contact name for the "VM dropped" toast
+  const [lastOutcomeContactName, setLastOutcomeContactName] = useState<string | null>(null);
   const vmToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [vmModalOpen, setVmModalOpen] = useState(false); // voicemail re-record modal during session
 
@@ -244,7 +245,10 @@ export default function Dialer() {
           return;
         }
         setBridgeStatus(data.status as BridgeStatus);
-        if (['no-answer', 'declined', 'call-failed'].includes(data.status)) setDisposition('no-answer');
+        if (['no-answer', 'declined', 'call-failed'].includes(data.status)) {
+          setDisposition('no-answer');
+          setLastOutcomeContactName(data.contactName || null);
+        }
       }
     });
 
@@ -1170,10 +1174,11 @@ export default function Dialer() {
 
             {/* Call outcome banner — tells the agent exactly what happened */}
             {(() => {
+              const n = lastOutcomeContactName || 'Contact';
               const outcome: Record<string, { icon: string; text: string; bg: string; color: string }> = {
-                'no-answer':   { icon: '📵', text: 'Rang out — no voicemail detected', bg: '#f3f4f6', color: '#374151' },
-                'declined':    { icon: '🚫', text: 'Contact declined the call', bg: '#fef2f2', color: '#dc2626' },
-                'call-failed': { icon: '⚠️', text: 'Number disconnected or invalid', bg: '#fef2f2', color: '#dc2626' },
+                'no-answer':   { icon: '📵', text: `${n} — rang out, no voicemail`, bg: '#f3f4f6', color: '#374151' },
+                'declined':    { icon: '🚫', text: `${n} declined the call`, bg: '#fef2f2', color: '#dc2626' },
+                'call-failed': { icon: '⚠️', text: `${n} — number may be disconnected`, bg: '#fef2f2', color: '#dc2626' },
                 'call-ended':  { icon: '', text: 'Call ended — contact answered and hung up', bg: '#f0fdf4', color: '#15803d' },
                 'vm-dropped':  { icon: '📨', text: 'Voicemail dropped successfully', bg: '#fefce8', color: '#92400e' },
                 ended:         { icon: '', text: 'Call ended', bg: '#f3f4f6', color: '#374151' },
