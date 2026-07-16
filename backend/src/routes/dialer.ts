@@ -740,12 +740,18 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
   }
 
   if (b && (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed')) {
+    // Surface distinct statuses to the agent so they know exactly what happened
+    const frontendStatus = CallStatus === 'busy' ? 'declined'
+                         : CallStatus === 'failed' ? 'call-failed'
+                         : 'no-answer';
     b.status = 'no-answer';
-    io.emit('bridge-status', { sessionId, status: 'no-answer' });
+    io.emit('bridge-status', { sessionId, status: frontendStatus });
     // Release agent
     try {
       if (b.agentCallSid) {
-        const msg = CallStatus === 'busy' ? 'Line busy.' : 'No answer.';
+        const msg = CallStatus === 'busy'   ? 'Contact declined the call.'
+                  : CallStatus === 'failed' ? 'Call failed. Number may be disconnected.'
+                  : 'No answer.';
         await twilioClient().calls(b.agentCallSid).update({
           twiml: `<Response><Say voice="Polly.Joanna">${msg} Moving to next contact.</Say><Hangup/></Response>`,
         });

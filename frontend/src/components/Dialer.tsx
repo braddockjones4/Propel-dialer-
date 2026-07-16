@@ -39,7 +39,7 @@ interface DialerSettings {
 }
 
 type SessionView = 'setup' | 'session' | 'done';
-type BridgeStatus = 'idle' | 'ringing-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'call-ended' | 'ended' | 'error';
+type BridgeStatus = 'idle' | 'ringing-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'declined' | 'call-failed' | 'call-ended' | 'ended' | 'error';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const GOLD = '#C9A84C';
@@ -77,7 +77,7 @@ const DISPOSITIONS = [
   { key: 'appointment',    label: 'Appointment Set',    color: '#8b5cf6' },
   { key: 'callback',       label: 'Callback Scheduled', color: '#3b82f6' },
   { key: 'left-voicemail', label: 'Left Voicemail',     color: '#6b7280' },
-  { key: 'no-answer',      label: 'No Answer',          color: '#6b7280' },
+  { key: 'no-answer',      label: 'Rang Out / No VM',   color: '#6b7280' },
   { key: 'not-interested', label: 'Not Interested',     color: '#6b7280' },
   { key: 'wrong-number',   label: 'Wrong Number',       color: '#6b7280' },
   { key: 'dnc',            label: 'DNC',                color: '#ef4444' },
@@ -244,7 +244,7 @@ export default function Dialer() {
           return;
         }
         setBridgeStatus(data.status as BridgeStatus);
-        if (data.status === 'no-answer') setDisposition('no-answer');
+        if (['no-answer', 'declined', 'call-failed'].includes(data.status)) setDisposition('no-answer');
       }
     });
 
@@ -648,7 +648,7 @@ export default function Dialer() {
   const isWebrtcInCall   = settings.callMode === 'webrtc' && ['in-call','connecting','ringing'].includes(callStatus);
   const isWebrtcDone     = settings.callMode === 'webrtc' && callStatus === 'completed';
   const isBridgeActive   = settings.callMode === 'bridge' && ['ringing-agent','calling-contact','connected'].includes(bridgeStatus);
-  const isBridgeDone     = settings.callMode === 'bridge' && ['vm-dropped','no-answer','call-ended','ended'].includes(bridgeStatus);
+  const isBridgeDone     = settings.callMode === 'bridge' && ['vm-dropped','no-answer','declined','call-failed','call-ended','ended'].includes(bridgeStatus);
   const showCallBtn      = !isWebrtcInCall && !isBridgeActive && !isWebrtcDone && !isBridgeDone;
   const showDisposition  = isWebrtcDone || isBridgeDone;
 
@@ -657,7 +657,9 @@ export default function Dialer() {
     'calling-contact':  `Connecting to ${contact?.firstName ?? ''}…`,
     connected:          `Connected — ${contact?.firstName ?? ''}`,
     'vm-dropped':       'Voicemail dropped',
-    'no-answer':        'No answer',
+    'no-answer':        'Rang out — no voicemail',
+    'declined':         'Contact declined',
+    'call-failed':      'Call failed',
     'call-ended':       'Call ended',
     ended:              'Call ended',
     error:              'Call failed',
@@ -1169,7 +1171,9 @@ export default function Dialer() {
             {/* Call outcome banner — tells the agent exactly what happened */}
             {(() => {
               const outcome: Record<string, { icon: string; text: string; bg: string; color: string }> = {
-                'no-answer':   { icon: '📵', text: 'No answer — contact did not pick up', bg: '#f3f4f6', color: '#374151' },
+                'no-answer':   { icon: '📵', text: 'Rang out — no voicemail detected', bg: '#f3f4f6', color: '#374151' },
+                'declined':    { icon: '🚫', text: 'Contact declined the call', bg: '#fef2f2', color: '#dc2626' },
+                'call-failed': { icon: '⚠️', text: 'Number disconnected or invalid', bg: '#fef2f2', color: '#dc2626' },
                 'call-ended':  { icon: '', text: 'Call ended — contact answered and hung up', bg: '#f0fdf4', color: '#15803d' },
                 'vm-dropped':  { icon: '📨', text: 'Voicemail dropped successfully', bg: '#fefce8', color: '#92400e' },
                 ended:         { icon: '', text: 'Call ended', bg: '#f3f4f6', color: '#374151' },
