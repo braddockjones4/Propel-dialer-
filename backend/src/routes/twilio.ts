@@ -64,11 +64,12 @@ router.post('/token', (req: Request, res: Response) => {
 //
 // Two modes depending on what params the browser passes via device.connect():
 //
-// A) Conference mode (WebRTC + sync AMD):
-//    Browser passes SessionId + ConfName → browser joins a named Twilio conference.
-//    Backend creates outbound REST API call to contact with machineDetection:'DetectMessageEnd'.
-//    AMD fires synchronously → bridge-b-twiml plays VM inline (machine) or joins conference (human).
-//    Sync AMD is used because asyncAmdStatusCallback can miss on Render cold-start delays.
+// A) Live-audio WebRTC mode (SessionId, no ConfName):
+//    Browser gets a <Dial callerId="..."><Number machineDetection="DetectMessageEnd" url="...">
+//    Agent hears ringing → voicemail greeting → beep live through the browser.
+//    After the beep, webrtc-number-url is called with AnsweredBy:
+//      human  → <Response/> keeps the bridge alive
+//      machine → <Play vmUrl/><Hangup/> drops the pre-recorded voicemail
 //
 // B) Legacy direct dial (fallback / inbound):
 //    Browser passes To → plain <Dial> to the number. No AMD in this path.
@@ -77,11 +78,15 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
   const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // ── A) Conference mode ────────────────────────────────────────────────────
+  // ── A) Live-audio WebRTC <Dial> mode ─────────────────────────────────────
+  // Browser sends SessionId only (no ConfName) → agent hears ringing + greeting live.
+  // <Number machineDetection="DetectMessageEnd"> calls webrtc-number-url after the beep
+  // with AnsweredBy so we can drop the pre-recorded VM inline — same as bridge mode but
+  // the agent hears all audio live through the browser WebRTC connection.
   const confNameParam = req.body.ConfName as string | undefined;
   const sessionId     = req.body.SessionId as string | undefined;
 
-  if (confNameParam && sessionId) {
+  if (sessionId && !confNameParam) {
     const b = bridges.get(sessionId);
     if (!b) {
       twiml.say({ voice: 'Polly.Joanna' }, 'Session not found. Please try again.');
@@ -90,58 +95,39 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
       return;
     }
 
-    // Store browser call SID so bridge-hangup / bridge-b-status can disconnect it
     b.agentCallSid = req.body.CallSid as string;
     b.status = 'calling-contact';
 
-    // Determine caller ID: use agent's verified personal phone, else local presence
     const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } }).catch(() => null);
     const localFrom = await pickCallerId(b.contactPhone).catch(() => TWILIO_CALLER_ID || '');
     const contactFrom = (settings?.phoneVerified && settings?.personalPhone)
       ? settings.personalPhone
       : localFrom;
 
-    // SYNC AMD: machineDetection:'DetectMessageEnd' waits for the full voicemail
-    // greeting + beep, then calls bridge-b-twiml with AnsweredBy in the body.
-    // bridge-b-twiml handles the VM drop inline (same as bridge mode) which is
-    // the most reliable path — no separate async callback that can miss on cold start.
-    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-    const contactBTwimlUrl = `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}&userId=${encodeURIComponent(b.userId)}&confName=${encodeURIComponent(b.confName || '')}&agentCallSid=${encodeURIComponent(b.agentCallSid || '')}`;
-    console.log(`[WebRTC Bridge] Dialing ${b.contactPhone} | machineDetection=DetectMessageEnd | url=${contactBTwimlUrl}`);
-    try {
-      const contactCall = await client.calls.create({
-        to:   b.contactPhone,
-        from: contactFrom,
-        machineDetection: 'DetectMessageEnd',
-        url:            contactBTwimlUrl,
-        statusCallback: `${ngrokBase}/api/dialer/bridge-b-status?sessionId=${encodeURIComponent(sessionId)}`,
-        statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
-        statusCallbackMethod: 'POST',
-      } as any);
-      b.contactCallSid = contactCall.sid;
-      console.log(`[WebRTC Bridge] Outbound call ${contactCall.sid} created for session ${sessionId}`);
-    } catch (e: any) {
-      console.error('[WebRTC Bridge] Failed to call contact:', e.message);
-      b.status = 'ended';
-      twiml.say({ voice: 'Polly.Joanna' }, 'Could not reach the contact. Please try again.');
-      twiml.hangup();
-      res.type('text/xml').send(twiml.toString());
-      return;
-    }
-
     io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
-    // Agent's browser joins the named conference and waits.
-    // bridge-b-twiml will either join the contact (human) or play VM + disconnect agent (machine).
+    // <Dial> bridges the agent's browser audio to the contact immediately.
+    // Agent hears ringing → voicemail greeting → beep, all in real time.
+    // <Number machineDetection="DetectMessageEnd"> waits for the full greeting + beep,
+    // then calls webrtc-number-url with AnsweredBy in the body:
+    //   human         → return <Response/> to keep the bridge alive
+    //   machine_end_* → return <Play vmUrl/><Hangup/> + disconnect agent via REST API
+    const sid = encodeURIComponent(sessionId);
     const dial = twiml.dial({
-      action: `${ngrokBase}/api/dialer/bridge-a-done?sessionId=${sessionId}`,
+      callerId: contactFrom,
+      action:   `${ngrokBase}/api/dialer/webrtc-dial-done?sessionId=${sid}`,
     } as any);
-    (dial as any).conference(b.confName || '', {
-      startConferenceOnEnter: 'true',
-      endConferenceOnExit:    'false',
-      beep: 'false',
-    });
+
+    (dial as any).number({
+      machineDetection:     'DetectMessageEnd',
+      url:                  `${ngrokBase}/api/dialer/webrtc-number-url?sessionId=${sid}`,
+      urlMethod:            'POST',
+      statusCallback:       `${ngrokBase}/api/dialer/webrtc-contact-status?sessionId=${sid}`,
+      statusCallbackEvent:  'answered completed no-answer busy failed',
+      statusCallbackMethod: 'POST',
+    }, b.contactPhone);
+
+    console.log(`[WebRTC Dial] session=${sessionId} | dialing ${b.contactPhone} | caller=${contactFrom}`);
     res.type('text/xml').send(twiml.toString());
     return;
   }

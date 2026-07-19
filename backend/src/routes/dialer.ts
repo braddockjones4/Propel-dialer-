@@ -420,7 +420,6 @@ router.post('/call', async (req: Request, res: Response) => {
     const settings = await prisma.dialerSettings.findUnique({ where: { userId } }).catch(() => null);
 
     const sessionId = crypto.randomUUID();
-    const confName = `propel-${sessionId}`;
     const contactName = `${contact.firstName} ${contact.lastName}`.trim();
 
     if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
@@ -428,9 +427,9 @@ router.post('/call', async (req: Request, res: Response) => {
       contactId,
       contactPhone: contact.phone,
       contactName,
-      confName,              // conference room — browser joins, contact joins when they answer
+      confName: null,        // live-audio <Dial> mode — no conference room
       agentCallSid: null,   // set by /voice webhook when browser connects
-      contactCallSid: null,  // set immediately when REST API call is created in /voice webhook
+      contactCallSid: null,  // set by webrtc-contact-status when child call answers
       userId,
       voicemailUrl: settings?.voicemailUrl ?? null,
       status: 'waiting-agent',
@@ -440,7 +439,7 @@ router.post('/call', async (req: Request, res: Response) => {
     res.json({
       mode: 'webrtc',
       sessionId,
-      confName,
+      // no confName — voice webhook uses SessionId-only path → live-audio <Dial>
       contact: {
         id: contact.id,
         phone: contact.phone,
@@ -952,6 +951,128 @@ webhooks.post('/live-contact-join-twiml', (req: Request, res: Response) => {
     beep:                   'false',
   });
 
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── POST /api/dialer/webrtc-contact-status (public) ──────────────────────────
+// statusCallback for the <Number> inside <Dial> in live-audio WebRTC mode.
+// Fires when the contact's leg status changes. Captures the child call SID
+// (needed for vm-inject) and surfaces answered/no-answer to the frontend.
+webhooks.post('/webrtc-contact-status', (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const { CallStatus, CallSid } = req.body;
+  const b = bridges.get(sessionId);
+  console.log(`[webrtc-contact-status] session=${sessionId} | status=${CallStatus} | sid=${CallSid}`);
+
+  if (!b) { res.sendStatus(204); return; }
+
+  if (CallStatus === 'in-progress') {
+    b.contactCallSid = CallSid; // capture CHILD SID for potential manual-vm-drop
+    io.emit('bridge-status', { sessionId, status: 'contact-answered', contactName: b.contactName });
+  }
+
+  if (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed') {
+    b.status = 'no-answer';
+    const frontendStatus = CallStatus === 'busy' ? 'declined'
+                         : CallStatus === 'failed' ? 'call-failed'
+                         : 'no-answer';
+    io.emit('bridge-status', { sessionId, status: frontendStatus, contactName: b.contactName });
+  }
+
+  res.sendStatus(204);
+});
+
+// ─── POST /api/dialer/webrtc-number-url (public) ───────────────────────────────
+// Called by Twilio after AMD completes (machineDetection: DetectMessageEnd on <Number>).
+// This fires AFTER the full voicemail greeting + beep — agent has heard everything live.
+//   human         → return <Response/> (bridge stays active, agent and contact keep talking)
+//   machine_end_* → return <Play voicemailUrl/><Hangup/> + disconnect agent via REST API
+webhooks.post('/webrtc-number-url', async (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const { AnsweredBy } = req.body;
+  const b = bridges.get(sessionId);
+  const twiml = new twilio.twiml.VoiceResponse();
+  console.log(`[webrtc-number-url] session=${sessionId} | AnsweredBy=${AnsweredBy}`);
+
+  const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
+
+  if (!isMachine) {
+    // Human picked up — bridge is already live, just keep it going
+    if (b) { b.status = 'connected'; }
+    io.emit('bridge-status', { sessionId, status: 'connected', contactName: b?.contactName });
+    // Return empty response — the <Dial> bridge stays active
+    res.type('text/xml').send('<Response/>');
+    return;
+  }
+
+  // Voicemail detected — drop the pre-recorded message
+  if (b) { b.status = 'vm-dropped'; }
+  io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b?.contactName });
+
+  const fallbackText = process.env.VOICEMAIL_SCRIPT ||
+    `Hi, this is ${await getAgentName()} calling about your property. ` +
+    `Please give me a call back when you get a chance. Thank you!`;
+
+  try {
+    const settings = b?.userId
+      ? await prisma.dialerSettings.findUnique({
+          where:  { userId: b.userId },
+          select: { voicemailData: true, voicemailUrl: true },
+        })
+      : null;
+
+    if (settings?.voicemailData) {
+      const mimeType   = settings.voicemailData.match(/^data:([^;]+)/)?.[1] || '';
+      const isPlayable = mimeType === 'audio/wav' || mimeType.startsWith('audio/mp');
+      if (isPlayable && settings.voicemailUrl) {
+        console.log(`[webrtc-number-url] Playing WAV voicemail for session ${sessionId}`);
+        twiml.play(settings.voicemailUrl);
+      } else {
+        console.warn(`[webrtc-number-url] voicemailData is ${mimeType || 'unknown'} — using TTS`);
+        twiml.say({ voice: 'Polly.Joanna' }, fallbackText);
+      }
+    } else if (settings?.voicemailUrl) {
+      twiml.play(settings.voicemailUrl);
+    } else {
+      console.warn(`[webrtc-number-url] No voicemail configured — using TTS`);
+      twiml.say({ voice: 'Polly.Joanna' }, fallbackText);
+    }
+  } catch (e: any) {
+    console.error(`[webrtc-number-url] DB error: ${e.message} — using TTS`);
+    twiml.say({ voice: 'Polly.Joanna' }, fallbackText);
+  }
+
+  twiml.hangup();
+
+  // Disconnect the agent's browser call — UI already shows "vm-dropped" toast
+  if (b?.agentCallSid) {
+    twilioClient().calls(b.agentCallSid).update({ status: 'completed' }).catch((e: any) =>
+      console.error(`[webrtc-number-url] Failed to disconnect agent: ${e.message}`)
+    );
+  }
+
+  res.type('text/xml').send(twiml.toString());
+});
+
+// ─── POST /api/dialer/webrtc-dial-done (public) ────────────────────────────────
+// <Dial action> fires when the <Dial> verb ends (call finished, no-answer, etc.)
+webhooks.post('/webrtc-dial-done', (req: Request, res: Response) => {
+  const { sessionId } = req.query as { sessionId: string };
+  const { DialCallStatus } = req.body;
+  const b = bridges.get(sessionId);
+  console.log(`[webrtc-dial-done] session=${sessionId} | dialStatus=${DialCallStatus}`);
+
+  if (b && b.status !== 'vm-dropped' && b.status !== 'ended') {
+    const status = DialCallStatus === 'busy'      ? 'declined'
+                 : DialCallStatus === 'no-answer'  ? 'no-answer'
+                 : DialCallStatus === 'failed'     ? 'call-failed'
+                 : 'call-ended';
+    b.status = 'ended';
+    io.emit('bridge-status', { sessionId, status, contactName: b.contactName });
+  }
+
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.hangup();
   res.type('text/xml').send(twiml.toString());
 });
 
