@@ -119,12 +119,17 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
     } as any);
 
     (dial as any).number({
-      machineDetection:     'DetectMessageEnd',
-      url:                  `${ngrokBase}/api/dialer/webrtc-number-url?sessionId=${sid}`,
-      urlMethod:            'POST',
-      statusCallback:       `${ngrokBase}/api/dialer/webrtc-contact-status?sessionId=${sid}`,
-      statusCallbackEvent:  'answered completed no-answer busy failed',
-      statusCallbackMethod: 'POST',
+      machineDetection:          'DetectMessageEnd',
+      asyncAmd:                  'true',
+      asyncAmdStatusCallback:    `${ngrokBase}/api/dialer/webrtc-amd?sessionId=${sid}`,
+      asyncAmdStatusCallbackMethod: 'POST',
+      // url fires immediately on answer (AnsweredBy=undefined at this point — AMD not done yet)
+      // Return <Response/> to keep the bridge alive; AMD result arrives via asyncAmdStatusCallback
+      url:                       `${ngrokBase}/api/dialer/webrtc-number-url?sessionId=${sid}`,
+      urlMethod:                 'POST',
+      statusCallback:            `${ngrokBase}/api/dialer/webrtc-contact-status?sessionId=${sid}`,
+      statusCallbackEvent:       'answered completed no-answer busy failed',
+      statusCallbackMethod:      'POST',
     }, b.contactPhone);
 
     console.log(`[WebRTC Dial] session=${sessionId} | dialing ${b.contactPhone} | caller=${contactFrom}`);

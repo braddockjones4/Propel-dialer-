@@ -1104,7 +1104,8 @@ webhooks.post('/webrtc-amd', async (req: Request, res: Response) => {
   if (b) { b.status = 'vm-dropped'; }
   io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b?.contactName });
 
-  // CallSid from asyncAmdStatusCallback = contact's outbound call SID
+  // NOTE: for <Number asyncAmdStatusCallback>, CallSid = PARENT (agent browser) SID, not contact SID.
+  // Always use b.contactCallSid (set by webrtc-contact-status on answer) as the reliable source.
   const contactCallSid = b?.contactCallSid || CallSid;
 
   const fallbackText = process.env.VOICEMAIL_SCRIPT ||
