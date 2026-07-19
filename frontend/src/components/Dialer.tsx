@@ -530,9 +530,8 @@ export default function Dialer() {
         if (data.error) { alert(data.error); return; }
         setBridgeSessionId(data.sessionId);
         setBridgeStatus('calling-contact');
-        // Live-audio conference mode: browser joins named conference (SessionId + ConfName).
-        // asyncAmd on the REST API call means contact joins conference immediately on answer —
-        // agent hears voicemail greeting live. /webrtc-amd fires after beep and injects VM.
+        // WebRTC conference mode: browser joins named Twilio conference.
+        // Backend dials contact via REST API with sync AMD; bridge-b-twiml drops VM inline.
         await startCall(contact.phone, undefined, data.sessionId, data.confName);
       } catch (e: any) {
         alert('Call failed: ' + e.message);
@@ -777,7 +776,7 @@ export default function Dialer() {
           <Card title="Call mode" mb={14}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {([
-                { mode: 'webrtc', title: 'Browser Audio', sub: 'Hear ringing, greeting & VM drop live' },
+                { mode: 'webrtc', title: 'Browser Audio', sub: 'Browser mic & speaker • Auto VM drop' },
                 { mode: 'bridge', title: 'Personal Phone', sub: 'Twilio rings your cell first' },
               ] as const).map(opt => (
                 <button key={opt.mode} onClick={() => saveSettings({ callMode: opt.mode })}

@@ -64,11 +64,11 @@ router.post('/token', (req: Request, res: Response) => {
 //
 // Two modes depending on what params the browser passes via device.connect():
 //
-// A) Live-audio conference mode (WebRTC + asyncAmd):
+// A) Conference mode (WebRTC + sync AMD):
 //    Browser passes SessionId + ConfName → browser joins a named Twilio conference.
-//    Backend creates outbound REST API call to contact with asyncAmd:'true', so the
-//    contact joins the conference IMMEDIATELY on answer (before AMD finishes).
-//    Agent hears voicemail greeting live. asyncAmdStatusCallback → /webrtc-amd → injects VM.
+//    Backend creates outbound REST API call to contact with machineDetection:'DetectMessageEnd'.
+//    AMD fires synchronously → bridge-b-twiml plays VM inline (machine) or joins conference (human).
+//    Sync AMD is used because asyncAmdStatusCallback can miss on Render cold-start delays.
 //
 // B) Legacy direct dial (fallback / inbound):
 //    Browser passes To → plain <Dial> to the number. No AMD in this path.
@@ -101,24 +101,20 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
       ? settings.personalPhone
       : localFrom;
 
-    // ASYNC AMD: asyncAmd:'true' → Twilio calls contact's `url` immediately on answer
-    // (before AMD completes), so the contact joins the conference right away.
-    // The agent hears the voicemail greeting in real time while AMD analyzes.
-    // asyncAmdStatusCallback fires after the beep → /webrtc-amd injects the recorded VM.
+    // SYNC AMD: machineDetection:'DetectMessageEnd' waits for the full voicemail
+    // greeting + beep, then calls bridge-b-twiml with AnsweredBy in the body.
+    // bridge-b-twiml handles the VM drop inline (same as bridge mode) which is
+    // the most reliable path — no separate async callback that can miss on cold start.
     const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
     const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-    const liveJoinUrl = `${ngrokBase}/api/dialer/live-contact-join-twiml?sessionId=${encodeURIComponent(sessionId)}&confName=${encodeURIComponent(b.confName || '')}`;
-    console.log(`[WebRTC Bridge] Dialing ${b.contactPhone} | asyncAmd=DetectMessageEnd | joinUrl=${liveJoinUrl}`);
+    const contactBTwimlUrl = `${ngrokBase}/api/dialer/bridge-b-twiml?sessionId=${sessionId}&userId=${encodeURIComponent(b.userId)}&confName=${encodeURIComponent(b.confName || '')}&agentCallSid=${encodeURIComponent(b.agentCallSid || '')}`;
+    console.log(`[WebRTC Bridge] Dialing ${b.contactPhone} | machineDetection=DetectMessageEnd | url=${contactBTwimlUrl}`);
     try {
       const contactCall = await client.calls.create({
         to:   b.contactPhone,
         from: contactFrom,
-        machineDetection:             'DetectMessageEnd',
-        asyncAmd:                     'true',
-        asyncAmdStatusCallback:       `${ngrokBase}/api/dialer/webrtc-amd?sessionId=${encodeURIComponent(sessionId)}`,
-        asyncAmdStatusCallbackMethod: 'POST',
-        // url fires immediately when contact answers — joins the conference so agent hears them live
-        url:            liveJoinUrl,
+        machineDetection: 'DetectMessageEnd',
+        url:            contactBTwimlUrl,
         statusCallback: `${ngrokBase}/api/dialer/bridge-b-status?sessionId=${encodeURIComponent(sessionId)}`,
         statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
         statusCallbackMethod: 'POST',
@@ -136,15 +132,14 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
 
     io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
-    // Return conference TwiML: browser joins the named conference and hears silence
-    // until the contact answers (then hears their greeting live via the conference).
+    // Agent's browser joins the named conference and waits.
+    // bridge-b-twiml will either join the contact (human) or play VM + disconnect agent (machine).
     const dial = twiml.dial({
       action: `${ngrokBase}/api/dialer/bridge-a-done?sessionId=${sessionId}`,
     } as any);
     (dial as any).conference(b.confName || '', {
       startConferenceOnEnter: 'true',
-      endConferenceOnExit:    'false', // conference survives even if agent browser disconnects
-      // No waitUrl → silence while contact's phone rings (UI shows "Calling [Name]…")
+      endConferenceOnExit:    'false',
       beep: 'false',
     });
     res.type('text/xml').send(twiml.toString());
