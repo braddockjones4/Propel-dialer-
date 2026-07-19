@@ -530,10 +530,10 @@ export default function Dialer() {
         if (data.error) { alert(data.error); return; }
         setBridgeSessionId(data.sessionId);
         setBridgeStatus('calling-contact');
-        // Live-audio mode: browser dials the contact directly through <Dial> TwiML.
-        // Agent hears ringing, voicemail greeting, and their recording drop in real time.
-        // No confName — voice webhook detects SessionId-only and uses asyncAmd <Dial> path.
-        await startCall(contact.phone, undefined, data.sessionId);
+        // Live-audio conference mode: browser joins named conference (SessionId + ConfName).
+        // asyncAmd on the REST API call means contact joins conference immediately on answer —
+        // agent hears voicemail greeting live. /webrtc-amd fires after beep and injects VM.
+        await startCall(contact.phone, undefined, data.sessionId, data.confName);
       } catch (e: any) {
         alert('Call failed: ' + e.message);
         setBridgeStatus('idle');
