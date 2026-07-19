@@ -420,6 +420,7 @@ router.post('/call', async (req: Request, res: Response) => {
     const settings = await prisma.dialerSettings.findUnique({ where: { userId } }).catch(() => null);
 
     const sessionId = crypto.randomUUID();
+    const confName = `propel-${sessionId}`;
     const contactName = `${contact.firstName} ${contact.lastName}`.trim();
 
     if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
@@ -427,9 +428,9 @@ router.post('/call', async (req: Request, res: Response) => {
       contactId,
       contactPhone: contact.phone,
       contactName,
-      confName: null,        // live-audio <Dial> mode — no conference room
+      confName,              // agent joins conference; contact joins via REST API call
       agentCallSid: null,   // set by /voice webhook when browser connects
-      contactCallSid: null,  // set by webrtc-contact-status when child call answers
+      contactCallSid: null,  // set immediately after calls.create() in /voice webhook
       userId,
       voicemailUrl: settings?.voicemailUrl ?? null,
       status: 'waiting-agent',
@@ -439,7 +440,7 @@ router.post('/call', async (req: Request, res: Response) => {
     res.json({
       mode: 'webrtc',
       sessionId,
-      // no confName — voice webhook uses SessionId-only path → live-audio <Dial>
+      confName,   // browser passes ConfName → voice webhook → conference branch
       contact: {
         id: contact.id,
         phone: contact.phone,

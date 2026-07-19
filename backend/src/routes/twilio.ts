@@ -78,15 +78,18 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
   const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
   const twiml = new twilio.twiml.VoiceResponse();
 
-  // ── A) Live-audio WebRTC <Dial> mode ─────────────────────────────────────
-  // Browser sends SessionId only (no ConfName) → agent hears ringing + greeting live.
-  // <Number machineDetection="DetectMessageEnd"> calls webrtc-number-url after the beep
-  // with AnsweredBy so we can drop the pre-recorded VM inline — same as bridge mode but
-  // the agent hears all audio live through the browser WebRTC connection.
+  // ── A) WebRTC conference mode — live audio + async AMD via REST API ──────────
+  // Browser sends SessionId + ConfName → agent joins a named Twilio conference.
+  // Backend creates a TOP-LEVEL REST API call to the contact (not a <Dial> child)
+  // so we can later redirect it via calls.update() to play the VM.
+  //
+  // Contact joins the conference IMMEDIATELY on answer (via live-contact-join-twiml),
+  // so the agent hears the voicemail greeting live through the conference.
+  // asyncAmdStatusCallback fires after the beep → webrtc-amd injects the VM.
   const confNameParam = req.body.ConfName as string | undefined;
   const sessionId     = req.body.SessionId as string | undefined;
 
-  if (sessionId && !confNameParam) {
+  if (confNameParam && sessionId) {
     const b = bridges.get(sessionId);
     if (!b) {
       twiml.say({ voice: 'Polly.Joanna' }, 'Session not found. Please try again.');
@@ -104,40 +107,57 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
       ? settings.personalPhone
       : localFrom;
 
+    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const sid = encodeURIComponent(sessionId);
+
+    // Dial the contact as a TOP-LEVEL REST API call (not a <Dial> child).
+    // Top-level calls can be redirected via calls.update() — child <Dial> legs cannot.
+    // asyncAmd fires the AMD result to webrtc-amd AFTER the beep without blocking audio.
+    // The contact's initial url (live-contact-join-twiml) joins the conference immediately
+    // so the agent hears the greeting live. webrtc-amd then injects the VM.
+    try {
+      const contactCall = await client.calls.create({
+        to:   b.contactPhone,
+        from: contactFrom,
+        machineDetection:          'DetectMessageEnd',
+        asyncAmd:                  'true',
+        asyncAmdStatusCallback:    `${ngrokBase}/api/dialer/webrtc-amd?sessionId=${sid}`,
+        asyncAmdStatusCallbackMethod: 'POST',
+        url:            `${ngrokBase}/api/dialer/live-contact-join-twiml?sessionId=${sid}&confName=${encodeURIComponent(confNameParam)}`,
+        statusCallback: `${ngrokBase}/api/dialer/bridge-b-status?sessionId=${sid}`,
+        statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
+        statusCallbackMethod: 'POST',
+      } as any);
+      b.contactCallSid = contactCall.sid;
+      console.log(`[WebRTC Conf] session=${sessionId} | contact call ${contactCall.sid} | asyncAmd=true`);
+    } catch (e: any) {
+      console.error('[WebRTC Conf] Failed to call contact:', e.message);
+      b.status = 'ended';
+      twiml.say({ voice: 'Polly.Joanna' }, 'Could not reach the contact. Please try again.');
+      twiml.hangup();
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
+
     io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
-    // <Dial> bridges the agent's browser audio to the contact immediately.
-    // Agent hears ringing → voicemail greeting → beep, all in real time.
-    // <Number machineDetection="DetectMessageEnd"> waits for the full greeting + beep,
-    // then calls webrtc-number-url with AnsweredBy in the body:
-    //   human         → return <Response/> to keep the bridge alive
-    //   machine_end_* → return <Play vmUrl/><Hangup/> + disconnect agent via REST API
-    const sid = encodeURIComponent(sessionId);
+    // Agent joins the conference and waits. No waitUrl = silence while the contact's
+    // phone rings; once they answer, live-contact-join-twiml puts them in the same
+    // conference and the agent immediately hears the greeting.
     const dial = twiml.dial({
-      callerId: contactFrom,
-      action:   `${ngrokBase}/api/dialer/webrtc-dial-done?sessionId=${sid}`,
+      action: `${ngrokBase}/api/dialer/bridge-a-done?sessionId=${sid}`,
     } as any);
-
-    (dial as any).number({
-      machineDetection:          'DetectMessageEnd',
-      asyncAmd:                  'true',
-      asyncAmdStatusCallback:    `${ngrokBase}/api/dialer/webrtc-amd?sessionId=${sid}`,
-      asyncAmdStatusCallbackMethod: 'POST',
-      // url fires immediately on answer (AnsweredBy=undefined at this point — AMD not done yet)
-      // Return <Response/> to keep the bridge alive; AMD result arrives via asyncAmdStatusCallback
-      url:                       `${ngrokBase}/api/dialer/webrtc-number-url?sessionId=${sid}`,
-      urlMethod:                 'POST',
-      statusCallback:            `${ngrokBase}/api/dialer/webrtc-contact-status?sessionId=${sid}`,
-      statusCallbackEvent:       'answered completed no-answer busy failed',
-      statusCallbackMethod:      'POST',
-    }, b.contactPhone);
-
-    console.log(`[WebRTC Dial] session=${sessionId} | dialing ${b.contactPhone} | caller=${contactFrom}`);
+    (dial as any).conference(confNameParam, {
+      startConferenceOnEnter: 'true',
+      endConferenceOnExit:    'false',
+      beep:                   'false',
+    });
     res.type('text/xml').send(twiml.toString());
     return;
   }
 
-  // ── B) Legacy direct dial ─────────────────────────────────────────────────
+    // ── B) Legacy direct dial ─────────────────────────────────────────────────
   const to              = req.body.To as string;
   const personalCallerId = req.body.CallerId as string | undefined;
 
