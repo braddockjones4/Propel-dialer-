@@ -152,6 +152,8 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
       startConferenceOnEnter: 'true',
       endConferenceOnExit:    'false',
       beep:                   'false',
+      waitUrl:                `${ngrokBase}/api/dialer/ringback-twiml`,
+      waitMethod:             'GET',
     });
     res.type('text/xml').send(twiml.toString());
     return;

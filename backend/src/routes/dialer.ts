@@ -450,6 +450,17 @@ router.post('/call', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/dialer/ringback-twiml (public) ─────────────────────────────────
+// waitUrl for the agent's conference. Plays a US-style ring tone loop so the
+// agent hears the phone ringing while the contact's line is dialing.
+// Served as GET because Twilio fetches waitUrl via GET by default.
+webhooks.get('/ringback-twiml', (_req: Request, res: Response) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'https://propeldialer.com';
+  const twiml = new twilio.twiml.VoiceResponse();
+  twiml.play({ loop: 0 }, `${frontendUrl}/ring.mp3`);
+  res.type('text/xml').send(twiml.toString());
+});
+
 // ─── POST /api/dialer/bridge-a-twiml (public) ────────────────────────────────
 // TwiML for agent's personal phone (Leg A). Agent hears contact name then waits in conf.
 webhooks.post('/bridge-a-twiml', (req: Request, res: Response) => {
