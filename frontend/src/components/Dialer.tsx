@@ -530,8 +530,10 @@ export default function Dialer() {
         if (data.error) { alert(data.error); return; }
         setBridgeSessionId(data.sessionId);
         setBridgeStatus('calling-contact');
-        // Browser joins the named conference; AMD runs server-side on the outbound call
-        await startCall(contact.phone, undefined, data.sessionId, data.confName);
+        // Live-audio mode: browser dials the contact directly through <Dial> TwiML.
+        // Agent hears ringing, voicemail greeting, and their recording drop in real time.
+        // No confName — voice webhook detects SessionId-only and uses asyncAmd <Dial> path.
+        await startCall(contact.phone, undefined, data.sessionId);
       } catch (e: any) {
         alert('Call failed: ' + e.message);
         setBridgeStatus('idle');
@@ -578,10 +580,11 @@ export default function Dialer() {
 
   // ─── End call ───────────────────────────────────────────────────────────────
   const handleEndCall = useCallback(async () => {
-    // If the contact answered and AMD is still running (not yet connected as human),
-    // voicemail is in progress. Don't kill the contact call — let AMD finish and drop the VM.
-    // Auto-advance immediately so the agent can move on.
-    const vmInProgress = bridgeStatus === 'calling-contact' && contactAnswered;
+    // Bridge mode only: contact answered and AMD is still running — voicemail is in progress.
+    // Agent can escape early; AMD continues silently and drops the VM then cleans up.
+    // In live-audio WebRTC mode, the agent is hearing the call directly, so they stay
+    // connected until the voicemail plays through and the call ends naturally.
+    const vmInProgress = settings.callMode === 'bridge' && bridgeStatus === 'calling-contact' && contactAnswered;
 
     endCall(); // always disconnect browser WebRTC immediately
 
@@ -774,7 +777,7 @@ export default function Dialer() {
           <Card title="Call mode" mb={14}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
               {([
-                { mode: 'webrtc', title: 'Browser Audio', sub: 'Use computer mic & speakers' },
+                { mode: 'webrtc', title: 'Browser Audio', sub: 'Hear ringing, greeting & VM drop live' },
                 { mode: 'bridge', title: 'Personal Phone', sub: 'Twilio rings your cell first' },
               ] as const).map(opt => (
                 <button key={opt.mode} onClick={() => saveSettings({ callMode: opt.mode })}
@@ -1141,7 +1144,8 @@ export default function Dialer() {
 
           {(isWebrtcInCall || isBridgeActive) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* Drop VM button — visible when contact has answered but AMD is still running */}
+              {/* Drop VM button — bridge mode only. In live-audio WebRTC mode AMD handles it
+                  automatically and the agent hears the drop happen in real time. */}
               {settings.callMode === 'bridge' && bridgeStatus === 'calling-contact' && contactAnswered && (
                 <button
                   onClick={handleDropVm}

@@ -204,10 +204,14 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
       let params: Record<string, string>;
 
       if (sessionId && confName) {
-        // Conference mode: browser joins a named Twilio conference.
-        // The backend already created the outbound call to the contact via REST API
-        // with machineDetection — AMD is guaranteed to fire.
+        // Bridge / conference mode: browser joins a named Twilio conference.
+        // Backend already created the outbound call to contact via REST API with AMD.
         params = { SessionId: sessionId, ConfName: confName };
+      } else if (sessionId) {
+        // Live-audio WebRTC mode: browser dials through a <Dial> TwiML response.
+        // Agent hears ringing, voicemail greeting, and their recorded message drop.
+        // Voice webhook detects SessionId without ConfName → uses asyncAmd <Dial> path.
+        params = { SessionId: sessionId };
       } else {
         // Legacy direct-dial mode (used for inbound calls / fallback)
         params = { To: phoneNumber };
