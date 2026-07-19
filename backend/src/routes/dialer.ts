@@ -25,6 +25,7 @@ import prisma from '../db';
 import { pickCallerId } from './localPresence';
 import { io } from '../socket';
 import { getAgentName } from '../agent/settings';
+import { RINGBACK_MP3_BUF } from '../ringback';
 
 const router = Router();       // auth-protected endpoints
 export const webhooks = Router(); // public Twilio webhook endpoints (no auth)
@@ -450,14 +451,22 @@ router.post('/call', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /api/dialer/ring.mp3 (public) ───────────────────────────────────────
+// Serves the US ringback tone MP3 directly from the backend binary.
+// No dependency on FRONTEND_URL — Twilio fetches this when playing the waitUrl.
+webhooks.get('/ring.mp3', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Content-Length', RINGBACK_MP3_BUF.length);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(RINGBACK_MP3_BUF);
+});
+
 // ─── GET /api/dialer/ringback-twiml (public) ─────────────────────────────────
-// waitUrl for the agent's conference. Plays a US-style ring tone loop so the
-// agent hears the phone ringing while the contact's line is dialing.
-// Served as GET because Twilio fetches waitUrl via GET by default.
+// waitUrl for the agent's conference — plays the US ringback loop from our own backend.
 webhooks.get('/ringback-twiml', (_req: Request, res: Response) => {
-  const frontendUrl = process.env.FRONTEND_URL || 'https://propeldialer.com';
+  const backendUrl = process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com';
   const twiml = new twilio.twiml.VoiceResponse();
-  twiml.play({ loop: 0 }, `${frontendUrl}/ring.mp3`);
+  twiml.play({ loop: 0 }, `${backendUrl}/api/dialer/ring.mp3`);
   res.type('text/xml').send(twiml.toString());
 });
 
