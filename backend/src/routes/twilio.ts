@@ -148,9 +148,13 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
     const dial = twiml.dial({
       action: `${ngrokBase}/api/dialer/bridge-a-done?sessionId=${sid}`,
     } as any);
+    // Agent waits in the conference (startConferenceOnEnter:'false') so Twilio
+    // plays the waitUrl ringback tone until the contact joins and starts the conf.
+    // Contact's live-contact-join-twiml uses startConferenceOnEnter:'true',
+    // so the moment they answer the ringback stops and live audio begins.
     (dial as any).conference(confNameParam, {
-      startConferenceOnEnter: 'true',
-      endConferenceOnExit:    'false',
+      startConferenceOnEnter: 'false',
+      endConferenceOnExit:    'true',
       beep:                   'false',
       waitUrl:                `${ngrokBase}/api/dialer/ringback-twiml`,
       waitMethod:             'GET',
@@ -267,6 +271,9 @@ router.post('/voicemail-drop', validateTwilioSig, async (req: Request, res: Resp
 router.post('/call-status', validateTwilioSig, async (req: Request, res: Response) => {
   const { CallSid, CallStatus, CallDuration, To } = req.body;
   console.log(`[Call] SID: ${CallSid} | Status: ${CallStatus} | Duration: ${CallDuration}s | To: ${To}`);
+
+  // Skip follow-up sequences for WebRTC browser calls (To is empty or starts with 'client:')
+  if (!To || To.startsWith('client:')) { res.sendStatus(204); return; }
 
   try {
     const contact: ContactContext = { firstName: 'there', fullName: To, address: 'your property', phone: To };
