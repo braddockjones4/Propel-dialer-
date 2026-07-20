@@ -963,16 +963,17 @@ webhooks.post('/live-contact-join-twiml', (req: Request, res: Response) => {
 
   // Join the conference immediately — AMD is running asynchronously.
   // Agent is already in this conference and will hear the contact's audio instantly.
-  const dial = twiml.dial({
-    action: `${BACKEND()}/api/dialer/bridge-b-done?sessionId=${sessionId}`,
-  });
-  (dial as any).conference(confName, {
-    startConferenceOnEnter: 'true',
-    endConferenceOnExit:    'false', // conference stays alive after contact leaves (agent may still be present)
-    beep:                   'false',
-  });
-
-  res.type('text/xml').send(twiml.toString());
+  // Raw XML to avoid Twilio library conference() arg-order confusion.
+  const confXml = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<Response>`,
+    `  <Dial action="${BACKEND()}/api/dialer/bridge-b-done?sessionId=${sessionId}">`,
+    `    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false">${confName}</Conference>`,
+    `  </Dial>`,
+    `</Response>`,
+  ].join('\n');
+  console.log('[live-contact-join-twiml] TwiML:', confXml);
+  res.type('text/xml').send(confXml);
 });
 
 // ─── POST /api/dialer/webrtc-contact-status (public) ──────────────────────────

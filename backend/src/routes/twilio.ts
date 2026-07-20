@@ -142,24 +142,21 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
 
     io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
-    // Agent joins the conference and waits. No waitUrl = silence while the contact's
-    // phone rings; once they answer, live-contact-join-twiml puts them in the same
-    // conference and the agent immediately hears the greeting.
-    const dial = twiml.dial({
-      action: `${ngrokBase}/api/dialer/bridge-a-done?sessionId=${sid}`,
-    } as any);
-    // Agent waits in the conference (startConferenceOnEnter:'false') so Twilio
-    // plays the waitUrl ringback tone until the contact joins and starts the conf.
-    // Contact's live-contact-join-twiml uses startConferenceOnEnter:'true',
-    // so the moment they answer the ringback stops and live audio begins.
-    (dial as any).conference(confNameParam, {
-      startConferenceOnEnter: 'false',
-      endConferenceOnExit:    'true',
-      beep:                   'false',
-      waitUrl:                `${ngrokBase}/api/dialer/ringback-twiml`,
-      waitMethod:             'GET',
-    });
-    res.type('text/xml').send(twiml.toString());
+    // Build TwiML as raw XML to avoid Twilio library conference() arg-order confusion.
+    // Agent waits (startConferenceOnEnter=false) and hears the ringback waitUrl until
+    // the contact joins with startConferenceOnEnter=true, which starts the conference
+    // and switches the agent to live audio.
+    const confXml = [
+      `<?xml version="1.0" encoding="UTF-8"?>`,
+      `<Response>`,
+      `  <Dial action="${ngrokBase}/api/dialer/bridge-a-done?sessionId=${sid}">`,
+      `    <Conference startConferenceOnEnter="false" endConferenceOnExit="true" beep="false"`,
+      `      waitUrl="${ngrokBase}/api/dialer/ringback-twiml" waitMethod="GET">${confNameParam}</Conference>`,
+      `  </Dial>`,
+      `</Response>`,
+    ].join('\n');
+    console.log('[WebRTC Conf] agent TwiML:', confXml);
+    res.type('text/xml').send(confXml);
     return;
   }
 
