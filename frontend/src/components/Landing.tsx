@@ -71,9 +71,20 @@ export default function Landing({ onSignIn }: Props) {
 
       {/* Footer */}
       <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', padding: '20px 24px', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
-        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.15)', letterSpacing: '0.08em' }}>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.15)', letterSpacing: '0.08em', marginBottom: 8 }}>
           Built by Compass Solutions &nbsp;·&nbsp; © 2026
-        </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 20 }}>
+          <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: 'rgba(201,168,76,0.4)', letterSpacing: '0.08em', textDecoration: 'none' }}>
+            Terms of Service
+          </a>
+          <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: 'rgba(201,168,76,0.4)', letterSpacing: '0.08em', textDecoration: 'none' }}>
+            Privacy Policy
+          </a>
+          <a href="/tcpa.html" target="_blank" rel="noopener noreferrer" style={{ fontSize: 10, color: 'rgba(201,168,76,0.4)', letterSpacing: '0.08em', textDecoration: 'none' }}>
+            TCPA Policy
+          </a>
+        </div>
       </div>
     </div>
   );

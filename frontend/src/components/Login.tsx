@@ -16,6 +16,7 @@ export default function Login({ onBack }: Props) {
   const [success,  setSuccess]  = useState('');
   const [loading,  setLoading]  = useState(false);
   const [resetToken, setResetToken] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // Check for reset token in URL
   useEffect(() => {
@@ -49,6 +50,11 @@ export default function Login({ onBack }: Props) {
         setSuccess('Password reset! Signing you in…');
         setTimeout(() => { window.location.href = window.location.pathname; }, 1500);
       } catch { setError('Something went wrong. Try again.'); }
+      setLoading(false); return;
+    }
+
+    if (mode === 'register' && !termsAccepted) {
+      setError('Please accept the Terms of Service and Privacy Policy to continue.');
       setLoading(false); return;
     }
 
@@ -152,6 +158,24 @@ export default function Login({ onBack }: Props) {
                   style={inputStyle}
                 />
               </div>
+            )}
+
+            {mode === 'register' && (
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginTop: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={e => setTermsAccepted(e.target.checked)}
+                  style={{ marginTop: 2, flexShrink: 0, accentColor: '#C9A84C' }}
+                />
+                <span style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.5 }}>
+                  I agree to the{' '}
+                  <a href="/terms.html" target="_blank" rel="noopener noreferrer" style={{ color: '#C9A84C', textDecoration: 'underline' }}>Terms of Service</a>
+                  {' '}and{' '}
+                  <a href="/privacy.html" target="_blank" rel="noopener noreferrer" style={{ color: '#C9A84C', textDecoration: 'underline' }}>Privacy Policy</a>
+                  . I understand I am solely responsible for TCPA compliance.
+                </span>
+              </label>
             )}
 
             {success && (
