@@ -8,10 +8,10 @@ const router = Router();
 const db = prisma as any; // cast so missing models don't cause TS errors before prisma generate
 
 // ── GET /api/appointments/upcoming ───────────────────────────────────────────
-router.get('/upcoming', async (_req: Request, res: Response) => {
+router.get('/upcoming', async (req: Request, res: Response) => {
   try {
     const appts = await db.appointment.findMany({
-      where: { scheduledAt: { gte: new Date() }, status: 'confirmed' },
+      where: { contact: { userId: (req as any).user?.id }, scheduledAt: { gte: new Date() }, status: 'confirmed' },
       include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true, address: true } } },
       orderBy: { scheduledAt: 'asc' },
       take: 10,
@@ -26,8 +26,9 @@ router.get('/upcoming', async (_req: Request, res: Response) => {
 // ── GET /api/appointments ─────────────────────────────────────────────────────
 router.get('/', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id;
     const { month, year } = req.query;
-    let where: any = {};
+    let where: any = { contact: { userId } };
     if (month && year) {
       const start = new Date(Number(year), Number(month) - 1, 1);
       const end   = new Date(Number(year), Number(month), 1);

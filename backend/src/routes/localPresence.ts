@@ -15,32 +15,34 @@ function extractAreaCode(phone: string): string {
   return '';
 }
 
-// Pick best local number for a given destination phone
-// Returns the matching local number or falls back to default caller ID
-export async function pickCallerId(destinationPhone: string): Promise<string> {
+// Pick best local number for a given destination phone, scoped to a user
+export async function pickCallerId(destinationPhone: string, userId?: string | null): Promise<string> {
   const areaCode = extractAreaCode(destinationPhone);
   const defaultCallerId = process.env.TWILIO_CALLER_ID || '';
 
   if (!areaCode) return defaultCallerId;
 
-  // Try exact area code match first
-  const match = await prisma.localNumber.findFirst({
-    where: { areaCode, active: true },
-  });
+  const userFilter = userId ? { userId } : {};
 
+  const match = await (prisma.localNumber as any).findFirst({
+    where: { areaCode, active: true, ...userFilter },
+  });
   if (match) return match.number;
 
-  // Fall back to any active local number (still better than your real number)
-  const any = await prisma.localNumber.findFirst({ where: { active: true } });
+  const any = await (prisma.localNumber as any).findFirst({ where: { active: true, ...userFilter } });
   if (any) return any.number;
 
   return defaultCallerId;
 }
 
 // ─── GET /api/local-presence ──────────────────────────────────────────────────
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
-    const numbers = await prisma.localNumber.findMany({ orderBy: { areaCode: 'asc' } });
+    const userId = (req as any).user?.id as string;
+    const numbers = await (prisma.localNumber as any).findMany({
+      where: { userId },
+      orderBy: { areaCode: 'asc' },
+    });
     res.json(numbers);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -85,8 +87,9 @@ router.post('/buy', async (req: Request, res: Response) => {
       friendlyName:  label || `Propel Local — ${areaCode}`,
     });
 
-    const saved = await prisma.localNumber.create({
-      data: { number: purchased.phoneNumber, areaCode, state: state || null, label: label || null, active: true },
+    const userId = (req as any).user?.id as string | null;
+    const saved = await (prisma.localNumber as any).create({
+      data: { number: purchased.phoneNumber, areaCode, state: state || null, label: label || null, active: true, userId },
     });
 
     res.status(201).json(saved);
@@ -107,8 +110,9 @@ router.post('/add', async (req: Request, res: Response) => {
   }
 
   try {
-    const saved = await prisma.localNumber.create({
-      data: { number, areaCode, state: state || null, label: label || null, active: true },
+    const userId = (req as any).user?.id as string | null;
+    const saved = await (prisma.localNumber as any).create({
+      data: { number, areaCode, state: state || null, label: label || null, active: true, userId },
     });
     res.status(201).json(saved);
   } catch (e: any) {
@@ -120,7 +124,7 @@ router.post('/add', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const { active, label } = req.body;
-    const updated = await prisma.localNumber.update({
+    const updated = await (prisma.localNumber as any).update({
       where: { id: req.params.id },
       data: { active, label },
     });
@@ -134,7 +138,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 // ─── DELETE /api/local-presence/:id ──────────────────────────────────────────
 // Soft-delete (deactivate) — actual Twilio release requires manual action
 router.delete('/:id', async (req: Request, res: Response) => {
-  const number = await prisma.localNumber.findUnique({ where: { id: req.params.id } });
+  const number = await (prisma.localNumber as any).findUnique({ where: { id: req.params.id } });
   if (!number) { res.status(404).json({ error: 'Not found' }); return; }
 
   // Optionally release from Twilio
@@ -152,7 +156,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   }
 
   try {
-    await prisma.localNumber.delete({ where: { id: req.params.id } });
+    await (prisma.localNumber as any).delete({ where: { id: req.params.id } });
     res.json({ deleted: true });
   } catch (e: any) {
     if (e.code === 'P2025') { res.status(404).json({ error: 'Not found' }); return; }

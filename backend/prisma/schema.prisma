@@ -9,9 +9,11 @@ datasource db {
 
 model Contact {
   id          String    @id @default(cuid())
+  userId      String?                       // owner — null = legacy pre-multitenancy
+  user        User?     @relation(fields: [userId], references: [id])
   firstName   String
   lastName    String
-  phone       String?   @unique
+  phone       String?                       // no longer globally unique — unique per user via @@unique below
   address     String?
   city        String?
   state       String?
@@ -32,6 +34,8 @@ model Contact {
   agentActions AgentAction[]
   agentPaused  Boolean       @default(false) // exclude this contact from autonomous agent
 
+  @@unique([userId, phone])               // phone unique within a user's contacts
+  @@index([userId])
   @@index([status])
   @@index([contactGroup])
   @@index([leadScore, updatedAt])
@@ -78,12 +82,15 @@ model VoicemailScript {
 
 model LocalNumber {
   id          String   @id @default(cuid())
-  number      String   @unique  // E.164 format: +14105551234
+  userId      String?           // owner — scopes numbers per user
+  number      String            // E.164 format: +14105551234
   areaCode    String            // "410"
   state       String?           // "MD"
   label       String?           // optional friendly label
   active      Boolean  @default(true)
   purchasedAt DateTime @default(now())
+
+  @@unique([userId, number])    // number unique per user
 }
 
 model ScheduledBlast {
@@ -151,6 +158,7 @@ model User {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   dialerSettings DialerSettings?
+  contacts       Contact[]
 }
 
 
