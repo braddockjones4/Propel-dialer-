@@ -31,6 +31,8 @@ import Voicemails from './components/Voicemails';
 import Dashboard from './components/Dashboard';
 import AgentChat from './components/AgentChat';
 import EmailBlast from './components/EmailBlast';
+import OnboardingWizard from './components/OnboardingWizard';
+import { API_BASE, authFetch } from './config';
 type Page = 'dashboard' | 'dialer' | 'contacts' | 'pipeline' | 'voicemails' | 'appointments' | 'analytics' | 'agent' | 'email' | 'settings';
 
 const NAV: { id: Page; label: string }[] = [
@@ -53,6 +55,7 @@ function AppInner() {
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showLogin, setShowLogin]   = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const { toast: addToast } = useToast();
   const [sharedVcfText, setSharedVcfText] = useState<string | undefined>(undefined);
 
@@ -111,6 +114,23 @@ function AppInner() {
       </div>
     );
   }
+
+  // Check onboarding status when user first loads in
+  useEffect(() => {
+    if (!user) return;
+    authFetch(`${API_BASE}/dialer/twilio-credentials`).then(async r => {
+      const d = await r.json();
+      // Also check onboarding step from dialer settings
+      authFetch(`${API_BASE}/dialer/onboarding-step`).then(async r2 => {
+        if (!r2.ok) return;
+        const d2 = await r2.json();
+        if ((d2.step ?? 5) < 5) setShowOnboarding(true);
+      }).catch(() => {
+        // If endpoint doesn't exist yet, check legacy way: no twilio creds = new user
+        if (!d.hasCreds) setShowOnboarding(true);
+      });
+    }).catch(() => {});
+  }, [user?.id]);
 
   if (!user) {
     if (showLogin) return <Login onBack={() => setShowLogin(false)} />;
@@ -262,6 +282,10 @@ function AppInner() {
           .full-page-h { height: calc(100vh - 49px) !important; }
         }
       `}</style>
+
+      {showOnboarding && (
+        <OnboardingWizard onComplete={() => setShowOnboarding(false)} />
+      )}
     </>
   );
 }

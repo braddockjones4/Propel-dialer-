@@ -8,6 +8,7 @@ import prisma from '../db';
 import { transcribeAndScoreCall } from './transcription';
 import { bridges } from './dialer';
 import { io } from '../socket';
+import { getTwilioCreds, getTwilioClient } from '../twilioClient';
 
 const router = Router();
 
@@ -27,13 +28,17 @@ function validateTwilioSig(req: Request, res: Response, next: NextFunction): voi
 const callToUser = new Map<string, string>();
 
 // ─── POST /api/twilio/token ───────────────────────────────────────────────────
-router.post('/token', (req: Request, res: Response) => {
+// requireAuth is applied at server.ts level before this route — req.user is set.
+router.post('/token', async (req: Request, res: Response) => {
   try {
-    const { TWILIO_ACCOUNT_SID, TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_TWIML_APP_SID } =
-      process.env;
+    const userId = (req as any).user?.id as string | undefined;
+    const creds = await getTwilioCreds(userId);
 
-    if (!TWILIO_ACCOUNT_SID || !TWILIO_API_KEY || !TWILIO_API_SECRET || !TWILIO_TWIML_APP_SID) {
-      res.status(500).json({ error: 'Twilio credentials not configured.' });
+    if (!creds.accountSid || !creds.apiKey || !creds.apiSecret || !creds.twimlAppSid) {
+      res.status(500).json({
+        error: 'Twilio credentials not configured.',
+        needsSetup: true,
+      });
       return;
     }
 
@@ -41,13 +46,13 @@ router.post('/token', (req: Request, res: Response) => {
     const AccessToken = twilio.jwt.AccessToken;
     const VoiceGrant = AccessToken.VoiceGrant;
 
-    const token = new AccessToken(TWILIO_ACCOUNT_SID, TWILIO_API_KEY, TWILIO_API_SECRET, {
+    const token = new AccessToken(creds.accountSid, creds.apiKey, creds.apiSecret, {
       identity,
       ttl: 3600,
     });
 
     const voiceGrant = new VoiceGrant({
-      outgoingApplicationSid: TWILIO_TWIML_APP_SID,
+      outgoingApplicationSid: creds.twimlAppSid,
       incomingAllow: true,
     });
 
@@ -74,7 +79,6 @@ router.post('/token', (req: Request, res: Response) => {
 // B) Legacy direct dial (fallback / inbound):
 //    Browser passes To → plain <Dial> to the number. No AMD in this path.
 router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => {
-  const { TWILIO_CALLER_ID } = process.env;
   const ngrokBase = process.env.NGROK_URL || process.env.BACKEND_URL || `https://propel-dialer-backend.onrender.com`;
   const twiml = new twilio.twiml.VoiceResponse();
 
@@ -101,14 +105,12 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
     b.agentCallSid = req.body.CallSid as string;
     b.status = 'calling-contact';
 
+    const { client, creds } = await getTwilioClient(b.userId);
     const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } }).catch(() => null);
-    const localFrom = await pickCallerId(b.contactPhone).catch(() => TWILIO_CALLER_ID || '');
+    const localFrom = await pickCallerId(b.contactPhone).catch(() => creds.callerId);
     const contactFrom = (settings?.phoneVerified && settings?.personalPhone)
       ? settings.personalPhone
       : localFrom;
-
-    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
     const sid = encodeURIComponent(sessionId);
 
     // Dial the contact as a TOP-LEVEL REST API call (not a <Dial> child).
@@ -163,14 +165,16 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
     // ── B) Legacy direct dial ─────────────────────────────────────────────────
   const to              = req.body.To as string;
   const personalCallerId = req.body.CallerId as string | undefined;
+  const legacyUserId = (req as any).user?.id as string | undefined;
+  const legacyCreds = await getTwilioCreds(legacyUserId);
 
-  if (!to || !TWILIO_CALLER_ID) {
+  if (!to || !legacyCreds.callerId) {
     twiml.say('Configuration error.');
     res.type('text/xml').send(twiml.toString());
     return;
   }
 
-  const localCallerId   = await pickCallerId(to).catch(() => TWILIO_CALLER_ID);
+  const localCallerId   = await pickCallerId(to).catch(() => legacyCreds.callerId);
   const effectiveCallerId = personalCallerId || localCallerId;
 
   const dial = twiml.dial({
@@ -213,9 +217,8 @@ router.post('/amd-status', validateTwilioSig, async (req: Request, res: Response
   if (isMachine && CallSid) {
     console.log(`[AMD] Machine detected — dropping voicemail for ${To}, userId=${userId ?? 'unknown'}`);
     try {
-      const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, BACKEND_URL, NGROK_URL } = process.env;
-      const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-      const backendBase = BACKEND_URL || NGROK_URL || 'https://propel-dialer-backend.onrender.com';
+      const { client, creds } = await getTwilioClient(userId);
+      const backendBase = process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com';
 
       // Use format-aware TwiML endpoint if we have a userId.
       // It checks audio format at play time: WAV/MP3 → <Play>, webm/none → TTS <Say>.
@@ -226,7 +229,7 @@ router.post('/amd-status', validateTwilioSig, async (req: Request, res: Response
         await client.calls(CallSid).update({ url: vmPlayUrl, method: 'POST' } as any);
       } else {
         const vmScript = process.env.VOICEMAIL_SCRIPT ||
-          `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
+          `Hi, this is ${creds.agentName} calling about your property. ` +
           `Please call me back when you get a chance. Thank you!`;
         await client.calls(CallSid).update({
           twiml: `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`,
@@ -247,13 +250,13 @@ router.post('/voicemail-drop', validateTwilioSig, async (req: Request, res: Resp
   const { callSid } = req.body;
   if (!callSid) { res.status(400).json({ error: 'callSid required' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
+  const userId = (req as any).user?.id as string | undefined;
+  const { client, creds } = await getTwilioClient(userId);
   const vmScript = process.env.VOICEMAIL_SCRIPT ||
-    `Hi, this is ${process.env.AGENT_NAME || 'Braddock'} calling about your property. ` +
-    `I'd love to connect — please call me back at ${process.env.AGENT_PHONE || 'my office'}. Thank you and have a great day!`;
+    `Hi, this is ${creds.agentName} calling about your property. ` +
+    `I'd love to connect — please call me back at ${creds.agentPhone || 'my office'}. Thank you and have a great day!`;
 
   try {
-    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
     const dropTwiml = `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`;
     await client.calls(callSid).update({ twiml: dropTwiml });
     res.json({ dropped: true });
@@ -336,8 +339,9 @@ router.get('/recording-proxy', async (req: Request, res: Response) => {
     }
   } catch { res.status(400).json({ error: 'Invalid URL' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+  const userId = (req as any).user?.id as string | undefined;
+  const creds = await getTwilioCreds(userId);
+  if (!creds.accountSid || !creds.authToken) {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
 
@@ -345,7 +349,7 @@ router.get('/recording-proxy', async (req: Request, res: Response) => {
     const https = await import('https');
     const http  = await import('http');
     const targetUrl = new URL(url);
-    const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+    const auth = Buffer.from(`${creds.accountSid}:${creds.authToken}`).toString('base64');
     const lib  = targetUrl.protocol === 'https:' ? https : http;
 
     lib.get(url, { headers: { Authorization: `Basic ${auth}` } }, (upstream) => {

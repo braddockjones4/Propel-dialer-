@@ -26,18 +26,13 @@ import { pickCallerId } from './localPresence';
 import { io } from '../socket';
 import { getAgentName } from '../agent/settings';
 import { RINGBACK_MP3_BUF } from '../ringback';
+import { getTwilioClient, getTwilioCreds } from '../twilioClient';
 
 const router = Router();       // auth-protected endpoints
 export const webhooks = Router(); // public Twilio webhook endpoints (no auth)
 
 function BACKEND() {
   return process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com';
-}
-
-function twilioClient() {
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) throw new Error('Twilio not configured');
-  return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
 
 // ─── In-memory bridge session store ──────────────────────────────────────────
@@ -108,6 +103,109 @@ router.put('/settings', async (req: Request, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── PUT /api/dialer/twilio-credentials ──────────────────────────────────────
+// Save the user's own Twilio credentials. Returns {ok, hasCreds}.
+router.put('/twilio-credentials', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id as string;
+    const {
+      twilioAccountSid,
+      twilioAuthToken,
+      twilioApiKey,
+      twilioApiSecret,
+      twilioTwimlAppSid,
+      twilioCallerId,
+      agentName,
+    } = req.body;
+
+    // Validate the credentials by hitting Twilio's API before saving
+    if (twilioAccountSid && twilioAuthToken) {
+      try {
+        const testClient = require('twilio')(twilioAccountSid, twilioAuthToken);
+        await testClient.api.accounts(twilioAccountSid).fetch();
+      } catch (e: any) {
+        res.status(400).json({ error: 'Invalid Twilio credentials. Please check your Account SID and Auth Token.' });
+        return;
+      }
+    }
+
+    await (prisma.dialerSettings.upsert as any)({
+      where: { userId },
+      create: {
+        userId,
+        ...(twilioAccountSid  !== undefined && { twilioAccountSid }),
+        ...(twilioAuthToken   !== undefined && { twilioAuthToken }),
+        ...(twilioApiKey      !== undefined && { twilioApiKey }),
+        ...(twilioApiSecret   !== undefined && { twilioApiSecret }),
+        ...(twilioTwimlAppSid !== undefined && { twilioTwimlAppSid }),
+        ...(twilioCallerId    !== undefined && { twilioCallerId }),
+        ...(agentName         !== undefined && { agentName }),
+      },
+      update: {
+        ...(twilioAccountSid  !== undefined && { twilioAccountSid }),
+        ...(twilioAuthToken   !== undefined && { twilioAuthToken }),
+        ...(twilioApiKey      !== undefined && { twilioApiKey }),
+        ...(twilioApiSecret   !== undefined && { twilioApiSecret }),
+        ...(twilioTwimlAppSid !== undefined && { twilioTwimlAppSid }),
+        ...(twilioCallerId    !== undefined && { twilioCallerId }),
+        ...(agentName         !== undefined && { agentName }),
+      },
+    });
+
+    res.json({ ok: true, hasCreds: !!(twilioAccountSid && twilioAuthToken) });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/dialer/twilio-credentials ──────────────────────────────────────
+// Returns whether the user has credentials set (never returns the raw tokens).
+router.get('/twilio-credentials', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id as string;
+    const s = await prisma.dialerSettings.findUnique({ where: { userId } }) as any;
+    res.json({
+      hasCreds:          !!(s?.twilioAccountSid && s?.twilioAuthToken),
+      twilioCallerId:    s?.twilioCallerId    ?? '',
+      twilioTwimlAppSid: s?.twilioTwimlAppSid ?? '',
+      agentName:         s?.agentName         ?? '',
+      twilioAccountSid:  s?.twilioAccountSid  ? `${s.twilioAccountSid.slice(0, 8)}...` : '',
+      twilioAuthToken:   s?.twilioAuthToken   ? '••••••••••••••••' : '',
+      twilioApiKey:      s?.twilioApiKey      ? `${s.twilioApiKey.slice(0, 8)}...` : '',
+      twilioApiSecret:   s?.twilioApiSecret   ? '••••••••••••••••' : '',
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GET /api/dialer/onboarding-step ─────────────────────────────────────────
+router.get('/onboarding-step', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id as string;
+    const s = await prisma.dialerSettings.findUnique({ where: { userId } }) as any;
+    res.json({ step: s?.onboardingStep ?? 0 });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── PUT /api/dialer/onboarding-step ─────────────────────────────────────────
+router.put('/onboarding-step', async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?.id as string;
+    const { step } = req.body;
+    await (prisma.dialerSettings.upsert as any)({
+      where: { userId },
+      create: { userId, onboardingStep: step },
+      update: { onboardingStep: step },
+    });
+    res.json({ ok: true, step });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── POST /api/dialer/verify-phone ───────────────────────────────────────────
 // Triggers a Twilio call to verify the user's personal phone as a caller ID.
 // Twilio calls the number and reads a code — user presses keys to confirm.
@@ -120,7 +218,7 @@ router.post('/verify-phone', async (req: Request, res: Response) => {
   const digits = phone.replace(/\D/g, '');
   const e164 = digits.startsWith('1') ? `+${digits}` : `+1${digits}`;
 
-  const client = twilioClient();
+  const { client } = await getTwilioClient(userId);
 
   // Check if already verified in Twilio
   try {
@@ -163,7 +261,7 @@ router.get('/verify-status', async (req: Request, res: Response) => {
   if (settings.phoneVerified) { res.json({ verified: true, phone: settings.personalPhone }); return; }
 
   try {
-    const client = twilioClient();
+    const { client } = await getTwilioClient(userId);
     const callerIds = await client.outgoingCallerIds.list({ phoneNumber: settings.personalPhone });
     const verified = callerIds.length > 0;
     if (verified) {
@@ -307,10 +405,11 @@ router.post('/record-vm', async (req: Request, res: Response) => {
   const userId = (req as any).user?.id as string;
   const { personalPhone } = req.body;
   if (!personalPhone) { res.status(400).json({ error: 'personalPhone required' }); return; }
-  const from = process.env.TWILIO_CALLER_ID || process.env.AGENT_PHONE || '';
-  if (!from) { res.status(500).json({ error: 'TWILIO_CALLER_ID not set' }); return; }
+  const { client: vmRecClient, creds: vmRecCreds } = await getTwilioClient(userId);
+  const from = vmRecCreds.callerId || vmRecCreds.agentPhone || '';
+  if (!from) { res.status(500).json({ error: 'Twilio callerId not configured' }); return; }
   try {
-    const call = await twilioClient().calls.create({
+    const call = await vmRecClient.calls.create({
       to: personalPhone,
       from,
       url: `${BACKEND()}/api/dialer/vm-twiml?userId=${encodeURIComponent(userId)}`,
@@ -397,9 +496,10 @@ router.post('/call', async (req: Request, res: Response) => {
       createdAt: Date.now(),
     });
 
-    const from = process.env.TWILIO_CALLER_ID || process.env.AGENT_PHONE || '';
+    const { client: bridgeCallClient, creds: bridgeCallCreds } = await getTwilioClient(userId);
+    const from = bridgeCallCreds.callerId || bridgeCallCreds.agentPhone || '';
     try {
-      const call = await twilioClient().calls.create({
+      const call = await bridgeCallClient.calls.create({
         to: settings.personalPhone,
         from,
         url: `${BACKEND()}/api/dialer/bridge-a-twiml?sessionId=${sessionId}`,
@@ -515,11 +615,12 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
     // Use agent's verified personal phone as caller ID.
     // Falls back to local presence number if personal phone isn't set/verified.
     const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } });
-    const localFrom = await pickCallerId(b.contactPhone).catch(() => process.env.TWILIO_CALLER_ID || '');
+    const { client: bridgeAClient, creds: bridgeACreds } = await getTwilioClient(b.userId);
+    const localFrom = await pickCallerId(b.contactPhone).catch(() => bridgeACreds.callerId);
     const contactFrom = (settings?.phoneVerified && settings?.personalPhone) ? settings.personalPhone : localFrom;
 
     try {
-      const contactCall = await twilioClient().calls.create({
+      const contactCall = await bridgeAClient.calls.create({
         to: b.contactPhone,
         from: contactFrom,
         machineDetection: 'DetectMessageEnd', // SYNC: Twilio calls url after beep with AnsweredBy
@@ -536,7 +637,7 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
       b.status = 'ended';
       // Notify agent
       try {
-        await twilioClient().calls(b.agentCallSid!).update({
+        await bridgeAClient.calls(b.agentCallSid!).update({
           twiml: '<Response><Say voice="Polly.Joanna">Could not reach the contact. Goodbye.</Say><Hangup/></Response>',
         });
       } catch {}
@@ -547,7 +648,7 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
   if ((CallStatus === 'completed' || CallStatus === 'failed') && b.agentCallSid === CallSid) {
     // Agent hung up — end contact call if still going
     if (b.contactCallSid && b.status === 'connected') {
-      try { await twilioClient().calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
+      try { await (await getTwilioClient(b.userId)).client.calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
     }
     b.status = 'ended';
     io.emit('bridge-status', { sessionId, status: 'ended' });
@@ -634,7 +735,8 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
     // Notify the agent that voicemail was dropped so they can move on
     if (effectiveAgentCallSid) {
       try {
-        await twilioClient().calls(effectiveAgentCallSid).update({
+        const btUserId = req.query.userId as string | undefined;
+        await (await getTwilioClient(btUserId ?? b?.userId)).client.calls(effectiveAgentCallSid).update({
           twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
         });
       } catch {}
@@ -728,7 +830,7 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
   // Update the contact's live call with the voicemail TwiML
   console.log(`[Bridge AMD] Calling calls(${CallSid}).update() with inline TwiML...`);
   try {
-    await twilioClient().calls(CallSid).update({ twiml: vmTwiml });
+    await (await getTwilioClient(b.userId)).client.calls(CallSid).update({ twiml: vmTwiml });
     console.log(`[Bridge AMD] ✓ calls.update() succeeded — voicemail TwiML sent`);
   } catch (e: any) {
     console.error(`[Bridge AMD] ✗ calls.update() FAILED: ${e.message}`);
@@ -737,7 +839,7 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
   // Disconnect agent leg
   try {
     if (b.agentCallSid) {
-      await twilioClient().calls(b.agentCallSid).update({
+      await (await getTwilioClient(b.userId)).client.calls(b.agentCallSid).update({
         twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
       });
     }
@@ -770,7 +872,7 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
     // (TTS via calls.update({ twiml }) on a conference leg causes carrier voicemail prompts)
     try {
       if (b.agentCallSid) {
-        await twilioClient().calls(b.agentCallSid).update({ status: 'completed' });
+        await (await getTwilioClient(b.userId)).client.calls(b.agentCallSid).update({ status: 'completed' });
       }
     } catch {}
   }
@@ -787,7 +889,7 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
     io.emit('bridge-status', { sessionId, status: 'no-answer' });
     try {
       if (b.agentCallSid) {
-        await twilioClient().calls(b.agentCallSid).update({
+        await (await getTwilioClient(b.userId)).client.calls(b.agentCallSid).update({
           twiml: `<Response><Say voice="Polly.Joanna">Call ended. Moving to next contact.</Say><Hangup/></Response>`,
         });
       }
@@ -825,12 +927,12 @@ router.post('/bridge-hangup', async (req: Request, res: Response) => {
   const b = bridges.get(sessionId);
   if (!b) { res.json({ ok: true }); return; }
 
-  const c = twilioClient();
+  const { client: hangupClient } = await getTwilioClient(b.userId);
   if (b.agentCallSid) {
-    try { await c.calls(b.agentCallSid).update({ status: 'completed' }); } catch {}
+    try { await hangupClient.calls(b.agentCallSid).update({ status: 'completed' }); } catch {}
   }
   if (b.contactCallSid) {
-    try { await c.calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
+    try { await hangupClient.calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
   }
   b.status = 'ended';
   bridges.delete(sessionId);
@@ -878,8 +980,9 @@ router.post('/manual-vm-drop', async (req: Request, res: Response) => {
     vmTwiml = `<Response><Say voice="Polly.Joanna">${fallbackText}</Say><Hangup/></Response>`;
   }
 
+  const { client: vmDropClient } = await getTwilioClient(b.userId);
   try {
-    await twilioClient().calls(b.contactCallSid).update({ twiml: vmTwiml });
+    await vmDropClient.calls(b.contactCallSid).update({ twiml: vmTwiml });
   } catch (e: any) {
     res.status(500).json({ error: `Could not update contact call: ${e.message}` });
     return;
@@ -891,7 +994,7 @@ router.post('/manual-vm-drop', async (req: Request, res: Response) => {
   // Disconnect agent with notification
   if (b.agentCallSid) {
     try {
-      await twilioClient().calls(b.agentCallSid).update({
+      await vmDropClient.calls(b.agentCallSid).update({
         twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
       });
     } catch {}
@@ -1068,7 +1171,9 @@ webhooks.post('/webrtc-number-url', async (req: Request, res: Response) => {
 
   // Disconnect the agent's browser call — UI already shows "vm-dropped" toast
   if (b?.agentCallSid) {
-    twilioClient().calls(b.agentCallSid).update({ status: 'completed' }).catch((e: any) =>
+    getTwilioClient(b?.userId).then(({ client: numUrlClient }) =>
+      numUrlClient.calls(b!.agentCallSid!).update({ status: 'completed' })
+    ).catch((e: any) =>
       console.error(`[webrtc-number-url] Failed to disconnect agent: ${e.message}`)
     );
   }
@@ -1166,8 +1271,9 @@ webhooks.post('/webrtc-amd', async (req: Request, res: Response) => {
 
   // Redirect the contact's call to play the voicemail (exits the conference).
   // Then disconnect the agent's browser call — UI already shows "vm-dropped" toast.
+  const { client: amdClient } = await getTwilioClient(b?.userId);
   try {
-    await twilioClient().calls(contactCallSid).update({ twiml: vmTwiml });
+    await amdClient.calls(contactCallSid).update({ twiml: vmTwiml });
     console.log(`[webrtc-amd] ✓ Voicemail injected into call ${contactCallSid}`);
   } catch (e: any) {
     console.error(`[webrtc-amd] ✗ Failed to inject voicemail: ${e.message}`);
@@ -1176,7 +1282,7 @@ webhooks.post('/webrtc-amd', async (req: Request, res: Response) => {
   // Disconnect agent from the now-empty conference
   if (b?.agentCallSid) {
     try {
-      await twilioClient().calls(b.agentCallSid).update({ status: 'completed' });
+      await amdClient.calls(b.agentCallSid).update({ status: 'completed' });
     } catch {}
   }
 

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import prisma from '../db';
 import { getAgentName } from '../agent/settings';
 
@@ -21,30 +22,23 @@ router.post('/send', async (req: Request, res: Response) => {
 
   if (!message?.trim()) { res.status(400).json({ error: 'Message is required' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, AGENT_PHONE } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
-    res.status(500).json({ error: 'Twilio not configured' }); return;
+  // Fetch contacts
+  let contacts: any[] = [];
+  if (contactIds?.length) {
+    contacts = await prisma.contact.findMany({ where: { id: { in: contactIds }, phone: { not: null }, status: { not: 'dnc' } } });
+  } else if (filter) {
+    contacts = await prisma.contact.findMany({ where: { ...(filter.source && { source: filter.source }), ...(filter.status && { status: filter.status }), phone: { not: null }, status: { not: 'dnc' } } });
   }
+  if (!contacts.length) { res.json({ sent: 0, failed: 0, errors: [] }); return; }
 
-  const agentDisplayName = await getAgentName();
+  const userId = (req as any).user?.id as string | undefined;
+  const { client, creds: blastCreds } = await getTwilioClient(userId);
+  const TWILIO_CALLER_ID = blastCreds.callerId;
+  const AGENT_PHONE = blastCreds.agentPhone;
+  const agentDisplayName = blastCreds.agentName || await getAgentName().catch(() => 'Agent');
 
-  // Resolve contacts
-  let contacts;
-  if (contactIds && contactIds.length > 0) {
-    contacts = await prisma.contact.findMany({ where: { id: { in: contactIds }, NOT: { status: 'dnc' } } });
-  } else {
-    contacts = await prisma.contact.findMany({
-      where: {
-        NOT: { status: 'dnc' },
-        ...(filter?.source ? { source: filter.source } : {}),
-        ...(filter?.status ? { status: filter.status } : {}),
-      },
-    });
-  }
+  if (!TWILIO_CALLER_ID) { res.status(500).json({ error: 'Twilio callerId not configured. Complete setup in Settings.' }); return; }
 
-  if (contacts.length === 0) { res.status(400).json({ error: 'No eligible contacts' }); return; }
-
-  const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
   const results = { sent: 0, failed: 0, errors: [] as string[] };
 
   for (const contact of contacts) {

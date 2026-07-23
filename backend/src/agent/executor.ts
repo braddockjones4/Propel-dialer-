@@ -2,6 +2,7 @@
 // Performs the real side-effects of an agent action. Used both by the engine
 // (autonomous/auto mode) and by the approval route (human approves a queued one).
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import prisma from '../db';
 import { io } from '../socket';
 import { computeLeadScore } from '../leadScore';
@@ -25,17 +26,16 @@ export interface ActionSpec {
   };
 }
 
-function twilioClient() {
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) return null;
-  return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+async function twilioClient() {
+  try { return (await getTwilioClient(undefined)).client; } catch { return null; }
 }
 
 /** Send an SMS now. Falls back to "simulated" send when Twilio isn't configured. */
 export async function sendSmsNow(contact: { id: string; phone: string | null }, body: string) {
   if (!contact.phone) throw new Error('Contact has no phone number — cannot send SMS');
-  const from = process.env.TWILIO_CALLER_ID || process.env.AGENT_PHONE || '';
-  const client = twilioClient();
+  const exCreds = (await getTwilioClient(undefined).catch(() => null))?.creds;
+  const from = exCreds?.callerId || exCreds?.agentPhone || '';
+  const client = await twilioClient();
   let twilioSid: string | undefined;
   let status = 'sent';
 

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import prisma from '../db';
 import { getAgentName } from '../agent/settings';
 
@@ -58,16 +59,16 @@ router.post('/', async (req: Request, res: Response) => {
     await prisma.contact.update({ where: { id: contactId }, data: { status: 'appointment' } });
 
     if (sendSms !== false) {
-      const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
-      if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_CALLER_ID) {
+      const apptUserId = (req as any).user?.id as string | undefined;
+      const { client: apptClient, creds: apptCreds } = await getTwilioClient(apptUserId);
+      if (apptCreds.callerId) {
         try {
           const date = new Date(scheduledAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
           const time = new Date(scheduledAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
           const agentName = await getAgentName();
           const msg = `Hi ${appt.contact.firstName}! This confirms your appointment with ${agentName} on ${date} at ${time}${location ? ` at ${location}` : ''}. Reply STOP to opt out.`;
-          const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
           if (!appt.contact.phone) throw new Error('Contact has no phone number');
-          await client.messages.create({ to: appt.contact.phone!, from: TWILIO_CALLER_ID, body: msg });
+          await apptClient.messages.create({ to: appt.contact.phone!, from: apptCreds.callerId, body: msg });
           await db.appointment.update({ where: { id: appt.id }, data: { smsSent: true } });
         } catch (e: any) { console.error('[Appt] SMS failed:', e.message); }
       }

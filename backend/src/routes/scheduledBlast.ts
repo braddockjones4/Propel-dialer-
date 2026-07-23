@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import cron from 'node-cron';
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import prisma from '../db';
 
 const router = Router();
@@ -16,22 +17,24 @@ export async function fireScheduledBlast(blastId: string): Promise<void> {
   if (!blast || blast.status !== 'pending') return;
 
   const filter = JSON.parse(blast.filter) as { source?: string; status?: string };
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, AGENT_NAME, AGENT_PHONE, NGROK_URL } = process.env;
-
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
-    console.error('[ScheduledBlast] Twilio not configured');
-    return;
+  const { client, creds: sbCreds } = await getTwilioClient(undefined);
+  const TWILIO_CALLER_ID = sbCreds.callerId;
+  const AGENT_NAME = sbCreds.agentName;
+  const AGENT_PHONE = sbCreds.agentPhone;
+  const NGROK_URL = process.env.NGROK_URL || process.env.BACKEND_URL || '';
+  if (!TWILIO_CALLER_ID) {
+    console.error('[scheduledBlast] Twilio callerId not configured'); return;
   }
 
   const contacts = await prisma.contact.findMany({
     where: {
-      NOT: { status: 'dnc' },
-      ...(filter.source ? { source: filter.source } : {}),
-      ...(filter.status ? { status: filter.status } : {}),
+      ...(filter.source && { source: filter.source }),
+      ...(filter.status && { status: filter.status }),
+      phone: { not: null },
+      status: { not: 'dnc' },
     },
   });
 
-  const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
   let sent = 0;
   let failed = 0;
 

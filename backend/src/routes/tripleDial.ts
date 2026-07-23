@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import crypto from 'crypto';
 import { pickCallerId } from './localPresence';
 
@@ -102,7 +103,7 @@ router.get('/session/:id', (req: Request, res: Response) => {
 
 // ─── POST /api/triple-dial/twiml ─────────────────────────────────────────────
 // Called when a contact answers — connects them to the agent browser
-router.post('/twiml', (req: Request, res: Response) => {
+router.post('/twiml', async (req: Request, res: Response) => {
   const { sessionId } = req.query as { sessionId: string; contactId: string };
   const { CallSid } = req.body;
 
@@ -115,8 +116,7 @@ router.post('/twiml', (req: Request, res: Response) => {
       if (callRecord) callRecord.status = 'connected';
 
       // Cancel the other calls async
-      const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-      const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+      const { client } = await getTwilioClient(undefined);
       for (const c of session.calls) {
         if (c.sid !== CallSid && !c.sid.startsWith('failed') && c.status !== 'cancelled') {
           c.status = 'cancelled';
@@ -136,7 +136,8 @@ router.post('/twiml', (req: Request, res: Response) => {
 
   // Connect to agent browser client
   const twiml = new twilio.twiml.VoiceResponse();
-  const dial = twiml.dial({ callerId: process.env.TWILIO_CALLER_ID || '' });
+  const { creds: tdWCreds } = await getTwilioClient(undefined);
+  const dial = twiml.dial({ callerId: tdWCreds.callerId });
   dial.client('agent');
 
   res.type('text/xml').send(twiml.toString());

@@ -5,6 +5,7 @@
  */
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import prisma from '../db';
 import { getAgentName } from '../agent/settings';
 

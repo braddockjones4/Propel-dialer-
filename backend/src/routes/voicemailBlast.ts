@@ -13,6 +13,7 @@
 
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import prisma from '../db';
 import { pickCallerId } from './localPresence';
 
@@ -147,8 +148,7 @@ router.post('/amd', async (req: Request, res: Response) => {
   const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
 
   if (isMachine && CallSid && script) {
-    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const { client } = await getTwilioClient(undefined);
     const decodedScript = decodeURIComponent(script);
     const dropTwiml = `<Response><Pause length="1"/><Say voice="Polly.Joanna">${decodedScript}</Say><Hangup/></Response>`;
 
@@ -162,8 +162,7 @@ router.post('/amd', async (req: Request, res: Response) => {
     }
   } else if (!isMachine) {
     // Human answered during blast — hang up
-    const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN } = process.env;
-    const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    const { client } = await getTwilioClient(undefined);
     try {
       await client.calls(CallSid).update({ twiml: '<Response><Hangup/></Response>' });
       const blast = activeBlasts.get(blastId);

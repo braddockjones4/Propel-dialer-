@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import twilio from 'twilio';
+import { getTwilioClient } from '../twilioClient';
 import prisma from '../db';
 import { io } from '../socket';
 import { runInboxAgent } from '../agent/engine';
@@ -60,8 +61,9 @@ router.post('/:contactId/reply', async (req: Request, res: Response) => {
   const contact = await prisma.contact.findUnique({ where: { id: req.params.contactId } });
   if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
-  const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+  const userId = (req as any).user?.id as string | undefined;
+  const { client, creds: inboxCreds } = await getTwilioClient(userId);
+  const TWILIO_CALLER_ID = inboxCreds.callerId;
 
   const msg = await client.messages.create({
     body,

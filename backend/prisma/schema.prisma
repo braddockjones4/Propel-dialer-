@@ -167,7 +167,17 @@ model DialerSettings {
   voicemailData String?                     // base64 data URL of browser-recorded voicemail audio
   icloudEmail   String?                     // Apple ID email for CardDAV sync
   icloudAppPwd  String?                     // App-Specific Password (AES-256 encrypted)
-  updatedAt     DateTime @updatedAt
+  // ── Per-user Twilio credentials ──────────────────────────────────────────
+  twilioAccountSid  String?                 // Client's own Twilio Account SID
+  twilioAuthToken   String?                 // Client's own Twilio Auth Token
+  twilioApiKey      String?                 // Client's Twilio API Key (for Access Tokens)
+  twilioApiSecret   String?                 // Client's Twilio API Secret
+  twilioTwimlAppSid String?                 // Client's TwiML App SID
+  twilioCallerId    String?                 // Client's Twilio phone number (E.164)
+  agentName         String?                 // Agent display name (overrides env AGENT_NAME)
+  // ── Onboarding ────────────────────────────────────────────────────────────
+  onboardingStep    Int      @default(0)    // 0=new 1=profile 2=twilio 3=voicemail 4=contacts 5=done
+  updatedAt         DateTime @updatedAt
 }
 
 // ─── Contact Groups ───────────────────────────────────────────────────────────
