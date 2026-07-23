@@ -216,7 +216,7 @@ export default function Settings() {
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: 'clamp(16px, 4vw, 32px) clamp(12px, 4vw, 24px)' }}>
-      <h1 style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 24, fontWeight: 300, letterSpacing: '0.15em', marginBottom: 24, color: '#1a1a1a' }}>
+      <h1 style={{ fontFamily: '"Cormorant Garamond", serif', fontSize: 24, fontWeight: 300, letterSpacing: '0.15em', marginBottom: 24, color: '#C9A84C' }}>
         SETTINGS
       </h1>
 

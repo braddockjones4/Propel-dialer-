@@ -92,12 +92,11 @@ export default function TeamPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Stats banner */}
       {stats && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
           {[
-            { label: 'Calls (30d)',    value: stats.totals.calls },
-            { label: 'Texts Sent',     value: stats.totals.messages },
-            { label: 'Hot Leads',      value: stats.totals.hotLeads },
-            { label: 'Appointments',   value: stats.totals.appointments },
+            { label: 'Calls (30d)',  value: stats.totals.calls },
+            { label: 'Hot Leads',    value: stats.totals.hotLeads },
+            { label: 'Appointments', value: stats.totals.appointments },
           ].map(s => (
             <div key={s.label} style={{ background: '#fff', border: '1px solid #f0f0f0', borderRadius: 8, padding: '14px 16px' }}>
               <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 6 }}>{s.label}</div>
