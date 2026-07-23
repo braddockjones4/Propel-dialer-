@@ -64,11 +64,12 @@ export default function Settings() {
   const [savingNgrok, setSavingNgrok] = useState(false);
 
   useEffect(() => {
-    authFetch(`${API_BASE}/local-presence`).then(r => r.json()).then(setNumbers).catch(() => {});
-    authFetch(`${API_BASE}/settings/status`).then(r => r.json()).then(setStatus).catch(() => {});
-    authFetch(`${API_BASE}/settings/ngrok`).then(r => r.json()).then(d => setNgrok(d.ngrokUrl || '')).catch(() => {});
-    authFetch(`${API_BASE}/agent/settings`).then(r => r.json()).then(d => setAgentName(d.agentName || '')).catch(() => {});
-    authFetch(`${API_BASE}/dialer/twilio-credentials`).then(r => r.json()).then(d => {
+    authFetch(`${API_BASE}/local-presence`).then(r => r.ok ? r.json() : []).then(d => setNumbers(Array.isArray(d) ? d : [])).catch(() => setNumbers([]));
+    authFetch(`${API_BASE}/settings/status`).then(r => r.ok ? r.json() : {}).then(d => d && !d.error ? setStatus(d) : null).catch(() => {});
+    authFetch(`${API_BASE}/settings/ngrok`).then(r => r.ok ? r.json() : {}).then(d => setNgrok(d?.ngrokUrl || '')).catch(() => {});
+    authFetch(`${API_BASE}/agent/settings`).then(r => r.ok ? r.json() : {}).then(d => setAgentName(d?.agentName || '')).catch(() => {});
+    authFetch(`${API_BASE}/dialer/twilio-credentials`).then(r => r.ok ? r.json() : null).then(d => {
+      if (!d || d.error) return;
       setTwilioStatus(d);
       setTwilioFields(f => ({ ...f, agentNameTwilio: d.agentName || '', twilioCallerId: d.twilioCallerId || '', twilioTwimlAppSid: d.twilioTwimlAppSid || '' }));
     }).catch(() => {});

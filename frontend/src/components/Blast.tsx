@@ -62,9 +62,9 @@ export default function Blast() {
 
   const loadScheduled = () => {
     authFetch(`${API_BASE}/blast/scheduled`)
-      .then(r => r.json())
-      .then(setScheduledBlasts)
-      .catch(() => {});
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setScheduledBlasts(Array.isArray(d) ? d : []))
+      .catch(() => setScheduledBlasts([]));
   };
 
   useEffect(() => { loadScheduled(); }, []);

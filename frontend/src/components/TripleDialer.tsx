@@ -62,9 +62,9 @@ export default function TripleDialer() {
   // Load contacts
   useEffect(() => {
     authFetch(`${API_BASE}/contacts?limit=300`)
-      .then(r => r.json())
-      .then(setContacts)
-      .catch(console.error);
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setContacts(Array.isArray(d) ? d : []))
+      .catch(() => setContacts([]));
   }, []);
 
   // Get next 3 contacts from current index

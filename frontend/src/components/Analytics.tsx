@@ -124,7 +124,7 @@ export default function Analytics() {
   const load = () => {
     setLoading(true);
     authFetch(`${API_BASE}/analytics`)
-      .then(r => r.json())
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('Server error')))
       .then(d => { setData(d); setLoading(false); })
       .catch(() => { setError('Failed to load analytics'); setLoading(false); });
   };
