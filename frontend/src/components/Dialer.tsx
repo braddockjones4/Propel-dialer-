@@ -154,10 +154,13 @@ function timeAgo(iso: string) {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function Dialer() {
+  // Settings must be declared first so callMode is known before device init
+  const [settings, setSettings] = useState<DialerSettings>({ callMode: 'bridge', personalPhone: '', phoneVerified: false });
+
   const {
     deviceStatus, callStatus, callDuration, activeCall,
     startCall, endCall, muteCall, resetCallStatus, isMuted,
-  } = useTwilioDevice();
+  } = useTwilioDevice(settings.callMode === 'webrtc');
 
   // Twilio configuration status
   const [twilioReady, setTwilioReady]   = useState<boolean | null>(null);
@@ -177,9 +180,6 @@ export default function Dialer() {
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [dialerGroups, setDialerGroups] = useState<Array<{ id: string; name: string; color: string; contactCount: number }>>([]);
   const [groupsLoading, setGroupsLoading] = useState(false);
-
-  // Settings
-  const [settings, setSettings]         = useState<DialerSettings>({ callMode: 'webrtc', personalPhone: '', phoneVerified: false });
 
   // Phone verification
   const [verifyStatus, setVerifyStatus] = useState<'idle' | 'calling' | 'polling' | 'verified' | 'error'>('idle');

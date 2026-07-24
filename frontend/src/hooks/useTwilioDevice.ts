@@ -25,7 +25,7 @@ interface UseTwilioDeviceReturn {
 }
 
 
-export function useTwilioDevice(): UseTwilioDeviceReturn {
+export function useTwilioDevice(enabled = true): UseTwilioDeviceReturn {
   const deviceRef = useRef<Device | null>(null);
   const activeCallRef = useRef<Call | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -42,6 +42,12 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
 
   // ─── Initialize Twilio Device on mount ─────────────────────────────────────
   useEffect(() => {
+    // Skip entirely when not in WebRTC mode — bridge mode doesn't need the device
+    if (!enabled) {
+      setDeviceStatus('uninitialized');
+      return;
+    }
+
     let cancelled = false;
 
     async function initDevice() {
@@ -129,7 +135,7 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
       deviceRef.current = null;
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, []);
+  }, [enabled]);
 
   // ─── Bind Call Events ───────────────────────────────────────────────────────
   const bindCallEvents = useCallback((call: Call) => {
