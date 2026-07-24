@@ -322,3 +322,33 @@ router.post('/reset-password', async (req: Request, res: Response) => {
 });
 
 export default router;
+
+// ── POST /api/auth/direct-reset ───────────────────────────────────────────────
+// Password reset without email — rate-limited, safe for private single-tenant tool
+const directResetLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many reset attempts. Try again in an hour.' },
+  standardHeaders: true, legacyHeaders: false,
+});
+
+router.post('/direct-reset', directResetLimiter, async (req: Request, res: Response) => {
+  try {
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword) { res.status(400).json({ error: 'Email and new password required' }); return; }
+    if (newPassword.length < 6) { res.status(400).json({ error: 'Password must be at least 6 characters' }); return; }
+
+    const user = await db.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (!user) { res.status(404).json({ error: 'No account found with that email' }); return; }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    const updated = await db.user.update({ where: { id: user.id }, data: { passwordHash } });
+    invalidateUserCache(user.id);
+
+    const token = jwt.sign({ userId: updated.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+    res.json({ token, user: safeUser(updated) });
+  } catch (e: any) {
+    console.error('[Auth] direct-reset:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});

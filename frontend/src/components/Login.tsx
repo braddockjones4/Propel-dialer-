@@ -31,11 +31,13 @@ export default function Login({ onBack }: Props) {
 
     if (mode === 'forgot') {
       try {
-        await fetch(`${API_BASE}/auth/forgot-password`, {
+        const r = await fetch(`${API_BASE}/auth/direct-reset`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email }),
-        });
-        setSuccess('Check your email for a password reset link.');
+          body: JSON.stringify({ email, newPassword: password }),
+        }).then(x => x.json());
+        if (r.error) { setError(r.error); setLoading(false); return; }
+        localStorage.setItem('propel_token', r.token);
+        window.location.reload();
       } catch { setError('Something went wrong. Try again.'); }
       setLoading(false); return;
     }
@@ -140,10 +142,12 @@ export default function Login({ onBack }: Props) {
               />
             </div>
 
-            {mode !== 'forgot' && (
+            {(mode !== 'forgot' || mode === 'forgot') && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <label style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280' }}>Password</label>
+                  <label style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280' }}>
+                    {mode === 'forgot' ? 'New Password' : 'Password'}
+                  </label>
                   {mode === 'login' && (
                     <button type="button" onClick={() => { setMode('forgot'); setError(''); setSuccess(''); }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: '#C9A84C' }}>
@@ -209,7 +213,7 @@ export default function Login({ onBack }: Props) {
                 transition: 'background 0.2s',
               }}
             >
-              {loading ? 'Please wait…' : mode === 'login' ? 'Sign In' : 'Create Account'}
+              {loading ? 'Please wait…' : mode === 'login' ? 'Sign In' : mode === 'forgot' ? 'Reset Password' : mode === 'reset' ? 'Set New Password' : 'Create Account'}
             </button>
           </form>
 
