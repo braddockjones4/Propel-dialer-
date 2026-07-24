@@ -267,8 +267,11 @@ router.post('/claim', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id as string;
     const role   = (req as any).user?.role as string;
     if (role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return; }
-    const result = await (prisma.contact as any).updateMany({ where: { userId: null }, data: { userId } });
-    res.json({ claimed: result.count });
+    // claim null-userId contacts first
+    const nullResult = await (prisma.contact as any).updateMany({ where: { userId: null }, data: { userId } });
+    // also claim contacts owned by other users (orphaned from deleted accounts)
+    const orphanResult = await (prisma.contact as any).updateMany({ where: { NOT: { userId } }, data: { userId } });
+    res.json({ claimed: nullResult.count + orphanResult.count });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

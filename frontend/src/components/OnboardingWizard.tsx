@@ -214,7 +214,7 @@ export default function OnboardingWizard({ onComplete }: Props) {
               <WLabel label="Your Full Name">
                 <input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Jane Smith" style={iSt} />
               </WLabel>
-              <WLabel label="Agent Display Name (used in SMS & voicemail)">
+              <WLabel label="Agent Display Name (used in voicemail drops & calls)">
                 <input value={agentName} onChange={e => setAgentName(e.target.value)} placeholder="Jane from Realty Co." style={iSt} />
               </WLabel>
               {error && <ErrBox msg={error} />}
