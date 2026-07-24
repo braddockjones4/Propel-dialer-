@@ -103,81 +103,11 @@ router.put('/settings', async (req: Request, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── PUT /api/dialer/twilio-credentials ──────────────────────────────────────
-// Save the user's own Twilio credentials. Returns {ok, hasCreds}.
-router.put('/twilio-credentials', async (req: Request, res: Response) => {
-  try {
-    const userId = (req as any).user?.id as string;
-    const {
-      twilioAccountSid,
-      twilioAuthToken,
-      twilioApiKey,
-      twilioApiSecret,
-      twilioTwimlAppSid,
-      twilioCallerId,
-      agentName,
-    } = req.body;
+// twilio-credentials endpoint removed — app uses env var credentials
 
-    // Validate the credentials by hitting Twilio's API before saving
-    if (twilioAccountSid && twilioAuthToken) {
-      try {
-        const testClient = require('twilio')(twilioAccountSid, twilioAuthToken);
-        await testClient.api.accounts(twilioAccountSid).fetch();
-      } catch (e: any) {
-        res.status(400).json({ error: 'Invalid Twilio credentials. Please check your Account SID and Auth Token.' });
-        return;
-      }
-    }
+// twilio-auto-setup endpoint removed
 
-    await (prisma.dialerSettings.upsert as any)({
-      where: { userId },
-      create: {
-        userId,
-        ...(twilioAccountSid  !== undefined && { twilioAccountSid }),
-        ...(twilioAuthToken   !== undefined && { twilioAuthToken }),
-        ...(twilioApiKey      !== undefined && { twilioApiKey }),
-        ...(twilioApiSecret   !== undefined && { twilioApiSecret }),
-        ...(twilioTwimlAppSid !== undefined && { twilioTwimlAppSid }),
-        ...(twilioCallerId    !== undefined && { twilioCallerId }),
-        ...(agentName         !== undefined && { agentName }),
-      },
-      update: {
-        ...(twilioAccountSid  !== undefined && { twilioAccountSid }),
-        ...(twilioAuthToken   !== undefined && { twilioAuthToken }),
-        ...(twilioApiKey      !== undefined && { twilioApiKey }),
-        ...(twilioApiSecret   !== undefined && { twilioApiSecret }),
-        ...(twilioTwimlAppSid !== undefined && { twilioTwimlAppSid }),
-        ...(twilioCallerId    !== undefined && { twilioCallerId }),
-        ...(agentName         !== undefined && { agentName }),
-      },
-    });
 
-    res.json({ ok: true, hasCreds: !!(twilioAccountSid && twilioAuthToken) });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── GET /api/dialer/twilio-credentials ──────────────────────────────────────
-// Returns whether the user has credentials set (never returns the raw tokens).
-router.get('/twilio-credentials', async (req: Request, res: Response) => {
-  try {
-    const userId = (req as any).user?.id as string;
-    const s = await prisma.dialerSettings.findUnique({ where: { userId } }) as any;
-    res.json({
-      hasCreds:          !!(s?.twilioAccountSid && s?.twilioAuthToken),
-      twilioCallerId:    s?.twilioCallerId    ?? '',
-      twilioTwimlAppSid: s?.twilioTwimlAppSid ?? '',
-      agentName:         s?.agentName         ?? '',
-      twilioAccountSid:  s?.twilioAccountSid  ? `${s.twilioAccountSid.slice(0, 8)}...` : '',
-      twilioAuthToken:   s?.twilioAuthToken   ? '••••••••••••••••' : '',
-      twilioApiKey:      s?.twilioApiKey      ? `${s.twilioApiKey.slice(0, 8)}...` : '',
-      twilioApiSecret:   s?.twilioApiSecret   ? '••••••••••••••••' : '',
-    });
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
 
 // ─── GET /api/dialer/onboarding-step ─────────────────────────────────────────
 router.get('/onboarding-step', async (req: Request, res: Response) => {
@@ -473,11 +403,6 @@ router.post('/call', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Enter your personal phone number in dialer settings first.' });
       return;
     }
-    if (!settings.phoneVerified) {
-      res.status(400).json({ error: 'Verify your personal phone number before making calls.' });
-      return;
-    }
-
     const sessionId = crypto.randomUUID();
     const confName = `propel-${sessionId}`;
     const contactName = `${contact.firstName} ${contact.lastName}`.trim();

@@ -54,7 +54,15 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
           body: JSON.stringify({ identity: 'agent' }),
         });
 
-        if (!res.ok) throw new Error('Failed to fetch Twilio token from backend.');
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          if ((body as any).needsSetup) {
+            // Credentials not yet configured — stay uninitialized silently
+            if (!cancelled) setDeviceStatus('uninitialized');
+            return;
+          }
+          throw new Error((body as any).error || 'Failed to fetch Twilio token from backend.');
+        }
 
         const { token } = await res.json();
         if (cancelled) return;
@@ -94,6 +102,10 @@ export function useTwilioDevice(): UseTwilioDeviceReturn {
         deviceRef.current = device;
       } catch (err: unknown) {
         if (!cancelled) {
+          // Twilio SDK sometimes rejects device.register() with undefined after
+          // firing the error event — in that case the error handler above already
+          // set deviceStatus and errorMessage, so don't overwrite them.
+          if (err === undefined || err === null) return;
           console.error('initDevice caught error:', err);
           let message = 'Failed to initialize dialer.';
           if (err instanceof Error) {

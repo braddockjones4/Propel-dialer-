@@ -16,11 +16,10 @@ const US_STATES = [
   'VA','WA','WV','WI','WY',
 ];
 
-type Tab = 'account' | 'twilio' | 'numbers' | 'integrations' | 'billing' | 'team';
+type Tab = 'account' | 'numbers' | 'integrations' | 'billing' | 'team';
 
 const TAB_LABELS: { id: Tab; label: string; icon: string }[] = [
   { id: 'account',      label: 'Account',      icon: '' },
-  { id: 'twilio',       label: 'Twilio Setup',  icon: '' },
   { id: 'numbers',      label: 'Phone Numbers', icon: '' },
   { id: 'integrations', label: 'Integrations',  icon: '' },
   { id: 'billing',      label: 'Billing',       icon: '' },
@@ -48,31 +47,13 @@ export default function Settings() {
   const [buying,    setBuying]    = useState(false);
   const [buyError,  setBuyError]  = useState('');
 
-  // ── Twilio credentials ──────────────────────────────────────────────────────
-  const [twilioFields, setTwilioFields] = useState({
-    twilioAccountSid: '', twilioAuthToken: '', twilioApiKey: '',
-    twilioApiSecret: '', twilioTwimlAppSid: '', twilioCallerId: '',
-    agentNameTwilio: '',
-  });
-  const [twilioStatus, setTwilioStatus] = useState<any>(null);
-  const [savingTwilio, setSavingTwilio] = useState(false);
-  const [twilioError, setTwilioError]   = useState('');
-
   // ── Integration status ──────────────────────────────────────────────────────
   const [status, setStatus] = useState<Record<string, boolean>>({});
-  const [ngrok,  setNgrok]  = useState('');
-  const [savingNgrok, setSavingNgrok] = useState(false);
 
   useEffect(() => {
     authFetch(`${API_BASE}/local-presence`).then(r => r.ok ? r.json() : []).then(d => setNumbers(Array.isArray(d) ? d : [])).catch(() => setNumbers([]));
     authFetch(`${API_BASE}/settings/status`).then(r => r.ok ? r.json() : {}).then((d: any) => d && !d.error ? setStatus(d) : null).catch(() => {});
-    authFetch(`${API_BASE}/settings/ngrok`).then(r => r.ok ? r.json() : {}).then((d: any) => setNgrok(d?.ngrokUrl || '')).catch(() => {});
     authFetch(`${API_BASE}/agent/settings`).then(r => r.ok ? r.json() : {}).then((d: any) => setAgentName(d?.agentName || '')).catch(() => {});
-    authFetch(`${API_BASE}/dialer/twilio-credentials`).then(r => r.ok ? r.json() : null).then(d => {
-      if (!d || d.error) return;
-      setTwilioStatus(d);
-      setTwilioFields(f => ({ ...f, agentNameTwilio: d.agentName || '', twilioCallerId: d.twilioCallerId || '', twilioTwimlAppSid: d.twilioTwimlAppSid || '' }));
-    }).catch(() => {});
   }, []);
 
   // ── Account save ────────────────────────────────────────────────────────────
@@ -108,37 +89,6 @@ export default function Settings() {
     setSavingAcct(false);
     if (hasProfileChanges || agentName) { toast.success('Account updated'); }
     else { toast.info('Nothing changed'); }
-  };
-
-  // ── Save Twilio credentials ─────────────────────────────────────────────────
-  const saveTwilio = async () => {
-    setSavingTwilio(true);
-    setTwilioError('');
-    try {
-      const body: any = {};
-      if (twilioFields.twilioAccountSid)  body.twilioAccountSid  = twilioFields.twilioAccountSid;
-      if (twilioFields.twilioAuthToken)   body.twilioAuthToken   = twilioFields.twilioAuthToken;
-      if (twilioFields.twilioApiKey)      body.twilioApiKey      = twilioFields.twilioApiKey;
-      if (twilioFields.twilioApiSecret)   body.twilioApiSecret   = twilioFields.twilioApiSecret;
-      if (twilioFields.twilioTwimlAppSid) body.twilioTwimlAppSid = twilioFields.twilioTwimlAppSid;
-      if (twilioFields.twilioCallerId)    body.twilioCallerId    = twilioFields.twilioCallerId;
-      if (twilioFields.agentNameTwilio)   body.agentName         = twilioFields.agentNameTwilio;
-      const r = await authFetch(`${API_BASE}/dialer/twilio-credentials`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const d = await r.json();
-      if (!r.ok) { setTwilioError(d.error || 'Save failed'); return; }
-      toast.success('Twilio credentials saved!');
-      // Refresh masked status
-      authFetch(`${API_BASE}/dialer/twilio-credentials`).then(r2 => r2.json()).then(setTwilioStatus).catch(() => {});
-      setTwilioFields(f => ({ ...f, twilioAccountSid: '', twilioAuthToken: '', twilioApiKey: '', twilioApiSecret: '' }));
-    } catch (e: any) {
-      setTwilioError(e.message || 'Unknown error');
-    } finally {
-      setSavingTwilio(false);
-    }
   };
 
   // ── Buy number ──────────────────────────────────────────────────────────────
@@ -186,17 +136,6 @@ export default function Settings() {
     toast.success('Number removed');
   };
 
-  // ── Save ngrok URL ──────────────────────────────────────────────────────────
-  const saveNgrok = async () => {
-    setSavingNgrok(true);
-    await authFetch(`${API_BASE}/settings/ngrok`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ngrokUrl: ngrok }),
-    });
-    setSavingNgrok(false);
-    toast.success('Ngrok URL saved — restart backend to apply');
-  };
-
   // ── Billing portal ──────────────────────────────────────────────────────────
   const openPortal = async () => {
     if (!token) return;
@@ -210,7 +149,6 @@ export default function Settings() {
   const planColor = PLAN_COLOR[user?.plan || 'trial'] || '#9ca3af';
 
   const INTEGRATION_LABELS: Record<string, { label: string; doc: string; envKey: string; desc: string }> = {
-    twilio:   { label: 'Twilio',  doc: 'console.twilio.com',              envKey: 'TWILIO_ACCOUNT_SID', desc: 'Powers outbound calling & voicemail drops' },
     openai:   { label: 'OpenAI',  doc: 'platform.openai.com/api-keys',    envKey: 'OPENAI_API_KEY',     desc: 'AI agent & call transcription' },
     stripe:   { label: 'Stripe',  doc: 'dashboard.stripe.com/apikeys',    envKey: 'STRIPE_SECRET_KEY',  desc: 'Subscription billing' },
   };
@@ -281,119 +219,6 @@ export default function Settings() {
         </div>
       )}
 
-      {/* ── TWILIO SETUP TAB ─────────────────────────────────────────────────── */}
-      {tab === 'twilio' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-          {/* Current status banner */}
-          {twilioStatus && (
-            <div style={{ padding: '12px 16px', borderRadius: 8, border: `1px solid ${twilioStatus.hasCreds ? '#bbf7d0' : '#fde68a'}`, background: twilioStatus.hasCreds ? '#f0fdf4' : '#fffbeb', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 16 }}>{twilioStatus.hasCreds ? '✅' : '⚠️'}</span>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: twilioStatus.hasCreds ? '#166534' : '#92400e' }}>
-                  {twilioStatus.hasCreds ? 'Twilio credentials configured' : 'No Twilio credentials — using deployment defaults'}
-                </div>
-                {twilioStatus.hasCreds && (
-                  <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
-                    Account: {twilioStatus.twilioAccountSid} · Auth: {twilioStatus.twilioAuthToken}
-                    {twilioStatus.twilioCallerId && ` · Caller ID: ${twilioStatus.twilioCallerId}`}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <Section title="Twilio Account Credentials">
-            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.6 }}>
-              Enter your Twilio credentials below. These are validated against the Twilio API before saving.
-              Twilio powers your outbound calls and voicemail drops. Find your credentials at <a href="https://console.twilio.com" target="_blank" rel="noreferrer" style={{ color: '#C9A84C' }}>console.twilio.com</a>.
-            </p>
-            <Field label="Account SID">
-              <input
-                value={twilioFields.twilioAccountSid}
-                onChange={e => setTwilioFields(f => ({ ...f, twilioAccountSid: e.target.value }))}
-                placeholder={twilioStatus?.twilioAccountSid || 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
-                style={inputSt}
-              />
-            </Field>
-            <Field label="Auth Token">
-              <input
-                type="password"
-                value={twilioFields.twilioAuthToken}
-                onChange={e => setTwilioFields(f => ({ ...f, twilioAuthToken: e.target.value }))}
-                placeholder={twilioStatus?.hasCreds ? '••••••••••••••••' : 'Your auth token'}
-                style={inputSt}
-              />
-            </Field>
-          </Section>
-
-          <Section title="API Key (for Browser Calls)">
-            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.6 }}>
-              Create an API Key at <a href="https://console.twilio.com/us1/account/keys-credentials/api-keys" target="_blank" rel="noreferrer" style={{ color: '#C9A84C' }}>Twilio Console → API Keys</a>.
-            </p>
-            <Field label="API Key SID">
-              <input
-                value={twilioFields.twilioApiKey}
-                onChange={e => setTwilioFields(f => ({ ...f, twilioApiKey: e.target.value }))}
-                placeholder={twilioStatus?.twilioApiKey || 'SKxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
-                style={inputSt}
-              />
-            </Field>
-            <Field label="API Secret">
-              <input
-                type="password"
-                value={twilioFields.twilioApiSecret}
-                onChange={e => setTwilioFields(f => ({ ...f, twilioApiSecret: e.target.value }))}
-                placeholder="API key secret"
-                style={inputSt}
-              />
-            </Field>
-          </Section>
-
-          <Section title="TwiML App & Caller ID">
-            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.6 }}>
-              Create a TwiML App at <a href="https://console.twilio.com/us1/develop/voice/manage/twiml-apps" target="_blank" rel="noreferrer" style={{ color: '#C9A84C' }}>Twilio Console → TwiML Apps</a> and set its Voice Request URL to your backend <code style={{ background: '#f3f4f6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>/api/twilio/voice</code>.
-            </p>
-            <Field label="TwiML App SID">
-              <input
-                value={twilioFields.twilioTwimlAppSid}
-                onChange={e => setTwilioFields(f => ({ ...f, twilioTwimlAppSid: e.target.value }))}
-                placeholder={twilioStatus?.twilioTwimlAppSid || 'APxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
-                style={inputSt}
-              />
-            </Field>
-            <Field label="Caller ID (your Twilio phone number)">
-              <input
-                value={twilioFields.twilioCallerId}
-                onChange={e => setTwilioFields(f => ({ ...f, twilioCallerId: e.target.value }))}
-                placeholder={twilioStatus?.twilioCallerId || '+14435551234'}
-                style={inputSt}
-              />
-            </Field>
-            <Field label="Agent Display Name">
-              <input
-                value={twilioFields.agentNameTwilio}
-                onChange={e => setTwilioFields(f => ({ ...f, agentNameTwilio: e.target.value }))}
-                placeholder="Your name (announced on calls)"
-                style={inputSt}
-              />
-            </Field>
-          </Section>
-
-          {twilioError && (
-            <div style={{ padding: '10px 14px', borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', fontSize: 12, color: '#dc2626' }}>
-              ⚠️ {twilioError}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button onClick={saveTwilio} disabled={savingTwilio} style={btnPrimary}>
-              {savingTwilio ? 'Validating & Saving…' : 'Save Twilio Credentials'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ── NUMBERS TAB ──────────────────────────────────────────────────────── */}
       {tab === 'numbers' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -453,7 +278,7 @@ export default function Settings() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <Section title="Connected Services">
             <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
-              These services power Propel Dialer. Your Twilio credentials are managed under the <strong>Twilio Setup</strong> tab.
+              These services power Propel Dialer. All calling infrastructure is managed by your account team.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {Object.entries(INTEGRATION_LABELS).map(([key, info]) => (
@@ -471,15 +296,6 @@ export default function Settings() {
                   </a>
                 </div>
               ))}
-            </div>
-          </Section>
-
-          <Section title="Twilio Voice Webhook">
-            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10, lineHeight: 1.6 }}>
-              In your <a href="https://console.twilio.com/us1/develop/voice/manage/twiml-apps" target="_blank" rel="noreferrer" style={{ color: '#C9A84C' }}>Twilio TwiML App</a>, set the Voice Request URL to:
-            </div>
-            <div style={{ fontFamily: 'monospace', background: '#f9fafb', borderRadius: 6, padding: '10px 12px', fontSize: 12, color: '#374151', wordBreak: 'break-all' }}>
-              {API_BASE.replace(/\/api$/, '')}/api/twilio/voice
             </div>
           </Section>
         </div>
