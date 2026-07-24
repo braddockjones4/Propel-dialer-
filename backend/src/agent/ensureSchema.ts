@@ -5,6 +5,25 @@
 import prisma from '../db';
 
 const STATEMENTS: string[] = [
+  // ── Multi-tenancy columns (added 2026-07) ────────────────────────────────
+  `ALTER TABLE "Contact" ADD COLUMN IF NOT EXISTS "userId" TEXT`,
+  `ALTER TABLE "LocalNumber" ADD COLUMN IF NOT EXISTS "userId" TEXT`,
+  // Drop old global phone unique; replace with per-user composite unique
+  `ALTER TABLE "Contact" DROP CONSTRAINT IF EXISTS "Contact_phone_key"`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "Contact_userId_phone_key" ON "Contact"("userId", "phone")`,
+  `CREATE INDEX IF NOT EXISTS "Contact_userId_idx" ON "Contact"("userId")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "LocalNumber_userId_number_key" ON "LocalNumber"("userId", "number")`,
+  // Per-user Twilio credentials + onboarding on DialerSettings
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "twilioAccountSid" TEXT`,
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "twilioAuthToken" TEXT`,
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "twilioApiKey" TEXT`,
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "twilioApiSecret" TEXT`,
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "twilioTwimlAppSid" TEXT`,
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "twilioCallerId" TEXT`,
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "agentName" TEXT`,
+  `ALTER TABLE "DialerSettings" ADD COLUMN IF NOT EXISTS "onboardingStep" INTEGER NOT NULL DEFAULT 0`,
+
+  // ── Agent columns ─────────────────────────────────────────────────────────
   `ALTER TABLE "Contact" ADD COLUMN IF NOT EXISTS "agentPaused" BOOLEAN NOT NULL DEFAULT false`,
   `CREATE TABLE IF NOT EXISTS "AgentSettings" (
      "id" TEXT PRIMARY KEY DEFAULT 'singleton',
@@ -56,5 +75,5 @@ export async function ensureAgentSchema(): Promise<void> {
     }
   }
   ensured = true;
-  console.log('[ensureAgentSchema] ✅ agent tables ensured');
+  console.log('[ensureAgentSchema] ✅ schema ensured');
 }
