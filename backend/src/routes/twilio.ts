@@ -40,16 +40,17 @@ async function validateTokenCreds(creds: { accountSid: string; authToken: string
     const keyClient = twilio(creds.apiKey, creds.apiSecret, { accountSid: creds.accountSid });
     await (keyClient.api as any).accounts(creds.accountSid).fetch();
   } catch (e: any) {
-    // Safe diagnostic metadata — prefixes and lengths only, never the values.
-    const ws = (s: string) => (/^\s|\s$/.test(s) ? 'YES' : 'no');
-    const diag = `key=${creds.apiKey.slice(0, 4)}… len=${creds.apiKey.length} lead/trail-space=${ws(creds.apiKey)} | ` +
-                 `secret len=${creds.apiSecret.length} lead/trail-space=${ws(creds.apiSecret)} | ` +
-                 `acct=${creds.accountSid.slice(0, 8)}… len=${creds.accountSid.length}`;
+    // Diagnostic metadata. Account SID and key SID are shown in full/partial —
+    // they are identifiers visible in the Twilio Console, not secrets.
+    // The API secret is never shown (length only).
+    const diag = `key=${creds.apiKey.slice(0, 6)}…${creds.apiKey.slice(-4)} len=${creds.apiKey.length} | ` +
+                 `secret len=${creds.apiSecret.length} | ` +
+                 `acct=${creds.accountSid} len=${creds.accountSid.length}`;
     credCheckResult = {
       ok: false,
       error: `TWILIO_API_KEY/TWILIO_API_SECRET rejected by Twilio [${e.status || e.code || e.message}]. ` +
-             `Diag: ${diag}. Expected: key starts SK + length 34, account length 34, no spaces. ` +
-             `If those look right, confirm the key's Region is "United States (US1)" and its type is "Standard" in the Twilio Console.`,
+             `Diag: ${diag}. Compare the acct value to the Account SID in your Twilio Console — every character must match. ` +
+             `Compare the key start/end to the key's SID on the API keys page. If both match, the secret is from a different key.`,
     };
     console.error('[twilio/token] CREDENTIAL CHECK FAILED:', credCheckResult.error);
     return credCheckResult;

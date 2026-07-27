@@ -29,15 +29,17 @@ export async function getTwilioCreds(userId?: string | null): Promise<TwilioCred
     if (s?.personalPhone) agentPhone = s.personalPhone;
   }
 
+  // .trim() everything — a single invisible space or newline pasted into an
+  // env var produces Twilio 401s that are miserable to diagnose.
   return {
-    accountSid:  process.env.TWILIO_ACCOUNT_SID   ?? '',
-    authToken:   process.env.TWILIO_AUTH_TOKEN     ?? '',
-    apiKey:      process.env.TWILIO_API_KEY        ?? '',
-    apiSecret:   process.env.TWILIO_API_SECRET     ?? '',
-    twimlAppSid: process.env.TWILIO_TWIML_APP_SID ?? '',
-    callerId:    process.env.TWILIO_CALLER_ID      ?? '',
-    agentName:   process.env.AGENT_NAME            ?? 'Agent',
-    agentPhone,
+    accountSid:  (process.env.TWILIO_ACCOUNT_SID   ?? '').trim(),
+    authToken:   (process.env.TWILIO_AUTH_TOKEN     ?? '').trim(),
+    apiKey:      (process.env.TWILIO_API_KEY        ?? '').trim(),
+    apiSecret:   (process.env.TWILIO_API_SECRET     ?? '').trim(),
+    twimlAppSid: (process.env.TWILIO_TWIML_APP_SID ?? '').trim(),
+    callerId:    (process.env.TWILIO_CALLER_ID      ?? '').trim(),
+    agentName:   (process.env.AGENT_NAME            ?? 'Agent').trim(),
+    agentPhone:  agentPhone.trim(),
   };
 }
 
