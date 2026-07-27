@@ -1,24 +1,29 @@
 // ── Import Contacts Modal ─────────────────────────────────────────────────────
-// Supports two import paths:
-//   1. CSV (BatchLeads, PropStream, Google Contacts, any spreadsheet export)
-//   2. vCard / .vcf (iPhone: Contacts → Share Contact → Save to Files)
-//
-// vCard parsing is done entirely client-side — no new backend needed.
-// Uses the existing POST /api/contacts/import endpoint.
+// Single import path — file upload (the industry standard, per PhoneBurner/Mojo):
+//   1. Upload a CSV or vCard (.vcf) — auto-detected from one button
+//   2. CSV columns are auto-mapped (adjustable), then preview → import
+//   3. Duplicates are skipped automatically server-side
+// Fully client-side parsing: no OAuth, no third-party APIs, nothing to break.
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { API_BASE, authFetch } from '../config';
 
 const GOLD = '#C9A84C';
+const DARK = '#0A0A0A';
 
 interface ParsedRow { [key: string]: string }
-interface Props { onClose: () => void; onImported: (count: number) => void; preloadedVcfText?: string; }
+interface Props {
+  onClose: () => void;
+  onImported: (count: number) => void;
+  preloadedVcfText?: string;
+}
 
 // ── Field options for CSV column mapping ─────────────────────────────────────
 const FIELD_OPTIONS = [
-  { value: '',          label: '— skip —' },
+  { value: '',          label: 'Skip this column' },
+  { value: 'fullName',  label: 'Full Name (auto-split)' },
   { value: 'firstName', label: 'First Name' },
   { value: 'lastName',  label: 'Last Name' },
-  { value: 'phone',     label: 'Phone *' },
+  { value: 'phone',     label: 'Phone (required)' },
   { value: 'address',   label: 'Address' },
   { value: 'city',      label: 'City' },
   { value: 'state',     label: 'State' },
@@ -30,13 +35,14 @@ const FIELD_OPTIONS = [
 
 const SOURCE_OPTIONS = ['manual', 'expired', 'fsbo', 'circle', 'past-client'];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function guessMapping(header: string): string {
+// ── Helpers (exported for reuse in OnboardingWizard) ─────────────────────────
+export function guessMapping(header: string): string {
   const h = header.toLowerCase().replace(/[^a-z]/g, '');
+  if (h === 'name' || h === 'fullname' || h === 'contactname' || h === 'ownername') return 'fullName';
   if (h.includes('first'))   return 'firstName';
   if (h.includes('last'))    return 'lastName';
   if (h.includes('phone') || h.includes('mobile') || h.includes('cell')) return 'phone';
-  if (h.includes('addr'))    return 'address';
+  if (h.includes('addr') || h === 'street') return 'address';
   if (h.includes('city'))    return 'city';
   if (h.includes('state'))   return 'state';
   if (h.includes('zip') || h.includes('postal')) return 'zip';
@@ -46,7 +52,7 @@ function guessMapping(header: string): string {
   return '';
 }
 
-function parseCsv(text: string): { headers: string[]; rows: ParsedRow[] } {
+export function parseCsv(text: string): { headers: string[]; rows: ParsedRow[] } {
   const lines = text.split(/\r?\n/).filter(l => l.trim());
   if (!lines.length) return { headers: [], rows: [] };
 
@@ -77,7 +83,7 @@ function parseCsv(text: string): { headers: string[]; rows: ParsedRow[] } {
 }
 
 /** Parse a .vcf file string into contact objects. Handles vCard 2.1, 3.0, 4.0. */
-function parseVCard(text: string): ParsedRow[] {
+export function parseVCard(text: string): ParsedRow[] {
   const contacts: ParsedRow[] = [];
   const cards = text.split(/BEGIN:VCARD/i).slice(1);
 
@@ -94,9 +100,7 @@ function parseVCard(text: string): ParsedRow[] {
       const prop = line.slice(0, colonIdx).toUpperCase();
       const value = line.slice(colonIdx + 1).trim();
 
-      if (prop === 'FN' && value) {
-        contact._fn = value;
-      }
+      if (prop === 'FN' && value) contact._fn = value;
 
       if (prop === 'N' && value) {
         const parts = value.split(';');
@@ -138,7 +142,7 @@ function parseVCard(text: string): ParsedRow[] {
 }
 
 // ── Shared import function ────────────────────────────────────────────────────
-async function postImport(contacts: ParsedRow[], source: string): Promise<{ imported: number; skipped: number }> {
+export async function postImport(contacts: ParsedRow[], source: string): Promise<{ imported: number; skipped: number }> {
   const data = contacts.map(c => ({ ...c, source: c.source || source }));
   const res = await authFetch(`${API_BASE}/contacts/import`, {
     method: 'POST',
@@ -149,140 +153,112 @@ async function postImport(contacts: ParsedRow[], source: string): Promise<{ impo
   return { imported: json.count ?? json.imported ?? data.length, skipped: json.skipped ?? 0 };
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
-type Mode  = 'csv' | 'vcf';
-type Stage = 'upload' | 'map' | 'preview' | 'done';
+// ── Stages ────────────────────────────────────────────────────────────────────
+type Stage = 'choose' | 'map' | 'preview' | 'done';
 
 export default function CsvImportModal({ onClose, onImported, preloadedVcfText }: Props) {
-  const [mode, setMode]         = useState<Mode>('vcf');
-  const [stage, setStage]       = useState<Stage>('upload');
+  const [stage, setStage]       = useState<Stage>('choose');
   const [dragging, setDragging] = useState(false);
+  const [fileError, setFileError] = useState('');
 
   // CSV state
-  const [headers, setHeaders]           = useState<string[]>([]);
-  const [rows, setRows]                 = useState<ParsedRow[]>([]);
-  const [mapping, setMapping]           = useState<Record<string, string>>({});
+  const [headers, setHeaders]   = useState<string[]>([]);
+  const [rows, setRows]         = useState<ParsedRow[]>([]);
+  const [mapping, setMapping]   = useState<Record<string, string>>({});
   const [defaultSource, setDefaultSource] = useState('manual');
+  const [fileName, setFileName] = useState('');
 
-  // VCF state
+  // VCF state (parsed contacts skip mapping — go straight to preview)
   const [vcfContacts, setVcfContacts] = useState<ParsedRow[]>([]);
+  const isVcf = vcfContacts.length > 0;
 
   // Shared
   const [importing, setImporting] = useState(false);
-  const [result, setResult]       = useState<{ imported: number; skipped: number; totalFetched?: number; noPhone?: number; fromIcloud?: boolean } | null>(null);
+  const [result, setResult]       = useState<{ imported: number; skipped: number } | null>(null);
 
-  // iCloud Direct state
-  const [icloudExpanded, setIcloudExpanded] = useState(false);
-  const [icloudEmail, setIcloudEmail]       = useState('');
-  const [icloudPwd, setIcloudPwd]           = useState('');
-  const [icloudLoading, setIcloudLoading]   = useState(false);
-  const [icloudError, setIcloudError]       = useState('');
-  const [icloudSaveCreds, setIcloudSaveCreds] = useState(true);
-
-  const csvRef = useRef<HTMLInputElement>(null);
-  const vcfRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // PWA share target: if a .vcf was shared to the app, parse it immediately
   useEffect(() => {
     if (preloadedVcfText) {
       const parsed = parseVCard(preloadedVcfText);
       setVcfContacts(parsed);
-      setMode('vcf');
-      setStage(parsed.length > 0 ? 'preview' : 'upload');
+      setStage(parsed.length > 0 ? 'preview' : 'choose');
     }
   }, [preloadedVcfText]);
 
-  const switchMode = (m: Mode) => {
-    setMode(m); setStage('upload'); setRows([]); setVcfContacts([]); setResult(null);
-  };
-
-  // ── CSV loading ───────────────────────────────────────────────────────────
-  const loadCsvFile = (file: File) => {
+  // ── Unified file loading — auto-detects CSV vs vCard ──────────────────────
+  const loadFile = (file: File) => {
+    setFileError('');
+    setFileName(file.name);
     const reader = new FileReader();
     reader.onload = e => {
       const text = e.target?.result as string;
-      const { headers: h, rows: r } = parseCsv(text);
-      setHeaders(h); setRows(r);
-      const auto: Record<string, string> = {};
-      h.forEach(hdr => { auto[hdr] = guessMapping(hdr); });
-      setMapping(auto);
-      setStage('map');
+      const lower = file.name.toLowerCase();
+      const looksVcf = lower.endsWith('.vcf') || lower.endsWith('.vcard') || /BEGIN:VCARD/i.test(text.slice(0, 500));
+
+      if (looksVcf) {
+        const parsed = parseVCard(text);
+        if (!parsed.length) { setFileError('No contacts with phone numbers found in this file.'); return; }
+        setVcfContacts(parsed);
+        setRows([]);
+        setStage('preview');
+      } else {
+        const { headers: h, rows: r } = parseCsv(text);
+        if (!h.length || !r.length) { setFileError('Could not read this file. Make sure it is a CSV with a header row.'); return; }
+        setHeaders(h); setRows(r); setVcfContacts([]);
+        const auto: Record<string, string> = {};
+        h.forEach(hdr => { auto[hdr] = guessMapping(hdr); });
+        setMapping(auto);
+        setStage('map');
+      }
     };
     reader.readAsText(file);
   };
 
-  const onCsvDrop = useCallback((e: React.DragEvent) => {
+  const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault(); setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file?.name.endsWith('.csv')) loadCsvFile(file);
+    if (file) loadFile(file);
   }, []);
 
-  // ── VCF loading ───────────────────────────────────────────────────────────
-  const loadVcfFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const text = e.target?.result as string;
-      const parsed = parseVCard(text);
-      setVcfContacts(parsed);
-      setStage('preview');
-    };
-    reader.readAsText(file);
-  };
-
-  const onVcfDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file?.name.endsWith('.vcf') || file?.name.endsWith('.vcard')) loadVcfFile(file);
-  }, []);
-
-  // ── Import ────────────────────────────────────────────────────────────────
-  const handleCsvImport = async () => {
-    setImporting(true);
-    const contacts = rows.map(row => {
+  // ── Build contacts from CSV mapping (handles fullName split) ──────────────
+  const buildCsvContacts = (): ParsedRow[] => {
+    return rows.map(row => {
       const c: ParsedRow = { source: defaultSource };
-      Object.entries(mapping).forEach(([col, field]) => { if (field) c[field] = row[col] || ''; });
+      Object.entries(mapping).forEach(([col, field]) => {
+        if (!field) return;
+        const val = row[col] || '';
+        if (field === 'fullName') {
+          if (val && !c.firstName) {
+            const parts = val.trim().split(/\s+/);
+            c.firstName = parts[0] || '';
+            c.lastName  = parts.slice(1).join(' ') || c.lastName || '';
+          }
+        } else {
+          c[field] = val;
+        }
+      });
       return c;
     }).filter(c => c.phone);
-
-    if (!contacts.length) { setImporting(false); alert('No rows with a phone number found.'); return; }
-    try {
-      const r = await postImport(contacts, defaultSource);
-      setResult(r); setStage('done');
-    } catch { alert('Import failed. Please try again.'); }
-    finally { setImporting(false); }
   };
 
-  const handleVcfImport = async () => {
+  const csvImportable = (() => {
+    const phoneCol = Object.entries(mapping).find(([, v]) => v === 'phone')?.[0];
+    if (!phoneCol) return 0;
+    return rows.filter(r => !!r[phoneCol]).length;
+  })();
+
+  // ── Import handlers ────────────────────────────────────────────────────────
+  const handleFileImport = async () => {
     setImporting(true);
     try {
-      const r = await postImport(vcfContacts, 'manual');
+      const contacts = isVcf ? vcfContacts : buildCsvContacts();
+      if (!contacts.length) { setFileError('No rows with a phone number found.'); setImporting(false); return; }
+      const r = await postImport(contacts, defaultSource);
       setResult(r); setStage('done');
-    } catch { alert('Import failed. Please try again.'); }
+    } catch { setFileError('Import failed. Please try again.'); }
     finally { setImporting(false); }
-  };
-
-  const handleIcloudImport = async () => {
-    if (!icloudEmail.trim() || !icloudPwd.trim()) {
-      setIcloudError('Enter your Apple ID and App-Specific Password.');
-      return;
-    }
-    setIcloudLoading(true);
-    setIcloudError('');
-    try {
-      const res = await authFetch(`${API_BASE}/contacts/icloud-import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appleId: icloudEmail.trim(), appPassword: icloudPwd.trim(), saveCredentials: icloudSaveCreds }),
-      });
-      const json = await res.json();
-      if (!res.ok) { setIcloudError(json.error || 'Import failed.'); return; }
-      setResult({ imported: json.imported ?? 0, skipped: json.skipped ?? 0, totalFetched: json.totalFetched ?? json.total ?? 0, noPhone: json.noPhone ?? 0, fromIcloud: true });
-      setStage('done');
-    } catch {
-      setIcloudError('Connection failed. Check your internet and try again.');
-    } finally {
-      setIcloudLoading(false);
-    }
   };
 
   useEffect(() => {
@@ -290,6 +266,8 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
     window.addEventListener('keydown', fn);
     return () => window.removeEventListener('keydown', fn);
   }, [onClose]);
+
+  const previewContacts = isVcf ? vcfContacts : buildCsvContacts();
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center px-0 sm:px-4"
@@ -304,376 +282,172 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
             <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontWeight: 300, fontSize: 22, margin: 0 }}>
               Import Contacts
             </h2>
-            <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>iPhone, Android, or CSV spreadsheet</p>
+            <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+              {stage === 'choose' && 'Upload a CSV or contacts file'}
+              {stage === 'map' && `${fileName} — review column matches`}
+              {stage === 'preview' && 'Review before importing'}
+              {stage === 'done' && 'Import complete'}
+            </p>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#d1d5db' }}>✕</button>
         </div>
 
-        {/* Mode tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #f3f4f6', padding: '0 16px', overflowX: 'auto' }}
-             className="hide-scrollbar">
-          {([
-            { id: 'vcf' as Mode, label: 'From Phone', sub: 'iPhone or Android contacts' },
-            { id: 'csv' as Mode, label: '📄 From CSV',   sub: 'Spreadsheet or list export'  },
-          ] as { id: Mode; label: string; sub: string }[]).map(tab => (
-            <button key={tab.id} onClick={() => switchMode(tab.id)} style={{
-              padding: '12px 16px 10px', flexShrink: 0,
-              background: 'none', border: 'none',
-              borderBottom: `2px solid ${mode === tab.id ? GOLD : 'transparent'}`,
-              cursor: 'pointer', textAlign: 'left', marginBottom: -1,
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: mode === tab.id ? '#111' : '#9ca3af' }}>{tab.label}</div>
-              <div style={{ fontSize: 10, color: '#bbb', marginTop: 1 }}>{tab.sub}</div>
-            </button>
-          ))}
-        </div>
-
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }} className="sm:px-6">
 
-          {/* ═══ VCF MODE — UPLOAD ══════════════════════════════════════ */}
-          {mode === 'vcf' && stage === 'upload' && (
+          {/* ═══ STAGE: CHOOSE METHOD ═══════════════════════════════════ */}
+          {stage === 'choose' && (
             <div>
-
-              {/* ── iCloud Direct Sync ──────────────────────────────── */}
-              <div style={{
-                borderRadius: 14, marginBottom: 14,
-                border: icloudExpanded ? '1.5px solid #0071e3' : '1px solid #d0e8ff',
-                background: icloudExpanded ? '#f5f9ff' : 'linear-gradient(135deg, #f0f7ff 0%, #e8f4ff 100%)',
-                overflow: 'hidden',
-              }}>
-                {/* Header row */}
-                <button
-                  onClick={() => setIcloudExpanded(e => !e)}
-                  style={{
-                    width: '100%', padding: '18px 18px', background: 'none', border: 'none',
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14,
-                  }}
-                >
-                  <span style={{ width:36,height:36,flexShrink:0,borderRadius:8,background:"rgba(0,122,255,0.08)",display:"inline-flex",alignItems:"center",justifyContent:"center" }}><svg width="18" height="18" fill="none" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" stroke="#007aff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
-                  <div style={{ textAlign: 'left', flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#0071e3', letterSpacing: '0.01em' }}>
-                      Connect iCloud Directly
-                    </div>
-                    <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>
-                      Fetch all contacts from iCloud in one tap — no file export needed
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 16, color: '#0071e3', transform: icloudExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>›</span>
-                </button>
-
-                {/* Expanded form */}
-                {icloudExpanded && (
-                  <div style={{ padding: '0 18px 18px' }}>
-                    <div style={{ fontSize: 11, color: '#555', marginBottom: 12, lineHeight: 1.6 }}>
-                      Uses your Apple ID to securely fetch contacts from iCloud. Your password is never stored.
-                    </div>
-
-                    <div style={{ marginBottom: 10 }}>
-                      <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
-                        Apple ID (email)
-                      </label>
-                      <input
-                        type="email"
-                        value={icloudEmail}
-                        onChange={e => setIcloudEmail(e.target.value)}
-                        placeholder="you@icloud.com"
-                        style={{
-                          width: '100%', padding: '10px 12px', borderRadius: 8, boxSizing: 'border-box',
-                          border: '1px solid #d1d5db', fontSize: 14, color: '#111', background: '#fff', outline: 'none',
-                        }}
-                      />
-                    </div>
-
-                    <div style={{ marginBottom: 12 }}>
-                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, color: '#374151', marginBottom: 5 }}>
-                        App-Specific Password
-                        <a href="https://appleid.apple.com/account/manage" target="_blank" rel="noreferrer"
-                           style={{ fontSize: 10, color: '#0071e3', fontWeight: 400, textDecoration: 'none' }}>
-                          Generate one ↗
-                        </a>
-                      </label>
-                      <input
-                        type="password"
-                        value={icloudPwd}
-                        onChange={e => setIcloudPwd(e.target.value)}
-                        placeholder="xxxx-xxxx-xxxx-xxxx"
-                        style={{
-                          width: '100%', padding: '10px 12px', borderRadius: 8, boxSizing: 'border-box',
-                          border: '1px solid #d1d5db', fontSize: 14, color: '#111', background: '#fff',
-                          outline: 'none', fontFamily: 'monospace',
-                        }}
-                      />
-                      <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 5 }}>
-                        appleid.apple.com → Sign In → Security → App-Specific Passwords → Generate
-                      </div>
-                    </div>
-
-                    {/* Save credentials checkbox */}
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={icloudSaveCreds}
-                        onChange={e => setIcloudSaveCreds(e.target.checked)}
-                        style={{ width: 16, height: 16, accentColor: '#0071e3' }}
-                      />
-                      <span style={{ fontSize: 12, color: '#374151' }}>
-                        Save for one-tap sync in future
-                      </span>
-                    </label>
-
-                    {icloudError && (
-                      <div style={{ fontSize: 12, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px', marginBottom: 10 }}>
-                        {icloudError}
-                      </div>
-                    )}
-
-                    <button
-                      onClick={handleIcloudImport}
-                      disabled={icloudLoading}
-                      style={{
-                        width: '100%', padding: '12px 18px', borderRadius: 10, border: 'none',
-                        background: icloudLoading ? '#6ea8d4' : 'linear-gradient(135deg, #0071e3 0%, #0058b0 100%)',
-                        color: '#fff', fontSize: 14, fontWeight: 700,
-                        cursor: icloudLoading ? 'default' : 'pointer',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                      }}
-                    >
-                      {icloudLoading ? 'Connecting to iCloud…' : 'Import All iCloud Contacts'}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Divider */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 12px' }}>
-                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
-                <span style={{ fontSize: 10, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>or select a .vcf file</span>
-                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
-              </div>
-
-              {/* ── PRIMARY CTA: file picker */}
-              <button
-                onClick={() => vcfRef.current?.click()}
+              {/* Upload file — hero card doubles as drop zone */}
+              <div
+                onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={onDrop}
+                onClick={() => fileRef.current?.click()}
                 style={{
-                  width: '100%', padding: '20px 18px', borderRadius: 14,
-                  background: 'linear-gradient(135deg, #0A0A0A 0%, #1a1a1a 100%)',
-                  border: '1px solid rgba(201,168,76,0.35)',
-                  color: '#fff', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 14,
-                  marginBottom: 12,
+                  borderRadius: 14, padding: '26px 20px', marginBottom: 14, cursor: 'pointer',
+                  background: dragging ? 'rgba(201,168,76,0.06)' : `linear-gradient(135deg, ${DARK} 0%, #1c1c1c 100%)`,
+                  border: dragging ? `2px dashed ${GOLD}` : '1px solid rgba(201,168,76,0.35)',
+                  display: 'flex', alignItems: 'center', gap: 16, transition: 'all 0.15s',
                 }}
               >
-                <span style={{ fontSize: 30 }}>📂</span>
-                <div style={{ textAlign: 'left', flex: 1 }}>
-                  <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: '0.02em' }}>
-                    Select .vcf File
+                <span style={{ width: 48, height: 48, flexShrink: 0, borderRadius: 12, background: 'rgba(201,168,76,0.12)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <svg width="22" height="22" fill="none" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 20h16" stroke={GOLD} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: dragging ? '#111' : '#fff' }}>Upload a File</span>
+                    <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: DARK, background: GOLD, borderRadius: 4, padding: '2px 7px' }}>Recommended</span>
                   </div>
-                  <div style={{ fontSize: 12, color: 'rgba(201,168,76,0.85)', marginTop: 3 }}>
-                    Choose a contacts file from your iPhone
+                  <div style={{ fontSize: 12, color: dragging ? '#6b7280' : 'rgba(255,255,255,0.55)', marginTop: 3, lineHeight: 1.5 }}>
+                    CSV or vCard (.vcf) — columns match automatically.<br/>
+                    Works with BatchLeads, PropStream, Vulcan7, RedX, iPhone exports.
                   </div>
                 </div>
-                <span style={{ fontSize: 20, color: 'rgba(201,168,76,0.6)' }}>›</span>
-              </button>
+                <span style={{ fontSize: 18, color: 'rgba(201,168,76,0.6)' }}>›</span>
+              </div>
               <input
-                ref={vcfRef}
+                ref={fileRef}
                 type="file"
-                accept=".vcf,.vcard,text/vcard,text/x-vcard,text/directory"
+                accept=".csv,.vcf,.vcard,text/csv,text/vcard,text/x-vcard,text/directory"
                 style={{ display: 'none' }}
-                onChange={e => { const f = e.target.files?.[0]; if (f) loadVcfFile(f); }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) loadFile(f); e.currentTarget.value = ''; }}
               />
 
-              {/* iCloud all-contacts export */}
-              <a
-                href="https://www.icloud.com/contacts"
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                  padding: '13px 14px', borderRadius: 12, marginBottom: 16,
-                  background: '#f0f9ff', border: '1px solid #bae6fd',
-                  textDecoration: 'none', color: '#0369a1', boxSizing: 'border-box',
-                }}
-              >
-                <span style={{ width:28,height:28,borderRadius:6,background:"rgba(0,122,255,0.08)",display:"inline-flex",alignItems:"center",justifyContent:"center" }}><svg width="14" height="14" fill="none" viewBox="0 0 24 24"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z" stroke="#007aff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg></span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>Export ALL contacts at once — iCloud.com</div>
-                  <div style={{ fontSize: 11, color: '#0ea5e9', marginTop: 2, lineHeight: 1.5 }}>
-                    Contacts → Settings → Select All → Export vCard → tap "Select .vcf File" above
-                  </div>
+              {fileError && (
+                <div style={{ fontSize: 12, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '9px 12px', marginBottom: 12 }}>
+                  {fileError}
                 </div>
-                <span style={{ fontSize: 16, color: '#7dd3fc', flexShrink: 0 }}>↗</span>
-              </a>
+              )}
 
-              {/* How-to steps */}
+              {/* Where to get your file */}
               <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 12, padding: '14px 16px' }}>
                 <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: GOLD, marginBottom: 10 }}>
-                  How to export contacts (all methods)
+                  Where to get your file
                 </div>
                 {[
-                  { icon: '💻', text: 'On Mac: Open Contacts → File → Export → Export vCard → import here (exports ALL contacts including "On My iPhone")' },
-                  { icon: '📲', text: 'On iPhone: Open the Contacts app → tap a contact → scroll down → "Share Contact"' },
-                  { icon: '', text: 'Tap "Save to Files" — this saves a .vcf file' },
-                  { icon: '📂', text: 'Tap "Select .vcf File" above and choose it' },
+                  { title: 'Lead lists', text: 'Export a CSV from BatchLeads, PropStream, Vulcan7, RedX, or any spreadsheet.' },
+                  { title: 'iPhone contacts', text: 'Go to iCloud.com → Contacts → select all → Export vCard, then upload the .vcf here.' },
+                  { title: 'Google contacts', text: 'Go to contacts.google.com → Export → CSV, then upload it here.' },
                 ].map((s, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: i < 3 ? 10 : 0 }}>
-                    <span style={{ fontSize: 16, minWidth: 24, textAlign: 'center', marginTop: 1 }}>{s.icon}</span>
-                    <span style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>{s.text}</span>
+                  <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', marginBottom: i < 2 ? 9 : 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#374151', minWidth: 104, flexShrink: 0 }}>{s.title}</span>
+                    <span style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.55 }}>{s.text}</span>
                   </div>
                 ))}
               </div>
 
-              {/* Desktop drag zone */}
-              <div
-                className="hidden sm:block"
-                onDragOver={e => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={onVcfDrop}
-                onClick={() => vcfRef.current?.click()}
-                style={{
-                  border: `2px dashed ${dragging ? GOLD : '#e5e7eb'}`,
-                  background: dragging ? 'rgba(201,168,76,0.04)' : 'transparent',
-                  borderRadius: 10, padding: '16px', textAlign: 'center', cursor: 'pointer',
-                  transition: 'all 0.2s', marginTop: 14,
-                }}
-              >
-                <div style={{ fontSize: 12, color: '#9ca3af' }}>Or drag & drop a .vcf file here</div>
+              <div style={{ fontSize: 11, color: '#c4c4c4', textAlign: 'center', marginTop: 14 }}>
+                Duplicates are detected and skipped automatically
               </div>
             </div>
           )}
 
-          {/* ═══ VCF MODE — PREVIEW ═════════════════════════════════════ */}
-          {mode === 'vcf' && stage === 'preview' && (
+          {/* ═══ STAGE: MAP (CSV only) ══════════════════════════════════ */}
+          {stage === 'map' && (
             <div>
-              <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>
-                  {vcfContacts.length} contacts with phone numbers found
-                </div>
-                <div style={{ fontSize: 11, color: '#9ca3af' }}>Duplicates skipped automatically</div>
-              </div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      {['Name', 'Phone', 'Email', 'City'].map(col => (
-                        <th key={col} style={{ textAlign: 'left', padding: '8px 12px 8px 0', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9ca3af' }}>{col}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {vcfContacts.slice(0, 8).map((c, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
-                        <td style={{ padding: '7px 12px 7px 0', color: '#111', fontWeight: 500 }}>{[c.firstName, c.lastName].filter(Boolean).join(' ') || '—'}</td>
-                        <td style={{ padding: '7px 12px 7px 0', color: '#374151', fontFamily: 'monospace', fontSize: 11 }}>{c.phone || '—'}</td>
-                        <td style={{ padding: '7px 12px 7px 0', color: '#9ca3af' }}>{c.email || '—'}</td>
-                        <td style={{ padding: '7px 0', color: '#9ca3af' }}>{c.city || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {vcfContacts.length > 8 && (
-                  <div style={{ padding: '10px 0 0', fontSize: 11, color: '#bbb' }}>
-                    + {vcfContacts.length - 8} more contacts…
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ═══ CSV MODE — UPLOAD ══════════════════════════════════════ */}
-          {mode === 'csv' && stage === 'upload' && (
-            <div>
-              <div
-                onDragOver={e => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={onCsvDrop}
-                onClick={() => csvRef.current?.click()}
-                style={{
-                  border: `2px dashed ${dragging ? GOLD : '#e0e0e0'}`,
-                  background: dragging ? 'rgba(201,168,76,0.04)' : 'transparent',
-                  borderRadius: 12, padding: '48px 24px', textAlign: 'center', cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <div style={{ fontSize: 36, marginBottom: 10, color: 'rgba(201,168,76,0.4)' }}>⬆</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#374151' }}>Drop your CSV here</div>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>or tap to browse</div>
-                <div style={{ fontSize: 10.5, color: '#d1d5db', marginTop: 10 }}>
-                  Supports BatchLeads, PropStream, Vulcan7, Google Contacts, and any standard CSV
-                </div>
-              </div>
-              <input ref={csvRef} type="file" accept=".csv" style={{ display: 'none' }}
-                     onChange={e => { const f = e.target.files?.[0]; if (f) loadCsvFile(f); }} />
-            </div>
-          )}
-
-          {/* ═══ CSV MODE — MAP ═════════════════════════════════════════ */}
-          {mode === 'csv' && stage === 'map' && (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{rows.length} rows — map your columns</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>{rows.length} rows found</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <label style={{ fontSize: 11, color: '#9ca3af' }}>Default source</label>
+                  <label style={{ fontSize: 11, color: '#9ca3af' }}>Lead source</label>
                   <select value={defaultSource} onChange={e => setDefaultSource(e.target.value)}
                     style={{ fontSize: 11, padding: '4px 8px', border: '1px solid #e5e7eb', borderRadius: 5, color: '#374151' }}>
                     {SOURCE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
               </div>
+              <div style={{ fontSize: 11.5, color: '#9ca3af', marginBottom: 14 }}>
+                We matched your columns automatically — adjust anything that looks off.
+              </div>
               <div>
-                {headers.map(col => (
-                  <div key={col} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 9 }}>
-                    <div style={{ width: 140, fontSize: 12, color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>{col}</div>
-                    <span style={{ color: '#d1d5db', fontSize: 11 }}>→</span>
-                    <select value={mapping[col] || ''} onChange={e => setMapping(m => ({ ...m, [col]: e.target.value }))}
-                      style={{ flex: 1, fontSize: 11, padding: '5px 8px', border: '1px solid #e5e7eb', borderRadius: 5, color: '#374151' }}>
-                      {FIELD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                    {mapping[col] && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e', flexShrink: 0 }} />}
-                  </div>
-                ))}
+                {headers.map(col => {
+                  const sample = rows.find(r => r[col])?.[col] || '';
+                  return (
+                    <div key={col} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 9 }}>
+                      <div style={{ width: 160, overflow: 'hidden' }}>
+                        <div style={{ fontSize: 12, color: '#111', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{col}</div>
+                        {sample && <div style={{ fontSize: 10, color: '#c4c4c4', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>e.g. {sample}</div>}
+                      </div>
+                      <span style={{ color: '#d1d5db', fontSize: 11 }}>→</span>
+                      <select value={mapping[col] || ''} onChange={e => setMapping(m => ({ ...m, [col]: e.target.value }))}
+                        style={{ flex: 1, fontSize: 12, padding: '6px 8px', border: `1px solid ${mapping[col] ? 'rgba(201,168,76,0.4)' : '#e5e7eb'}`, borderRadius: 6, color: mapping[col] ? '#111' : '#9ca3af', background: mapping[col] ? '#fdfbf5' : '#fff' }}>
+                        {FIELD_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
               {!Object.values(mapping).includes('phone') && (
-                <div style={{ fontSize: 11, color: '#ef4444', marginTop: 10, display: 'flex', gap: 6 }}>
-                  Map a Phone column before continuing
+                <div style={{ fontSize: 11.5, color: '#dc2626', marginTop: 12, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px' }}>
+                  Select which column contains the phone number to continue.
                 </div>
               )}
             </div>
           )}
 
-          {/* ═══ CSV MODE — PREVIEW ═════════════════════════════════════ */}
-          {mode === 'csv' && stage === 'preview' && (
+          {/* ═══ STAGE: PREVIEW (CSV + VCF) ═════════════════════════════ */}
+          {stage === 'preview' && (
             <div>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 12 }}>Preview — first 5 rows</div>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', fontSize: 12 }}>
+              <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#111' }}>
+                  {previewContacts.length} contacts ready to import
+                </div>
+                <div style={{ fontSize: 11, color: '#9ca3af' }}>Duplicates skipped automatically</div>
+              </div>
+              <div style={{ overflowX: 'auto', border: '1px solid #f3f4f6', borderRadius: 10 }}>
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid #f3f4f6' }}>
-                      {Object.entries(mapping).filter(([,v]) => v).map(([col, field]) => (
-                        <th key={col} style={{ textAlign: 'left', padding: '6px 10px 6px 0', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9ca3af' }}>{field}</th>
+                    <tr style={{ background: '#fafaf8' }}>
+                      {['Name', 'Phone', 'Email', 'City'].map(col => (
+                        <th key={col} style={{ textAlign: 'left', padding: '9px 12px', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9ca3af' }}>{col}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.slice(0, 5).map((row, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
-                        {Object.entries(mapping).filter(([,v]) => v).map(([col]) => (
-                          <td key={col} style={{ padding: '6px 10px 6px 0', color: '#374151' }}>{row[col] || '—'}</td>
-                        ))}
+                    {previewContacts.slice(0, 8).map((c, i) => (
+                      <tr key={i} style={{ borderTop: '1px solid #f7f7f5' }}>
+                        <td style={{ padding: '8px 12px', color: '#111', fontWeight: 500 }}>{[c.firstName, c.lastName].filter(Boolean).join(' ') || '—'}</td>
+                        <td style={{ padding: '8px 12px', color: '#374151', fontFamily: 'monospace', fontSize: 11 }}>{c.phone || '—'}</td>
+                        <td style={{ padding: '8px 12px', color: '#9ca3af' }}>{c.email || '—'}</td>
+                        <td style={{ padding: '8px 12px', color: '#9ca3af' }}>{c.city || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 12 }}>
-                <strong style={{ color: '#111' }}>{rows.filter(r => {
-                  const phoneCol = Object.entries(mapping).find(([,v]) => v === 'phone')?.[0];
-                  return phoneCol ? !!r[phoneCol] : false;
-                }).length}</strong> contacts with phone numbers will be imported. Duplicates skipped automatically.
-              </div>
+              {previewContacts.length > 8 && (
+                <div style={{ padding: '10px 2px 0', fontSize: 11, color: '#bbb' }}>
+                  + {previewContacts.length - 8} more contacts…
+                </div>
+              )}
+              {fileError && (
+                <div style={{ fontSize: 12, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '9px 12px', marginTop: 12 }}>
+                  {fileError}
+                </div>
+              )}
             </div>
           )}
 
-          {/* ═══ DONE (shared) ═════════════════════════════════════════ */}
+          {/* ═══ STAGE: DONE ════════════════════════════════════════════ */}
           {stage === 'done' && result && (
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <div style={{ fontSize: 48, marginBottom: 16, color: GOLD }}>✓</div>
@@ -683,24 +457,6 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
               {result.skipped > 0 && (
                 <div style={{ fontSize: 13, color: '#9ca3af' }}>{result.skipped} duplicates skipped</div>
               )}
-              {result.noPhone != null && result.noPhone > 0 && (
-                <div style={{ fontSize: 12, color: '#f59e0b', marginTop: 6 }}>
-                  {result.noPhone} contacts skipped — no phone number found
-                </div>
-              )}
-              {result.fromIcloud && (result.totalFetched ?? 0) < 100 && (
-                <div style={{ marginTop: 20, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 14px', textAlign: 'left' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 6 }}>Missing contacts?</div>
-                  <div style={{ fontSize: 12, color: '#78350f', lineHeight: 1.6 }}>
-                    iCloud only syncs contacts you've chosen to store there. Contacts saved as <strong>"On My iPhone"</strong> (local storage) are not accessible via iCloud.
-                  </div>
-                  <div style={{ fontSize: 12, color: '#78350f', marginTop: 8, lineHeight: 1.6 }}>
-                    <strong>To get ALL contacts:</strong><br/>
-                    <span style={{ display: 'block', marginTop: 4 }}>① On iPhone: <strong>Settings → [Your Name] → iCloud → Contacts → toggle ON → Merge</strong>. This moves local contacts to iCloud. Then sync again.</span>
-                    <span style={{ display: 'block', marginTop: 4 }}>② Or on Mac: Open <strong>Contacts app → File → Export → Export vCard</strong>, then import the .vcf file here.</span>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -709,44 +465,33 @@ export default function CsvImportModal({ onClose, onImported, preloadedVcfText }
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, padding: '12px 16px', borderTop: '1px solid rgba(201,168,76,0.12)' }}
              className="sm:px-6">
 
-          {stage === 'upload' && (
+          {stage === 'choose' && (
             <button onClick={onClose} style={{ padding: '9px 22px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
               Cancel
             </button>
           )}
 
-          {mode === 'csv' && stage === 'map' && (
+          {stage === 'map' && (
             <>
-              <button onClick={() => setStage('upload')} style={{ padding: '9px 18px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
+              <button onClick={() => { setStage('choose'); setRows([]); setFileError(''); }} style={{ padding: '9px 18px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
                 ← Back
               </button>
               <button
                 onClick={() => setStage('preview')}
-                disabled={!Object.values(mapping).includes('phone')}
-                style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: GOLD, color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: !Object.values(mapping).includes('phone') ? 0.5 : 1 }}>
-                Preview →
+                disabled={!csvImportable}
+                style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: GOLD, color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: !csvImportable ? 0.5 : 1 }}>
+                Preview {csvImportable > 0 ? `${csvImportable} contacts ` : ''}→
               </button>
             </>
           )}
 
-          {mode === 'csv' && stage === 'preview' && (
+          {stage === 'preview' && (
             <>
-              <button onClick={() => setStage('map')} style={{ padding: '9px 18px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
+              <button onClick={() => { if (isVcf) { setStage('choose'); setVcfContacts([]); } else setStage('map'); }} style={{ padding: '9px 18px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
                 ← Back
               </button>
-              <button onClick={handleCsvImport} disabled={importing} style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: GOLD, color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: importing ? 0.7 : 1 }}>
-                {importing ? 'Importing…' : `Import ${rows.length} contacts`}
-              </button>
-            </>
-          )}
-
-          {mode === 'vcf' && stage === 'preview' && (
-            <>
-              <button onClick={() => setStage('upload')} style={{ padding: '9px 18px', borderRadius: 7, border: '1px solid #e5e7eb', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer' }}>
-                ← Back
-              </button>
-              <button onClick={handleVcfImport} disabled={importing} style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: GOLD, color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: importing ? 0.7 : 1 }}>
-                {importing ? 'Importing…' : `Import ${vcfContacts.length} contacts`}
+              <button onClick={handleFileImport} disabled={importing || !previewContacts.length} style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: GOLD, color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: importing ? 0.7 : 1 }}>
+                {importing ? 'Importing…' : `Import ${previewContacts.length} Contacts`}
               </button>
             </>
           )}

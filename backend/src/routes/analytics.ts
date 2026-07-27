@@ -29,6 +29,7 @@ router.get('/', async (req: Request, res: Response) => {
       totalCalls, callsToday, callsWeek, callsMonth,
       totalContacts, hotLeads, dncCount,
       callsByDisposition, contactsByStatus, contactsBySource, recentCalls,
+      totalMessages, outboundMessages,
     ] = await Promise.all([
       db.call.count({ where: cw() }),
       db.call.count({ where: cw({ calledAt: { gte: startOf('day') } }) }),
@@ -41,6 +42,8 @@ router.get('/', async (req: Request, res: Response) => {
       db.contact.groupBy({ by: ['status'], where: ctw(), _count: { _all: true } }),
       db.contact.groupBy({ by: ['source'], where: ctw(), _count: { _all: true } }),
       db.call.findMany({ take: 10, where: cw(), orderBy: { calledAt: 'desc' }, include: { contact: { select: { firstName: true, lastName: true, phone: true } } } }),
+      db.message.count({ where: { contact: { userId } } }).catch(() => 0),
+      db.message.count({ where: { contact: { userId }, direction: 'outbound' } }).catch(() => 0),
     ]);
 
     // Calls per day for last 14 days — scoped via Contact join
@@ -75,6 +78,7 @@ router.get('/', async (req: Request, res: Response) => {
     res.json({
       calls:    { total: totalCalls, today: callsToday, week: callsWeek, month: callsMonth },
       contacts: { total: totalContacts, hot: hotLeads, dnc: dncCount },
+      messages: { total: totalMessages, outbound: outboundMessages },
       rates:    { answerRate, hotRate },
       dispositions:     callsByDisposition.map((d: any) => ({ label: d.disposition || 'unknown', count: d._count?._all ?? 0 })),
       callsByDay:       days,

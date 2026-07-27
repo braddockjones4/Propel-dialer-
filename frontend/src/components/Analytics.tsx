@@ -123,9 +123,24 @@ export default function Analytics() {
 
   const load = () => {
     setLoading(true);
+    setError('');
     authFetch(`${API_BASE}/analytics`)
       .then(r => r.ok ? r.json() : Promise.reject(new Error('Server error')))
-      .then(d => { setData(d); setLoading(false); })
+      .then((d: any) => {
+        // Normalize — never let a missing field crash the render
+        setData({
+          calls:    { total: 0, today: 0, week: 0, month: 0, ...(d?.calls || {}) },
+          contacts: { total: 0, hot: 0, dnc: 0, ...(d?.contacts || {}) },
+          messages: { total: 0, outbound: 0, ...(d?.messages || {}) },
+          rates:    { answerRate: 0, hotRate: 0, ...(d?.rates || {}) },
+          dispositions:     Array.isArray(d?.dispositions) ? d.dispositions : [],
+          callsByDay:       Array.isArray(d?.callsByDay) ? d.callsByDay : [],
+          contactsByStatus: Array.isArray(d?.contactsByStatus) ? d.contactsByStatus : [],
+          contactsBySource: Array.isArray(d?.contactsBySource) ? d.contactsBySource : [],
+          recentCalls:      Array.isArray(d?.recentCalls) ? d.recentCalls : [],
+        });
+        setLoading(false);
+      })
       .catch(() => { setError('Failed to load analytics'); setLoading(false); });
   };
 

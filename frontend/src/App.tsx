@@ -97,15 +97,10 @@ function AppInner() {
   // Check onboarding status when user first loads in
   useEffect(() => {
     if (!user) return;
-    authFetch(`${API_BASE}/dialer/twilio-credentials`).then(async r => {
+    authFetch(`${API_BASE}/dialer/onboarding-step`).then(async r => {
+      if (!r.ok) return;
       const d = await r.json();
-      authFetch(`${API_BASE}/dialer/onboarding-step`).then(async r2 => {
-        if (!r2.ok) return;
-        const d2 = await r2.json();
-        if ((d2.step ?? 5) < 5) setShowOnboarding(true);
-      }).catch(() => {
-        if (!d.hasCreds) setShowOnboarding(true);
-      });
+      if ((d.step ?? 5) < 5) setShowOnboarding(true);
     }).catch(() => {});
   }, [user?.id]);
 

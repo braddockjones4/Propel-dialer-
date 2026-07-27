@@ -3,13 +3,14 @@
  *
  * Steps:
  *   1 → Profile (name, agentName)
- *   2 → Your Phone Number (personal cell — Twilio will call this for bridge mode)
+ *   2 → Your Phone Number (personal cell — the system calls this for bridge mode)
  *   3 → Voicemail Greeting (skip allowed)
- *   4 → Import Contacts — iCloud or Gmail (skip allowed)
+ *   4 → Import Contacts — upload a CSV or vCard file (skip allowed)
  *   5 → Done
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE, authFetch } from '../config';
+import { parseCsv, parseVCard, guessMapping, postImport } from './CsvImportModal';
 
 interface Props { onComplete: () => void; }
 
@@ -17,7 +18,7 @@ const STEPS = [
   { n: 1, title: 'Your Profile',       subtitle: 'Set your name and how you appear to contacts.' },
   { n: 2, title: 'Your Phone Number',  subtitle: 'The system will call this number when you start a dialing session.' },
   { n: 3, title: 'Voicemail Greeting', subtitle: 'Upload a voicemail drop for missed calls.' },
-  { n: 4, title: 'Import Contacts',    subtitle: 'Sync contacts from iCloud or Gmail.' },
+  { n: 4, title: 'Import Contacts',    subtitle: 'Upload your contacts or lead list.' },
   { n: 5, title: "You're ready!",      subtitle: 'Propel Dialer is set up and ready to go.' },
 ];
 
@@ -37,24 +38,15 @@ export default function OnboardingWizard({ onComplete }: Props) {
   const [vmFile, setVmFile] = useState<File | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // Step 4 — iCloud
-  const [icloudEmail,  setIcloudEmail]  = useState('');
-  const [icloudPwd,    setIcloudPwd]    = useState('');
-  const [icloudStatus, setIcloudStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
-  const [icloudCount,  setIcloudCount]  = useState(0);
-  const [icloudErr,    setIcloudErr]    = useState('');
-
-  // Step 4 — Gmail
-  const [gmailConnected, setGmailConnected] = useState(false);
-  const [gmailStatus,    setGmailStatus]    = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
-  const [gmailCount,     setGmailCount]     = useState(0);
+  // Step 4 — contact file upload
+  const [importStatus, setImportStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [importCount,  setImportCount]  = useState(0);
+  const [importErr,    setImportErr]    = useState('');
+  const contactsInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     authFetch(`${API_BASE}/auth/me`).then(r => r.json()).then((d: any) => {
       setProfileName(d.name || '');
-    }).catch(() => {});
-    authFetch(`${API_BASE}/auth/gmail-status`).then(r => r.json()).then((d: any) => {
-      setGmailConnected(!!d.connected);
     }).catch(() => {});
   }, []);
 
@@ -118,30 +110,54 @@ export default function OnboardingWizard({ onComplete }: Props) {
     await advanceStep(4);
   };
 
-  const handleIcloudSync = async () => {
-    if (!icloudEmail.trim() || !icloudPwd.trim()) { setIcloudErr('Enter your Apple ID and App-Specific Password.'); return; }
-    setIcloudStatus('loading'); setIcloudErr('');
-    try {
-      const r = await authFetch(`${API_BASE}/contacts/icloud-import`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appleId: icloudEmail.trim(), appPassword: icloudPwd.trim(), saveCredentials: true }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setIcloudErr(d.error || 'Import failed'); setIcloudStatus('error'); return; }
-      setIcloudCount(d.imported ?? 0);
-      setIcloudStatus('done');
-    } catch { setIcloudErr('Connection failed. Try again.'); setIcloudStatus('error'); }
-  };
+  // Step 4 — parse an uploaded CSV or vCard and import it, all client-side
+  const handleContactsFile = (file: File) => {
+    setImportStatus('loading'); setImportErr('');
+    const reader = new FileReader();
+    reader.onload = async e => {
+      try {
+        const text = e.target?.result as string;
+        const lower = file.name.toLowerCase();
+        const looksVcf = lower.endsWith('.vcf') || lower.endsWith('.vcard') || /BEGIN:VCARD/i.test(text.slice(0, 500));
 
-  const handleGmailSync = async () => {
-    setGmailStatus('loading');
-    try {
-      const r = await authFetch(`${API_BASE}/contacts/google-import`, { method: 'POST' });
-      const d = await r.json();
-      if (!r.ok) { setGmailStatus('error'); return; }
-      setGmailCount(d.imported ?? 0);
-      setGmailStatus('done');
-    } catch { setGmailStatus('error'); }
+        let contacts: Array<Record<string, string>>;
+        if (looksVcf) {
+          contacts = parseVCard(text);
+        } else {
+          const { headers, rows } = parseCsv(text);
+          const mapping: Record<string, string> = {};
+          headers.forEach(h => { mapping[h] = guessMapping(h); });
+          contacts = rows.map(row => {
+            const c: Record<string, string> = {};
+            Object.entries(mapping).forEach(([col, field]) => {
+              if (!field) return;
+              const val = row[col] || '';
+              if (field === 'fullName') {
+                if (val && !c.firstName) {
+                  const parts = val.trim().split(/\s+/);
+                  c.firstName = parts[0] || '';
+                  c.lastName  = parts.slice(1).join(' ') || c.lastName || '';
+                }
+              } else { c[field] = val; }
+            });
+            return c;
+          }).filter(c => c.phone);
+        }
+
+        if (!contacts.length) {
+          setImportErr('No contacts with phone numbers found in that file.');
+          setImportStatus('error');
+          return;
+        }
+        const r = await postImport(contacts, 'manual');
+        setImportCount(r.imported);
+        setImportStatus('done');
+      } catch {
+        setImportErr('Could not read that file. You can also import later from the Contacts tab.');
+        setImportStatus('error');
+      }
+    };
+    reader.readAsText(file);
   };
 
   const progress = Math.min((step / 5) * 100, 100);
@@ -241,63 +257,68 @@ export default function OnboardingWizard({ onComplete }: Props) {
             </div>
           )}
 
-          {/* ── Step 4: Contacts — iCloud + Gmail only ─────────────────────── */}
+          {/* ── Step 4: Contacts — file upload ─────────────────────────────── */}
           {step === 4 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-              {/* iCloud */}
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ background: '#f0f7ff', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 16 }}>☁️</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#0071e3' }}>iCloud Contacts</span>
-                  {icloudStatus === 'done' && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#16a34a', fontWeight: 700 }}>✓ {icloudCount} imported</span>}
+              {importStatus === 'done' ? (
+                <div style={{ textAlign: 'center', padding: '18px 0 6px' }}>
+                  <div style={{ fontSize: 36, color: '#C9A84C', marginBottom: 8 }}>✓</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: '#111' }}>{importCount} contacts imported</div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>You can import more anytime from the Contacts tab.</div>
                 </div>
-                {icloudStatus !== 'done' && (
-                  <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <input value={icloudEmail} onChange={e => setIcloudEmail(e.target.value)}
-                      placeholder="Apple ID email" style={iSt} />
-                    <input type="password" value={icloudPwd} onChange={e => setIcloudPwd(e.target.value)}
-                      placeholder="App-Specific Password" style={iSt} />
-                    <div style={{ fontSize: 10, color: '#9ca3af' }}>
-                      Generate at <a href="https://appleid.apple.com" target="_blank" rel="noreferrer" style={{ color: '#C9A84C' }}>appleid.apple.com</a> → Security → App-Specific Passwords
+              ) : (
+                <>
+                  <button
+                    onClick={() => contactsInput.current?.click()}
+                    disabled={importStatus === 'loading'}
+                    style={{
+                      width: '100%', padding: '22px 18px', borderRadius: 12,
+                      background: 'linear-gradient(135deg, #0A0A0A 0%, #1c1c1c 100%)',
+                      border: '1px solid rgba(201,168,76,0.35)', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 14, textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ width: 42, height: 42, flexShrink: 0, borderRadius: 10, background: 'rgba(201,168,76,0.12)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7 9m5-5l5 5M4 20h16" stroke="#C9A84C" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>
+                        {importStatus === 'loading' ? 'Importing…' : 'Upload Contacts File'}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.55)', marginTop: 3, lineHeight: 1.5 }}>
+                        CSV or vCard (.vcf) — columns match automatically
+                      </div>
                     </div>
-                    {icloudErr && <ErrBox msg={icloudErr} />}
-                    <button onClick={handleIcloudSync} disabled={icloudStatus === 'loading'}
-                      style={{ ...bSt, background: '#0071e3', color: '#fff', alignSelf: 'flex-start', padding: '7px 14px' }}>
-                      {icloudStatus === 'loading' ? 'Syncing…' : 'Sync iCloud →'}
-                    </button>
-                  </div>
-                )}
-              </div>
+                    <span style={{ fontSize: 16, color: 'rgba(201,168,76,0.6)' }}>›</span>
+                  </button>
+                  <input
+                    ref={contactsInput}
+                    type="file"
+                    accept=".csv,.vcf,.vcard,text/csv,text/vcard,text/x-vcard,text/directory"
+                    style={{ display: 'none' }}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleContactsFile(f); e.currentTarget.value = ''; }}
+                  />
 
-              {/* Gmail */}
-              <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
-                <div style={{ background: '#fff8f0', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 16 }}>📧</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#ea4335' }}>Gmail Contacts</span>
-                  {gmailStatus === 'done' && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#16a34a', fontWeight: 700 }}>✓ {gmailCount} imported</span>}
-                </div>
-                <div style={{ padding: '12px 14px' }}>
-                  {!gmailConnected ? (
-                    <a href={`${API_BASE}/auth/gmail`} style={{ ...bSt, background: '#ea4335', color: '#fff', display: 'inline-block', textDecoration: 'none', padding: '7px 14px', fontSize: 11 }}>
-                      Connect Gmail →
-                    </a>
-                  ) : gmailStatus === 'done' ? (
-                    <div style={{ fontSize: 12, color: '#16a34a' }}>Gmail synced ✓</div>
-                  ) : (
-                    <button onClick={handleGmailSync} disabled={gmailStatus === 'loading'}
-                      style={{ ...bSt, background: '#ea4335', color: '#fff', padding: '7px 14px' }}>
-                      {gmailStatus === 'loading' ? 'Syncing…' : 'Sync Gmail Contacts →'}
-                    </button>
-                  )}
-                  {gmailStatus === 'error' && <ErrBox msg="Sync failed. You can try again from the Contacts page." />}
-                </div>
-              </div>
+                  {importErr && <ErrBox msg={importErr} />}
+
+                  <div style={{ background: '#fafaf8', border: '1px solid #f0eeea', borderRadius: 10, padding: '12px 14px' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#C9A84C', marginBottom: 8 }}>
+                      Where to get your file
+                    </div>
+                    <div style={{ fontSize: 11.5, color: '#6b7280', lineHeight: 1.7 }}>
+                      <strong style={{ color: '#374151' }}>Lead lists:</strong> export a CSV from BatchLeads, PropStream, Vulcan7, or RedX.<br/>
+                      <strong style={{ color: '#374151' }}>iPhone contacts:</strong> iCloud.com → Contacts → select all → Export vCard.<br/>
+                      <strong style={{ color: '#374151' }}>Google contacts:</strong> contacts.google.com → Export → CSV.
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 2 }}>
-                <SkipBtn onClick={() => advanceStep(5)} loading={saving} />
+                {importStatus !== 'done' && <SkipBtn onClick={() => advanceStep(5)} loading={saving} />}
                 <PrimaryBtn
-                  label={icloudStatus === 'done' || gmailStatus === 'done' ? 'Finish →' : 'Skip for now →'}
+                  label={importStatus === 'done' ? 'Finish →' : 'Skip for now →'}
                   onClick={() => advanceStep(5)} loading={saving}
                 />
               </div>
