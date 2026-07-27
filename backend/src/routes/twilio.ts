@@ -3,10 +3,10 @@ import twilio, { validateRequest as twilioValidate } from 'twilio';
 
 import { runFollowUpSequence, ContactContext } from '../followUp';
 import { SequenceTrigger } from '../sequenceStore';
-import { pickCallerId } from './localPresence';
+import { pickCallerId, resolveContactCallerId } from './localPresence';
 import prisma from '../db';
 import { transcribeAndScoreCall } from './transcription';
-import { bridges } from './dialer';
+import { bridges, isMachineAnswer } from './dialer';
 import { io } from '../socket';
 import { getTwilioCreds, getTwilioClient } from '../twilioClient';
 
@@ -170,11 +170,25 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
 
     const { client, creds } = await getTwilioClient(b.userId);
     const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } }).catch(() => null);
-    const localFrom = await pickCallerId(b.contactPhone).catch(() => creds.callerId);
-    const contactFrom = (settings?.phoneVerified && settings?.personalPhone)
-      ? settings.personalPhone
-      : localFrom;
+    // Guarantees From !== To — see resolveContactCallerId. A caller ID matching
+    // the dialed number sends the call to voicemail retrieval, not the greeting.
+    const contactFrom = await resolveContactCallerId({
+      destination:   b.contactPhone,
+      personalPhone: settings?.personalPhone,
+      phoneVerified: settings?.phoneVerified,
+      userId:        b.userId,
+      fallback:      creds.callerId,
+    });
     const sid = encodeURIComponent(sessionId);
+
+    if (!contactFrom) {
+      console.error(`[WebRTC Conf] No usable caller ID for dest=${b.contactPhone} (all candidates match the destination)`);
+      b.status = 'ended';
+      twiml.say({ voice: 'Polly.Joanna' }, 'Cannot call this number from your own number. Please try a different contact.');
+      twiml.hangup();
+      res.type('text/xml').send(twiml.toString());
+      return;
+    }
 
     // Dial the contact as a TOP-LEVEL REST API call (not a <Dial> child).
     // Top-level calls can be redirected via calls.update() — child <Dial> legs cannot.
@@ -186,6 +200,7 @@ router.post('/voice', validateTwilioSig, async (req: Request, res: Response) => 
         to:   b.contactPhone,
         from: contactFrom,
         machineDetection:          'DetectMessageEnd',
+        machineDetectionTimeout:   45,   // see note in dialer.ts bridge path
         asyncAmd:                  'true',
         asyncAmdStatusCallback:    `${ngrokBase}/api/dialer/webrtc-amd?sessionId=${sid}`,
         asyncAmdStatusCallbackMethod: 'POST',
@@ -275,7 +290,7 @@ router.post('/amd-status', validateTwilioSig, async (req: Request, res: Response
     phone: To,
   };
 
-  const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
+  const isMachine = isMachineAnswer(AnsweredBy);
 
   if (isMachine && CallSid) {
     console.log(`[AMD] Machine detected — dropping voicemail for ${To}, userId=${userId ?? 'unknown'}`);

@@ -1144,9 +1144,13 @@ export default function Dialer() {
 
           {(isWebrtcInCall || isBridgeActive) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* Drop VM button — bridge mode only. In live-audio WebRTC mode AMD handles it
-                  automatically and the agent hears the drop happen in real time. */}
-              {settings.callMode === 'bridge' && bridgeStatus === 'calling-contact' && contactAnswered && (
+              {/* Drop VM button — available for the whole live call, not just while AMD
+                  is running. Auto-drop only fires on a confident machine result, so the
+                  agent needs a manual drop for declined-to-voicemail calls, long or unusual
+                  greetings, and AMD 'unknown'. This matches PhoneBurner/Mojo, where the
+                  drop button is always available mid-call. */}
+              {settings.callMode === 'bridge' && contactAnswered
+                && (bridgeStatus === 'calling-contact' || bridgeStatus === 'connected') && (
                 <button
                   onClick={handleDropVm}
                   disabled={!settings.voicemailReady && !settings.voicemailUrl}

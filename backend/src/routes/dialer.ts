@@ -22,7 +22,7 @@ import express, { Router, Request, Response } from 'express';
 import twilio from 'twilio';
 import crypto from 'crypto';
 import prisma from '../db';
-import { pickCallerId } from './localPresence';
+import { resolveContactCallerId } from './localPresence';
 import { io } from '../socket';
 import { getAgentName } from '../agent/settings';
 import { RINGBACK_MP3_BUF } from '../ringback';
@@ -37,6 +37,26 @@ function BACKEND() {
 
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+/**
+ * Twilio AMD results meaning "a machine answered — safe to leave a message".
+ *
+ * With machineDetection: 'DetectMessageEnd' Twilio reports machine_end_* once the
+ * greeting has finished. machine_start only appears under machineDetection:
+ * 'Enable'; it is included so a config change can never silently disable
+ * voicemail drops.
+ *
+ * 'unknown' is deliberately EXCLUDED — auto-dropping on unknown risks playing a
+ * recording at a live person. Unknown is instead surfaced to the UI so the agent
+ * can drop manually (this is how PhoneBurner/Mojo behave: always-available drop
+ * button, auto-drop only on a confident machine result).
+ */
+export const MACHINE_ANSWERS = [
+  'machine_end_beep', 'machine_end_silence', 'machine_end_other', 'machine_start',
+];
+export function isMachineAnswer(answeredBy?: string | null): boolean {
+  return !!answeredBy && MACHINE_ANSWERS.includes(answeredBy);
 }
 
 // ─── In-memory bridge session store ──────────────────────────────────────────
@@ -545,13 +565,33 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
     b.agentCallSid = CallSid;
     io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
-    // Dial the contact (Leg B) with AMD
-    // Use agent's verified personal phone as caller ID.
-    // Falls back to local presence number if personal phone isn't set/verified.
+    // Dial the contact (Leg B) with AMD.
+    // resolveContactCallerId guarantees From !== To — a matching caller ID makes
+    // carriers answer with voicemail RETRIEVAL ("press # and enter your password")
+    // instead of the greeting + beep, so no message can be left.
     const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } });
     const { client: bridgeAClient, creds: bridgeACreds } = await getTwilioClient(b.userId);
-    const localFrom = await pickCallerId(b.contactPhone).catch(() => bridgeACreds.callerId);
-    const contactFrom = (settings?.phoneVerified && settings?.personalPhone) ? settings.personalPhone : localFrom;
+    const contactFrom = await resolveContactCallerId({
+      destination:   b.contactPhone,
+      personalPhone: settings?.personalPhone,
+      phoneVerified: settings?.phoneVerified,
+      userId:        b.userId,
+      fallback:      bridgeACreds.callerId,
+    });
+
+    if (!contactFrom) {
+      const msg = 'No usable caller ID — the only available numbers match the number being dialed. Add a phone number under Settings → Phone Numbers, or dial a different contact.';
+      console.error(`[Bridge] ${msg} (dest=${b.contactPhone})`);
+      b.status = 'ended';
+      try {
+        await bridgeAClient.calls(b.agentCallSid!).update({
+          twiml: '<Response><Say voice="Polly.Joanna">Cannot call this number from your own number. Please try a different contact.</Say><Hangup/></Response>',
+        });
+      } catch {}
+      io.emit('bridge-status', { sessionId, status: 'error', error: msg });
+      res.sendStatus(204);
+      return;
+    }
 
     try {
       // ASYNC AMD: the contact joins the conference IMMEDIATELY on answer
@@ -562,6 +602,10 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
         to: b.contactPhone,
         from: contactFrom,
         machineDetection:             'DetectMessageEnd',
+        // 45s (default 30) — carrier voicemail greetings after a declined call
+        // often run long with instructions; a timeout yields AnsweredBy=unknown
+        // and no auto-drop, so give detection room to reach the beep.
+        machineDetectionTimeout:      45,
         asyncAmd:                     'true',
         asyncAmdStatusCallback:       `${BACKEND()}/api/dialer/bridge-amd?sessionId=${sessionId}`,
         asyncAmdStatusCallbackMethod: 'POST',
@@ -631,7 +675,7 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
   }
 
   // ── Machine detected → drop voicemail ──────────────────────────────────────
-  const isMachine = answeredBy && ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(answeredBy);
+  const isMachine = isMachineAnswer(answeredBy);
 
   if (isMachine) {
     if (b) { b.status = 'vm-dropped'; }
@@ -713,15 +757,22 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
 
   console.log(`[Bridge AMD] ▶ session=${sessionId} | AnsweredBy=${AnsweredBy} | CallSid=${CallSid} | sessionFound=${!!b}`);
 
-  const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
+  const isMachine = isMachineAnswer(AnsweredBy);
 
   if (!isMachine) {
-    // Human — the contact is already live in the conference (joined on answer).
-    // Just surface the connected state to the UI.
-    console.log(`[Bridge AMD] Human detected — marking connected`);
+    // Human, or AMD couldn't decide ('unknown' — long/odd greeting, carrier IVR,
+    // detection timeout). Either way the contact is already live in the
+    // conference, so the agent hears what's actually happening and can drop the
+    // voicemail manually. Pass amdResult through so the UI can hint at that.
+    console.log(`[Bridge AMD] Non-machine result "${AnsweredBy}" — contact stays live, manual drop available`);
     if (b && (b.status === 'calling-contact' || b.status === 'waiting-agent')) {
       b.status = 'connected';
-      io.emit('bridge-status', { sessionId, status: 'connected', contactName: b.contactName });
+      io.emit('bridge-status', {
+        sessionId,
+        status: 'connected',
+        contactName: b.contactName,
+        amdResult: AnsweredBy || 'unknown',
+      });
     }
     res.sendStatus(204);
     return;
@@ -1064,7 +1115,7 @@ webhooks.post('/webrtc-number-url', async (req: Request, res: Response) => {
   const twiml = new twilio.twiml.VoiceResponse();
   console.log(`[webrtc-number-url] session=${sessionId} | AnsweredBy=${AnsweredBy}`);
 
-  const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
+  const isMachine = isMachineAnswer(AnsweredBy);
 
   if (!isMachine) {
     // Human picked up — bridge is already live, just keep it going
@@ -1161,7 +1212,7 @@ webhooks.post('/webrtc-amd', async (req: Request, res: Response) => {
   const b = bridges.get(sessionId);
   console.log(`[webrtc-amd] session=${sessionId} | AnsweredBy=${AnsweredBy} | CallSid=${CallSid}`);
 
-  const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
+  const isMachine = isMachineAnswer(AnsweredBy);
 
   if (!isMachine) {
     // Human answered — both parties already talking (Dial is live)

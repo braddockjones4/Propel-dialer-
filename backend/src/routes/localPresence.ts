@@ -15,24 +15,76 @@ function extractAreaCode(phone: string): string {
   return '';
 }
 
-// Pick best local number for a given destination phone, scoped to a user
+/** Compare two phone numbers by their last 10 digits (format-agnostic). */
+export function sameNumber(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  const da = a.replace(/\D/g, '').slice(-10);
+  const db = b.replace(/\D/g, '').slice(-10);
+  return da.length === 10 && da === db;
+}
+
+// Pick best local number for a given destination phone, scoped to a user.
+// Never returns a number equal to the destination (see resolveContactCallerId).
 export async function pickCallerId(destinationPhone: string, userId?: string | null): Promise<string> {
   const areaCode = extractAreaCode(destinationPhone);
   const defaultCallerId = process.env.TWILIO_CALLER_ID || '';
+  const notSelf = (n?: string | null) => (n && !sameNumber(n, destinationPhone) ? n : '');
 
-  if (!areaCode) return defaultCallerId;
+  if (!areaCode) return notSelf(defaultCallerId);
 
   const userFilter = userId ? { userId } : {};
 
   const match = await (prisma.localNumber as any).findFirst({
     where: { areaCode, active: true, ...userFilter },
   });
-  if (match) return match.number;
+  if (notSelf(match?.number)) return match.number;
 
   const any = await (prisma.localNumber as any).findFirst({ where: { active: true, ...userFilter } });
-  if (any) return any.number;
+  if (notSelf(any?.number)) return any.number;
 
-  return defaultCallerId;
+  return notSelf(defaultCallerId);
+}
+
+/**
+ * Resolve the From number for an outbound leg to a contact.
+ *
+ * CRITICAL: the caller ID must never equal the number being dialed. When they
+ * match, carriers treat the call as the subscriber phoning their own mailbox and
+ * answer with voicemail RETRIEVAL ("press # and enter your password") instead of
+ * the outgoing greeting + beep. No message can be left, and AMD can never detect
+ * a machine because there is no greeting to detect.
+ *
+ * Preference order (first candidate that isn't the destination wins):
+ *   1. agent's verified personal phone  — best answer rates, callbacks reach them
+ *   2. local-presence number matching the destination's area code
+ *   3. account default caller ID (TWILIO_CALLER_ID)
+ */
+export async function resolveContactCallerId(opts: {
+  destination: string;
+  personalPhone?: string | null;
+  phoneVerified?: boolean | null;
+  userId?: string | null;
+  fallback?: string;
+}): Promise<string> {
+  const { destination, personalPhone, phoneVerified, userId, fallback } = opts;
+
+  const local = await pickCallerId(destination, userId).catch(() => '');
+
+  const candidates = [
+    phoneVerified && personalPhone ? personalPhone : '',
+    local,
+    process.env.TWILIO_CALLER_ID || '',
+    fallback || '',
+  ];
+
+  for (const c of candidates) {
+    if (c && !sameNumber(c, destination)) return c;
+  }
+
+  // Every candidate matched the destination (e.g. agent dialing their own
+  // number as a test). Returning '' lets the caller surface a clear error
+  // rather than placing a self-call that lands in voicemail retrieval.
+  return '';
 }
 
 // ─── GET /api/local-presence ──────────────────────────────────────────────────
