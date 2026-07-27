@@ -35,6 +35,10 @@ function BACKEND() {
   return process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com';
 }
 
+function escapeXml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
 // ─── In-memory bridge session store ──────────────────────────────────────────
 export interface BridgeSession {
   contactId: string;
@@ -509,17 +513,22 @@ webhooks.post('/bridge-a-twiml', (req: Request, res: Response) => {
     return;
   }
 
-  twiml.say({ voice: 'Polly.Joanna' }, `Calling ${b.contactName} now.`);
-  const dial = twiml.dial({
-    action: `${BACKEND()}/api/dialer/bridge-a-done?sessionId=${sessionId}`,
-  });
-  (dial as any).conference(b.confName || '', {
-    startConferenceOnEnter: 'true',
-    endConferenceOnExit: 'false',
-    waitUrl: 'https://twimlets.com/holdmusic?Bucket=com.twilio.music.classical',
-    beep: 'false',
-  });
-  res.type('text/xml').send(twiml.toString());
+  // Raw XML — the Twilio SDK's dial.conference(name, attrs) silently drops the
+  // attributes (arg order is (attrs, name)), which made the agent hear Twilio's
+  // default classical hold music instead of our ringback. Raw XML is guaranteed.
+  const sid = encodeURIComponent(sessionId);
+  const confXml = [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<Response>`,
+    `  <Say voice="Polly.Joanna">Calling ${escapeXml(b.contactName)} now.</Say>`,
+    `  <Dial action="${BACKEND()}/api/dialer/bridge-a-done?sessionId=${sid}">`,
+    `    <Conference startConferenceOnEnter="true" endConferenceOnExit="false" beep="false"`,
+    `      waitUrl="${BACKEND()}/api/dialer/ringback-twiml" waitMethod="GET">${escapeXml(b.confName || '')}</Conference>`,
+    `  </Dial>`,
+    `</Response>`,
+  ].join('\n');
+  console.log('[bridge-a-twiml] TwiML:', confXml);
+  res.type('text/xml').send(confXml);
 });
 
 // ─── POST /api/dialer/bridge-a-status (public) ───────────────────────────────
@@ -545,13 +554,18 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
     const contactFrom = (settings?.phoneVerified && settings?.personalPhone) ? settings.personalPhone : localFrom;
 
     try {
+      // ASYNC AMD: the contact joins the conference IMMEDIATELY on answer
+      // (live-contact-join-twiml), so the agent hears the greeting/pickup in
+      // real time. AMD runs in the background and fires bridge-amd after the
+      // beep to inject the recorded voicemail. Mirrors the WebRTC conf path.
       const contactCall = await bridgeAClient.calls.create({
         to: b.contactPhone,
         from: contactFrom,
-        machineDetection: 'DetectMessageEnd', // SYNC: Twilio calls url after beep with AnsweredBy
-        // Embed userId/confName/agentCallSid in URL so bridge-b-twiml works even
-        // if a rolling deploy routes the callback to a fresh server instance.
-        url: `${BACKEND()}/api/dialer/bridge-b-twiml?sessionId=${sessionId}&userId=${encodeURIComponent(b.userId)}&confName=${encodeURIComponent(b.confName || '')}&agentCallSid=${encodeURIComponent(b.agentCallSid || '')}`,
+        machineDetection:             'DetectMessageEnd',
+        asyncAmd:                     'true',
+        asyncAmdStatusCallback:       `${BACKEND()}/api/dialer/bridge-amd?sessionId=${sessionId}`,
+        asyncAmdStatusCallbackMethod: 'POST',
+        url: `${BACKEND()}/api/dialer/live-contact-join-twiml?sessionId=${sessionId}&confName=${encodeURIComponent(b.confName || '')}`,
         statusCallback: `${BACKEND()}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
         statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
         statusCallbackMethod: 'POST',
@@ -702,7 +716,13 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
   const isMachine = ['machine_end_beep', 'machine_end_silence', 'machine_end_other'].includes(AnsweredBy);
 
   if (!isMachine) {
-    console.log(`[Bridge AMD] Human detected — no action needed`);
+    // Human — the contact is already live in the conference (joined on answer).
+    // Just surface the connected state to the UI.
+    console.log(`[Bridge AMD] Human detected — marking connected`);
+    if (b && (b.status === 'calling-contact' || b.status === 'waiting-agent')) {
+      b.status = 'connected';
+      io.emit('bridge-status', { sessionId, status: 'connected', contactName: b.contactName });
+    }
     res.sendStatus(204);
     return;
   }

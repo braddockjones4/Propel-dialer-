@@ -97,7 +97,8 @@ export function parseVCard(text: string): ParsedRow[] {
 
       const colonIdx = line.indexOf(':');
       if (colonIdx < 0) continue;
-      const prop = line.slice(0, colonIdx).toUpperCase();
+      // Apple groups properties as "item1.TEL", "item2.EMAIL", etc. — strip the prefix
+      const prop = line.slice(0, colonIdx).toUpperCase().replace(/^ITEM\d+\./, '');
       const value = line.slice(colonIdx + 1).trim();
 
       if (prop === 'FN' && value) contact._fn = value;

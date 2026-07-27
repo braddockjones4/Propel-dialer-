@@ -27,6 +27,45 @@ function validateTwilioSig(req: Request, res: Response, next: NextFunction): voi
 // Track callSid → userId so AMD can use the user's recorded voicemail
 const callToUser = new Map<string, string>();
 
+// ─── Credential self-check (cached for process lifetime) ─────────────────────
+// AccessTokenInvalid (20101) in the browser almost always means the API key/
+// secret or TwiML App SID don't belong to TWILIO_ACCOUNT_SID. Validate once and
+// return a precise error so misconfiguration is obvious in logs + UI.
+let credCheckResult: { ok: boolean; error?: string } | null = null;
+async function validateTokenCreds(creds: { accountSid: string; authToken: string; apiKey: string; apiSecret: string; twimlAppSid: string }) {
+  if (credCheckResult) return credCheckResult;
+
+  // 1) Does the API key authenticate against this account?
+  try {
+    const keyClient = twilio(creds.apiKey, creds.apiSecret, { accountSid: creds.accountSid });
+    await (keyClient.api as any).accounts(creds.accountSid).fetch();
+  } catch (e: any) {
+    credCheckResult = {
+      ok: false,
+      error: `TWILIO_API_KEY/TWILIO_API_SECRET are invalid or belong to a different account than TWILIO_ACCOUNT_SID (${creds.accountSid.slice(0, 8)}…). Create a new API key in the Twilio Console (Account → API keys & tokens) and update the env vars. [${e.status || e.code || e.message}]`,
+    };
+    console.error('[twilio/token] CREDENTIAL CHECK FAILED:', credCheckResult.error);
+    return credCheckResult;
+  }
+
+  // 2) Does the TwiML App exist in this account?
+  try {
+    const acctClient = twilio(creds.accountSid, creds.authToken);
+    await acctClient.applications(creds.twimlAppSid).fetch();
+  } catch (e: any) {
+    credCheckResult = {
+      ok: false,
+      error: `TWILIO_TWIML_APP_SID (${creds.twimlAppSid.slice(0, 8)}…) was not found in account ${creds.accountSid.slice(0, 8)}…. Create a TwiML App in this account and update the env var. [${e.status || e.code || e.message}]`,
+    };
+    console.error('[twilio/token] CREDENTIAL CHECK FAILED:', credCheckResult.error);
+    return credCheckResult;
+  }
+
+  credCheckResult = { ok: true };
+  console.log('[twilio/token] ✓ Credential self-check passed');
+  return credCheckResult;
+}
+
 // ─── POST /api/twilio/token ───────────────────────────────────────────────────
 // requireAuth is applied at server.ts level before this route — req.user is set.
 router.post('/token', async (req: Request, res: Response) => {
@@ -34,11 +73,24 @@ router.post('/token', async (req: Request, res: Response) => {
     const userId = (req as any).user?.id as string | undefined;
     const creds = await getTwilioCreds(userId);
 
-    if (!creds.accountSid || !creds.apiKey || !creds.apiSecret || !creds.twimlAppSid) {
+    const missing = [
+      !creds.accountSid  && 'TWILIO_ACCOUNT_SID',
+      !creds.apiKey      && 'TWILIO_API_KEY',
+      !creds.apiSecret   && 'TWILIO_API_SECRET',
+      !creds.twimlAppSid && 'TWILIO_TWIML_APP_SID',
+    ].filter(Boolean);
+    if (missing.length) {
+      console.error(`[twilio/token] Missing env vars: ${missing.join(', ')}`);
       res.status(500).json({
-        error: 'Twilio credentials not configured.',
+        error: `Twilio not configured — missing: ${missing.join(', ')}`,
         needsSetup: true,
       });
+      return;
+    }
+
+    const check = await validateTokenCreds(creds);
+    if (!check.ok) {
+      res.status(500).json({ error: check.error });
       return;
     }
 

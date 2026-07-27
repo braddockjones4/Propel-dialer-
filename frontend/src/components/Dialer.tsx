@@ -160,6 +160,7 @@ export default function Dialer() {
   const {
     deviceStatus, callStatus, callDuration, activeCall,
     startCall, endCall, muteCall, resetCallStatus, isMuted,
+    errorMessage: deviceError,
   } = useTwilioDevice(settings.callMode === 'webrtc');
 
   // Twilio configuration status
@@ -1168,6 +1169,11 @@ export default function Dialer() {
 
           {settings.callMode === 'webrtc' && deviceStatus === 'loading' && !isWebrtcInCall && (
             <p style={{ textAlign: 'center', fontSize: 12, color: '#9ca3af', margin: '8px 0 0' }}>Initializing dialer…</p>
+          )}
+          {settings.callMode === 'webrtc' && deviceStatus === 'error' && (
+            <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fecaca', fontSize: 12, color: '#dc2626', lineHeight: 1.5 }}>
+              Browser audio unavailable: {deviceError || 'unknown error'}. You can still dial with Personal Phone mode.
+            </div>
           )}
         </div>
 
