@@ -40,9 +40,16 @@ async function validateTokenCreds(creds: { accountSid: string; authToken: string
     const keyClient = twilio(creds.apiKey, creds.apiSecret, { accountSid: creds.accountSid });
     await (keyClient.api as any).accounts(creds.accountSid).fetch();
   } catch (e: any) {
+    // Safe diagnostic metadata — prefixes and lengths only, never the values.
+    const ws = (s: string) => (/^\s|\s$/.test(s) ? 'YES' : 'no');
+    const diag = `key=${creds.apiKey.slice(0, 4)}… len=${creds.apiKey.length} lead/trail-space=${ws(creds.apiKey)} | ` +
+                 `secret len=${creds.apiSecret.length} lead/trail-space=${ws(creds.apiSecret)} | ` +
+                 `acct=${creds.accountSid.slice(0, 8)}… len=${creds.accountSid.length}`;
     credCheckResult = {
       ok: false,
-      error: `TWILIO_API_KEY/TWILIO_API_SECRET are invalid or belong to a different account than TWILIO_ACCOUNT_SID (${creds.accountSid.slice(0, 8)}…). Create a new API key in the Twilio Console (Account → API keys & tokens) and update the env vars. [${e.status || e.code || e.message}]`,
+      error: `TWILIO_API_KEY/TWILIO_API_SECRET rejected by Twilio [${e.status || e.code || e.message}]. ` +
+             `Diag: ${diag}. Expected: key starts SK + length 34, account length 34, no spaces. ` +
+             `If those look right, confirm the key's Region is "United States (US1)" and its type is "Standard" in the Twilio Console.`,
     };
     console.error('[twilio/token] CREDENTIAL CHECK FAILED:', credCheckResult.error);
     return credCheckResult;
