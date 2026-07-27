@@ -36,9 +36,12 @@ async function validateTokenCreds(creds: { accountSid: string; authToken: string
   if (credCheckResult) return credCheckResult;
 
   // 1) Does the API key authenticate against this account?
+  // IMPORTANT: Standard API keys canNOT access the /Accounts resource (that
+  // requires a Main key) — fetching /Accounts here falsely 401s valid Standard
+  // keys. Use IncomingPhoneNumbers, which Standard keys can access.
   try {
     const keyClient = twilio(creds.apiKey, creds.apiSecret, { accountSid: creds.accountSid });
-    await (keyClient.api as any).accounts(creds.accountSid).fetch();
+    await keyClient.incomingPhoneNumbers.list({ limit: 1 });
   } catch (e: any) {
     // Diagnostic metadata. Account SID and key SID are shown in full/partial —
     // they are identifiers visible in the Twilio Console, not secrets.
