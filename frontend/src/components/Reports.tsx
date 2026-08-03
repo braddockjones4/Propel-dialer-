@@ -36,9 +36,9 @@ export default function Reports() {
   const loadReport = () => {
     setLoading(true);
     authFetch(`${API_BASE}/reports/daily?date=${date}`)
-      .then(r => r.json())
-      .then(data => { setReport(data); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then(r => r.ok ? r.json() : Promise.reject(new Error('Server error')))
+      .then(data => { setReport(data?.dispositions ? data : null); setLoading(false); })
+      .catch(() => { setReport(null); setLoading(false); });
   };
 
   useEffect(() => { loadReport(); }, [date]);
