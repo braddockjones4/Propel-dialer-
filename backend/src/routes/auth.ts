@@ -113,14 +113,14 @@ router.post('/register', registerLimiter, async (req: Request, res: Response) =>
     const existing = await db.user.findUnique({ where: { email: email.toLowerCase() } });
     if (existing) { res.status(409).json({ error: 'Email already registered' }); return; }
 
-    // First user ever = admin
-    const count = await db.user.count();
-    const role  = count === 0 ? 'admin' : 'agent';
-
+    // Every self-registered account is fully independent — 'admin' is no
+    // longer auto-granted to the first signup. It carries no cross-account
+    // power (team endpoints are retired, /contacts/claim is gone), so there's
+    // nothing for a new account to inherit or connect to.
     const passwordHash = await bcrypt.hash(password, 12);
     const trialEnd = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
     const user = await db.user.create({
-      data: { email: email.toLowerCase(), passwordHash, name: name || '', role, planExpiresAt: trialEnd },
+      data: { email: email.toLowerCase(), passwordHash, name: name || '', role: 'agent', planExpiresAt: trialEnd },
     });
 
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });

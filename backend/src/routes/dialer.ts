@@ -417,7 +417,8 @@ router.post('/call', async (req: Request, res: Response) => {
   const { contactId, mode } = req.body;
   if (!contactId) { res.status(400).json({ error: 'contactId required' }); return; }
 
-  const contact = await prisma.contact.findUnique({ where: { id: contactId } });
+  const callerUserId = (req as any).user?.id as string;
+  const contact = await (prisma.contact as any).findFirst({ where: { id: contactId, userId: callerUserId } });
   if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
 
   if (mode === 'bridge') {
@@ -580,7 +581,7 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
     });
 
     if (!contactFrom) {
-      const msg = 'No usable caller ID — the only available numbers match the number being dialed. Add a phone number under Settings → Phone Numbers, or dial a different contact.';
+      const msg = 'No usable caller ID — the only available numbers match the number being dialed. Dial a different contact (you cannot call your own number).';
       console.error(`[Bridge] ${msg} (dest=${b.contactPhone})`);
       b.status = 'ended';
       try {
@@ -1007,6 +1008,10 @@ router.post('/log-call', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'contactId and disposition required' }); return;
   }
 
+  const logUserId = (req as any).user?.id as string;
+  const owned = await (prisma.contact as any).findFirst({ where: { id: contactId, userId: logUserId }, select: { id: true } });
+  if (!owned) { res.status(404).json({ error: 'Contact not found' }); return; }
+
   const STATUS_MAP: Record<string, string> = {
     'hot-lead':           'hot',
     'appointment':        'appointment',
@@ -1290,10 +1295,11 @@ webhooks.post('/webrtc-amd', async (req: Request, res: Response) => {
 // ?status=new,hot,callback,all  (comma-separated)
 router.get('/contacts', async (req: Request, res: Response) => {
   try {
+  const userId = (req as any).user?.id as string;
   const { status = 'all', limit = '200' } = req.query as { status?: string; limit?: string };
   const cappedLimit = Math.min(parseInt(limit, 10) || 200, 500); // dial sessions capped at 500
 
-  const where: any = { NOT: { status: 'dnc' } };
+  const where: any = { userId, NOT: { status: 'dnc' } };
   if (status && status !== 'all') {
     where.status = { in: status.split(',').map(s => s.trim()) };
   }

@@ -190,6 +190,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // ─── POST /api/contacts/:id/calls ─────────────────────────────────────────────
 router.post('/:id/calls', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
+    const owned = await (prisma.contact as any).findFirst({ where: { id: req.params.id, userId }, select: { id: true } });
+    if (!owned) { res.status(404).json({ error: 'Contact not found' }); return; }
+
     const { duration, disposition, notes, recordingUrl, twilioSid } = req.body;
     const call = await prisma.call.create({
       data: {
@@ -255,23 +259,6 @@ router.post('/bulk', async (req: Request, res: Response) => {
     } else {
       res.status(400).json({ error: 'Invalid action' });
     }
-  } catch (e: any) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── POST /api/contacts/claim — one-time admin migration ─────────────────────
-// Assigns all legacy (un-owned) contacts to the requesting admin user.
-router.post('/claim', async (req: Request, res: Response) => {
-  try {
-    const userId = (req as any).user?.id as string;
-    const role   = (req as any).user?.role as string;
-    if (role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return; }
-    // claim null-userId contacts first
-    const nullResult = await (prisma.contact as any).updateMany({ where: { userId: null }, data: { userId } });
-    // also claim contacts owned by other users (orphaned from deleted accounts)
-    const orphanResult = await (prisma.contact as any).updateMany({ where: { NOT: { userId } }, data: { userId } });
-    res.json({ claimed: nullResult.count + orphanResult.count });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
