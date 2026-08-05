@@ -196,8 +196,14 @@ export default function Dialer() {
   const recChunksRef = useRef<Blob[]>([]);
   const recTimerRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Bridge mode
+  // Bridge mode — the agent's call leg is now PERSISTENT across an entire dial
+  // session (PhoneBurner/Mojo-style: answer once, stay connected). Once
+  // agentSessionConnected is true, initiateCall() reuses bridgeSessionId via
+  // /session-next instead of re-dialing the agent's phone for every contact.
   const [bridgeSessionId, setBridgeSessionId] = useState<string | null>(null);
+  const [agentSessionConnected, setAgentSessionConnected] = useState(false);
+  const agentSessionConnectedRef = useRef(false);
+  useEffect(() => { agentSessionConnectedRef.current = agentSessionConnected; }, [agentSessionConnected]);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus>('idle');
   const [contactAnswered, setContactAnswered] = useState(false); // true once Twilio reports contact's phone answered
   const [vmDropToast, setVmDropToast] = useState<string | null>(null); // contact name for the "VM dropped" toast
@@ -220,23 +226,37 @@ export default function Dialer() {
   const [autoDialNext, setAutoDialNext] = useState(false);
   const autoAdvancedForRef = useRef<string | null>(null); // contact id already snapshotted, guards double-fire
   const initiateCallRef = useRef<() => void>(() => {});
+  // Which contact is currently being dialed/talked to — since the bridge
+  // sessionId now stays constant across an entire persistent session, a
+  // late-arriving webhook event (e.g. voicemail detected after the agent
+  // already moved on) can no longer be told apart from a current one by
+  // sessionId alone. contactId on each socket event + this ref does that job.
+  const activeContactIdRef = useRef<string | null>(null);
 
   // AI script
   const [aiScript, setAiScript]         = useState<any>(null);
   const [scriptOpen, setScriptOpen]     = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
-  const bridgeIdRef = useRef<string | null>(null);
-
-  // Keep ref in sync so socket handler always sees current sessionId
-  useEffect(() => { bridgeIdRef.current = bridgeSessionId; }, [bridgeSessionId]);
 
   // ─── Socket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const socket = io(SOCKET_URL, { transports: ['websocket'] });
     socketRef.current = socket;
 
-    socket.on('bridge-status', (data: { sessionId: string; status: string; contactName?: string; callerId?: string | null; usingPersonalPhone?: boolean }) => {
+    socket.on('bridge-status', (data: { sessionId: string; contactId?: string; status: string; contactName?: string; callerId?: string | null; usingPersonalPhone?: boolean }) => {
+      // Session-level — the agent's own persistent leg actually ended (they
+      // hung up their real phone, or it failed). Not contact-scoped: applies
+      // regardless of which contact was live, and always wins.
+      if (data.status === 'session-ended') {
+        setAgentSessionConnected(false);
+        setBridgeSessionId(null);
+        setBridgeStatus('idle');
+        setAutoDialNext(false);
+        setView(v => (v === 'session' ? 'done' : v));
+        return;
+      }
+
       // Fired once per call, alongside the normal 'calling-contact' status — warn
       // when the call to the lead is going out under a fallback number instead of
       // the agent's own verified cell (phoneVerified can silently flip to false).
@@ -245,23 +265,31 @@ export default function Dialer() {
         if (callerIdToastTimerRef.current) clearTimeout(callerIdToastTimerRef.current);
         callerIdToastTimerRef.current = setTimeout(() => setCallerIdToast(null), 6000);
       }
-
+      // Reaching 'calling-contact' only ever happens once the agent's leg has
+      // answered and dialContactIntoSession() has run server-side — mark the
+      // persistent connection live so the next contact reuses it via /session-next.
+      if (data.status === 'calling-contact') {
+        setAgentSessionConnected(true);
+      }
 
       // vm-dropped: always show the toast (we may have already auto-advanced to the next contact),
-      // but only update bridgeStatus/disposition if this session is still the active one.
+      // but only update bridgeStatus/disposition if this is still the active contact.
+      // contactId-based, not sessionId-based — the session now persists across many
+      // contacts, so a late vm-dropped for a contact we've already left behind must
+      // not be mistaken for one about the contact currently on screen.
       if (data.status === 'vm-dropped') {
         const name = data.contactName || 'your contact';
         setVmDropToast(name);
         if (vmToastTimerRef.current) clearTimeout(vmToastTimerRef.current);
         vmToastTimerRef.current = setTimeout(() => setVmDropToast(null), 4000);
-        if (data.sessionId === bridgeIdRef.current) {
+        if (data.contactId === activeContactIdRef.current) {
           setBridgeStatus('vm-dropped' as BridgeStatus);
           setDisposition('left-voicemail');
         }
         return;
       }
 
-      if (!bridgeIdRef.current || data.sessionId === bridgeIdRef.current) {
+      if (!activeContactIdRef.current || data.contactId === activeContactIdRef.current) {
         // contact-answered: track that the contact's phone was picked up (human or VM greeting)
         if (data.status === 'contact-answered') {
           setContactAnswered(true);
@@ -523,6 +551,7 @@ export default function Dialer() {
     setSessionLog([]);
     setBridgeStatus('idle');
     setBridgeSessionId(null);
+    setAgentSessionConnected(false);
     setView('session');
   };
 
@@ -535,18 +564,45 @@ export default function Dialer() {
     setNotes('');
 
     if (settings.callMode === 'bridge') {
-      setBridgeStatus('ringing-agent');
-      try {
-        const r = await authFetch(`${API_BASE}/dialer/call`, {
-          method: 'POST',
-          body: JSON.stringify({ contactId: contact.id, mode: 'bridge' }),
-        });
-        const data = await r.json();
-        if (data.error) { alert(data.error); setBridgeStatus('idle'); return; }
-        setBridgeSessionId(data.sessionId);
-      } catch (e: any) {
-        alert('Call failed: ' + e.message);
-        setBridgeStatus('idle');
+      if (agentSessionConnectedRef.current && bridgeSessionId) {
+        // Agent is already connected from a prior contact in this session —
+        // reuse that same call leg, just dial the next contact into it.
+        // No ringing-agent step: the agent never leaves the conference.
+        try {
+          const r = await authFetch(`${API_BASE}/dialer/session-next`, {
+            method: 'POST',
+            body: JSON.stringify({ sessionId: bridgeSessionId, contactId: contact.id }),
+          });
+          const data = await r.json();
+          if (data.error) {
+            // Session may have gone away server-side (e.g. GC'd, or agent's
+            // leg actually ended without the session-ended event landing yet)
+            // — fall back to starting a fresh session rather than getting stuck.
+            setAgentSessionConnected(false);
+            setBridgeSessionId(null);
+            alert(data.error);
+            return;
+          }
+          setBridgeStatus('calling-contact');
+        } catch (e: any) {
+          alert('Call failed: ' + e.message);
+        }
+      } else {
+        // First contact of the session — Twilio calls the agent's phone once;
+        // this same call leg stays alive for every contact after this.
+        setBridgeStatus('ringing-agent');
+        try {
+          const r = await authFetch(`${API_BASE}/dialer/call`, {
+            method: 'POST',
+            body: JSON.stringify({ contactId: contact.id, mode: 'bridge' }),
+          });
+          const data = await r.json();
+          if (data.error) { alert(data.error); setBridgeStatus('idle'); return; }
+          setBridgeSessionId(data.sessionId);
+        } catch (e: any) {
+          alert('Call failed: ' + e.message);
+          setBridgeStatus('idle');
+        }
       }
     } else {
       // WebRTC conference mode: backend creates a bridge session, browser joins the named
@@ -569,7 +625,7 @@ export default function Dialer() {
         setBridgeStatus('idle');
       }
     }
-  }, [contacts, index, settings.callMode, startCall]);
+  }, [contacts, index, settings.callMode, startCall, bridgeSessionId]);
 
   // Always-fresh ref to initiateCall, so the auto-dial effect below can invoke
   // the version bound to the just-advanced index without listing initiateCall
@@ -612,16 +668,31 @@ export default function Dialer() {
     setDisposition(null);
     setNotes('');
     setBridgeStatus('idle');
-    setBridgeSessionId(null);
     resetCallStatus(); // clear 'completed' so next contact shows the Call button
 
+    // Persistent bridge session — the agent's leg stays connected across
+    // contacts, so bridgeSessionId must NOT be cleared just because one call
+    // ended (that would strand the reused connection and force a re-dial of
+    // the agent's phone next time).
+    const isPersistentBridge = settings.callMode === 'bridge' && agentSessionConnectedRef.current;
+
     if (index + 1 >= contacts.length) {
+      // No more contacts — actually end the session now (hangs up the agent's leg).
+      if (isPersistentBridge && bridgeSessionId) {
+        authFetch(`${API_BASE}/dialer/session-end`, {
+          method: 'POST',
+          body: JSON.stringify({ sessionId: bridgeSessionId }),
+        }).catch(() => {});
+      }
+      setBridgeSessionId(null);
+      setAgentSessionConnected(false);
       setView('done');
     } else {
+      if (!isPersistentBridge) setBridgeSessionId(null);
       setIndex(i => i + 1);
       setAutoDialNext(true); // dial the next contact immediately, no manual Call click needed
     }
-  }, [contacts, index, notes, callDuration, activeCall, settings.callMode, resetCallStatus]);
+  }, [contacts, index, notes, callDuration, activeCall, settings.callMode, resetCallStatus, bridgeSessionId]);
 
   // ─── End call ───────────────────────────────────────────────────────────────
   const handleEndCall = useCallback(async () => {
@@ -635,12 +706,12 @@ export default function Dialer() {
 
     if (bridgeSessionId) {
       if (vmInProgress) {
-        // Clear the ref NOW (synchronously) so the vm-dropped socket event that fires later
-        // doesn't update the next contact's bridgeStatus — just the toast. Skip setting
-        // bridgeStatus('ended') entirely here: that would race with the saveAndAdvance
-        // call below (both trying to auto-advance/auto-dial the same contact) — the
-        // outcome is already known, so go straight to logging it, no disposition UI needed.
-        bridgeIdRef.current = null;
+        // Skip setting bridgeStatus('ended') entirely here: that would race
+        // with the saveAndAdvance call below (both trying to auto-advance/
+        // auto-dial the same contact) — the outcome is already known, so go
+        // straight to logging it, no disposition UI needed. (A late vm-dropped
+        // event for this contact is filtered by contactId, not by any manual
+        // ref-clearing — see the socket handler.)
       } else {
         setBridgeStatus('ended');
         // Normal hang-up: kill both call legs via bridge-hangup
@@ -671,16 +742,19 @@ export default function Dialer() {
       });
       // Backend emits vm-dropped socket event; frontend handler will update status.
       // Advance to next contact immediately.
-      bridgeIdRef.current = null;
       endCall();
       saveAndAdvance('left-voicemail');
     } catch {}
   }, [bridgeSessionId, endCall, saveAndAdvance]);
 
   // ─── Skip ───────────────────────────────────────────────────────────────────
-  const skipContact = () => {
+  // ─── End session ────────────────────────────────────────────────────────────
+  // Agent leaves the session view early — actually hang up the persistent
+  // bridge leg (previously this just navigated away and silently left the
+  // agent's real phone call connected with nothing happening).
+  const endSession = () => {
     if (settings.callMode === 'bridge' && bridgeSessionId) {
-      authFetch(`${API_BASE}/dialer/bridge-hangup`, {
+      authFetch(`${API_BASE}/dialer/session-end`, {
         method: 'POST',
         body: JSON.stringify({ sessionId: bridgeSessionId }),
       }).catch(() => {});
@@ -689,6 +763,27 @@ export default function Dialer() {
     }
     setBridgeStatus('idle');
     setBridgeSessionId(null);
+    setAgentSessionConnected(false);
+    setAutoDialNext(false);
+    setView('setup');
+  };
+
+  const skipContact = () => {
+    const isPersistentBridge = settings.callMode === 'bridge' && agentSessionConnectedRef.current;
+    if (settings.callMode === 'bridge' && bridgeSessionId) {
+      const endpoint = index + 1 >= contacts.length && isPersistentBridge ? 'session-end' : 'bridge-hangup';
+      authFetch(`${API_BASE}/dialer/${endpoint}`, {
+        method: 'POST',
+        body: JSON.stringify({ sessionId: bridgeSessionId }),
+      }).catch(() => {});
+    } else {
+      endCall();
+    }
+    setBridgeStatus('idle');
+    if (!isPersistentBridge || index + 1 >= contacts.length) {
+      setBridgeSessionId(null);
+      setAgentSessionConnected(false);
+    }
     setDisposition(null);
     setNotes('');
     resetCallStatus();
@@ -701,9 +796,17 @@ export default function Dialer() {
   const isWebrtcInCall   = settings.callMode === 'webrtc' && ['in-call','connecting','ringing'].includes(callStatus);
   const isWebrtcDone     = settings.callMode === 'webrtc' && callStatus === 'completed';
   const isBridgeActive   = settings.callMode === 'bridge' && ['ringing-agent','calling-contact','connected'].includes(bridgeStatus);
-  const isBridgeDone     = settings.callMode === 'bridge' && ['vm-dropped','no-answer','declined','call-failed','call-ended','ended'].includes(bridgeStatus);
+  // 'error' included — a single contact failing to dial (e.g. no usable caller
+  // ID) must not strand the persistent session; treat it like any other
+  // call-ended outcome and move on to the next contact.
+  const isBridgeDone     = settings.callMode === 'bridge' && ['vm-dropped','no-answer','declined','call-failed','call-ended','ended','error'].includes(bridgeStatus);
   const showCallBtn      = !isWebrtcInCall && !isBridgeActive && !isWebrtcDone && !isBridgeDone;
   const showDisposition  = isWebrtcDone || isBridgeDone;
+
+  // Keep the "which contact is live right now" ref in sync with the derived
+  // contact so the socket handler (mounted once) can always read the current
+  // value without a stale closure.
+  useEffect(() => { activeContactIdRef.current = contact?.id ?? null; }, [contact?.id]);
 
   // The instant a call reaches a state that needs a disposition, snapshot it
   // into pendingDisposition and move straight on to the next contact — dialing
@@ -726,12 +829,24 @@ export default function Dialer() {
     // once the agent actually logs it (logPendingDisposition).
 
     setBridgeStatus('idle');
-    setBridgeSessionId(null);
     resetCallStatus(); // clear 'completed' so the next contact shows the Call button / auto-dials
 
+    // Persistent bridge session — don't clear bridgeSessionId just because
+    // one call ended; the agent's leg stays connected for the next contact.
+    const isPersistentBridge = settings.callMode === 'bridge' && agentSessionConnectedRef.current;
+
     if (index + 1 >= contacts.length) {
+      if (isPersistentBridge && bridgeSessionId) {
+        authFetch(`${API_BASE}/dialer/session-end`, {
+          method: 'POST',
+          body: JSON.stringify({ sessionId: bridgeSessionId }),
+        }).catch(() => {});
+      }
+      setBridgeSessionId(null);
+      setAgentSessionConnected(false);
       setView('done');
     } else {
+      if (!isPersistentBridge) setBridgeSessionId(null);
       setIndex(i => i + 1);
       setAutoDialNext(true);
     }
@@ -1103,7 +1218,16 @@ export default function Dialer() {
             </div>
           )}
 
-          <button onClick={() => { setView('setup'); setContacts([]); setIndex(0); }}
+          <button onClick={() => {
+              // Defensive: the session should already be closed by this point
+              // (saveAndAdvance/the auto-advance effect call session-end when
+              // the last contact finishes), but end it here too in case any
+              // connection is still lingering rather than silently leaving a
+              // real phone call connected.
+              endSession();
+              setContacts([]);
+              setIndex(0);
+            }}
             style={{ width: '100%', padding: '14px', borderRadius: 12, fontSize: 15, fontWeight: 600, background: DARK, color: '#fff', border: 'none', cursor: 'pointer' }}>
             New Session
           </button>
@@ -1153,7 +1277,7 @@ export default function Dialer() {
           style={{ fontSize: 14, color: settings.voicemailReady === false ? '#f59e0b' : '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>
           
         </button>
-        <button onClick={() => setView('setup')}
+        <button onClick={endSession}
           style={{ fontSize: 11, color: '#9ca3af', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}>
           End
         </button>

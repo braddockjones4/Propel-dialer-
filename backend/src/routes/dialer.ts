@@ -1,18 +1,31 @@
 // ─── Sequential Dialer ────────────────────────────────────────────────────────
-// Single-contact dialer with two call modes:
-//   webrtc  — browser handles audio via Twilio Device (existing token flow)
-//   bridge  — Twilio calls agent's personal cell, then bridges to contact
-//             via a conference room with AMD + pre-recorded voicemail drop
+// Two call modes:
+//   webrtc  — browser handles audio via Twilio Device (existing token flow).
+//             Persists naturally across a session — the browser tab IS the
+//             agent's live connection, no phone call to re-answer.
+//   bridge  — Twilio calls agent's personal cell ONCE per session, then
+//             cycles contacts through the same long-running conference —
+//             the agent's leg is never hung up between contacts (PhoneBurner/
+//             Mojo-style "answer once, stay connected").
 //
-// Bridge call flow:
-//   1. POST /call       → Twilio calls agent's personal phone (Leg A)
-//   2. /bridge-a-twiml  → Agent picks up → plays "Calling [Name]…" → joins conf
-//   3. /bridge-a-status → Twilio fires "in-progress" → backend creates Leg B (contact)
-//                         with AMD enabled
-//   4. /bridge-b-twiml  → Contact picks up → joins same conference (connected!)
-//   5. /bridge-amd      → AMD result:
+// Bridge session flow:
+//   1. POST /call         → Twilio calls agent's personal phone (Leg A) — ONCE, session start
+//   2. /bridge-a-twiml    → Agent picks up → joins the session's persistent conference
+//   3. /bridge-a-status   → Twilio fires "in-progress" → backend dials the FIRST contact
+//                           (Leg B) with AMD enabled, via dialContactIntoSession()
+//   4. live-contact-join-twiml → Contact picks up → joins same conference (connected!)
+//   5. /bridge-amd        → AMD result:
 //        human   → already connected via conference (do nothing extra)
-//        machine → play voicemail on Leg B, say "VM dropped" to Leg A, both hangup
+//        machine → play voicemail on Leg B, Leg B hangs up — Leg A (agent) is
+//                  NEVER touched, it just waits in the conference (Twilio's
+//                  waitUrl auto-plays ringback while alone) for the next contact
+//   6. POST /session-next → dial the NEXT contact into the SAME conference,
+//                           reusing the same agentCallSid/confName — repeats
+//                           steps 4-6 for every contact in the session
+//   7. POST /session-end  → agent is done; only now is Leg A actually hung up
+//
+// POST /bridge-hangup ends only the CURRENT contact's leg (agent stays connected)
+// — distinct from /session-end, which ends the whole session.
 //
 // Voicemail recording:
 //   POST /record-vm → Twilio calls agent's phone → agent speaks → presses #
@@ -60,21 +73,29 @@ export function isMachineAnswer(answeredBy?: string | null): boolean {
 }
 
 // ─── In-memory bridge session store ──────────────────────────────────────────
+// Bridge-mode sessions are now PERSISTENT across an entire dial session: the
+// agent's call leg (agentCallSid) is established once and stays alive in a
+// long-running conference while contact* fields are reset/reused for each
+// new contact dialed in. See dialContactIntoSession() and /session-next.
 export interface BridgeSession {
   contactId: string;
   contactPhone: string;
   contactName: string;
   confName: string | null; // null for live-audio WebRTC mode (only used in bridge/conference mode)
   agentCallSid: string | null;
+  agentConnected: boolean; // true once the agent has answered and joined the conference — stays true across contacts
   contactCallSid: string | null;
   userId: string;         // owner — used to scope settings in webhooks
   voicemailUrl: string | null; // pre-loaded so AMD never needs a DB round-trip
   status: 'waiting-agent' | 'calling-contact' | 'connected' | 'vm-dropped' | 'no-answer' | 'ended';
-  createdAt: number;
+  createdAt: number; // refreshed on each new contact dial so a long session doesn't get GC'd mid-use
 }
 export const bridges = new Map<string, BridgeSession>();
 setInterval(() => {
-  const cutoff = Date.now() - 15 * 60 * 1000;
+  // Generous window — a real dial session (many contacts, one persistent
+  // agent leg) can legitimately run for hours; createdAt is refreshed on
+  // every new contact dialed, so only truly abandoned sessions get swept.
+  const cutoff = Date.now() - 4 * 60 * 60 * 1000;
   for (const [id, b] of bridges) if (b.createdAt < cutoff) bridges.delete(id);
 }, 60_000);
 
@@ -442,6 +463,7 @@ router.post('/call', async (req: Request, res: Response) => {
       contactName,
       confName,
       agentCallSid: null,
+      agentConnected: false,
       contactCallSid: null,
       userId,
       voicemailUrl: settings.voicemailUrl ?? null, // pre-loaded — no DB hit in AMD webhook
@@ -484,6 +506,7 @@ router.post('/call', async (req: Request, res: Response) => {
       contactName,
       confName,              // agent joins conference; contact joins via REST API call
       agentCallSid: null,   // set by /voice webhook when browser connects
+      agentConnected: false, // unused in webrtc mode (browser connection persists in the frontend, not tracked here)
       contactCallSid: null,  // set immediately after calls.create() in /voice webhook
       userId,
       voicemailUrl: settings?.voicemailUrl ?? null,
@@ -555,8 +578,88 @@ webhooks.post('/bridge-a-twiml', (req: Request, res: Response) => {
   res.type('text/xml').send(confXml);
 });
 
+// ─── dialContactIntoSession ───────────────────────────────────────────────────
+// Dials a contact (Leg B) with AMD into an already-established session's
+// conference. Used both the first time (from bridge-a-status, once the agent
+// answers) and for every subsequent contact in the same session (from
+// /session-next) — the agent's leg is never touched here, it just stays in
+// the conference the whole time.
+async function dialContactIntoSession(b: BridgeSession, sessionId: string): Promise<void> {
+  // resolveContactCallerId guarantees From !== To — a matching caller ID makes
+  // carriers answer with voicemail RETRIEVAL ("press # and enter your password")
+  // instead of the greeting + beep, so no message can be left.
+  const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } });
+  const { client: bridgeAClient, creds: bridgeACreds } = await getTwilioClient(b.userId);
+  const contactFrom = await resolveContactCallerId({
+    destination:   b.contactPhone,
+    personalPhone: settings?.personalPhone,
+    phoneVerified: settings?.phoneVerified,
+    userId:        b.userId,
+    fallback:      bridgeACreds.callerId,
+  });
+
+  // Did the lead-facing leg actually go out as the agent's verified personal
+  // cell, or fall back to a local-presence/account number? phoneVerified can
+  // silently flip to false (number changed, verification never completed),
+  // which otherwise fails invisibly — the agent just sees calls going out
+  // under the wrong number with no explanation. Surface it in real time.
+  const usingPersonalPhone = !!(
+    settings?.phoneVerified && settings?.personalPhone && sameNumber(contactFrom, settings.personalPhone)
+  );
+  io.emit('bridge-status', {
+    sessionId,
+    contactId: b.contactId,
+    status: 'calling-contact',
+    contactName: b.contactName,
+    callerId: contactFrom || null,
+    usingPersonalPhone,
+  });
+
+  if (!contactFrom) {
+    const msg = 'No usable caller ID — the only available numbers match the number being dialed. Dial a different contact (you cannot call your own number).';
+    console.error(`[Bridge] ${msg} (dest=${b.contactPhone})`);
+    b.status = 'ended';
+    // Agent leg is intentionally left alone — this contact just failed to
+    // dial, the session keeps going and the frontend advances to the next one.
+    io.emit('bridge-status', { sessionId, contactId: b.contactId, status: 'error', error: msg });
+    return;
+  }
+
+  try {
+    // ASYNC AMD: the contact joins the conference IMMEDIATELY on answer
+    // (live-contact-join-twiml), so the agent hears the greeting/pickup in
+    // real time. AMD runs in the background and fires bridge-amd after the
+    // beep to inject the recorded voicemail. Mirrors the WebRTC conf path.
+    const contactCall = await bridgeAClient.calls.create({
+      to: b.contactPhone,
+      from: contactFrom,
+      machineDetection:             'DetectMessageEnd',
+      // 45s (default 30) — carrier voicemail greetings after a declined call
+      // often run long with instructions; a timeout yields AnsweredBy=unknown
+      // and no auto-drop, so give detection room to reach the beep.
+      machineDetectionTimeout:      45,
+      asyncAmd:                     'true',
+      asyncAmdStatusCallback:       `${BACKEND()}/api/dialer/bridge-amd?sessionId=${sessionId}`,
+      asyncAmdStatusCallbackMethod: 'POST',
+      url: `${BACKEND()}/api/dialer/live-contact-join-twiml?sessionId=${sessionId}&confName=${encodeURIComponent(b.confName || '')}`,
+      statusCallback: `${BACKEND()}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
+      statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
+      statusCallbackMethod: 'POST',
+    } as any);
+    b.contactCallSid = contactCall.sid;
+  } catch (e: any) {
+    console.error('[Bridge] Failed to call contact:', e.message);
+    b.status = 'ended';
+    // Agent leg intentionally left alone — same reasoning as above.
+    io.emit('bridge-status', { sessionId, contactId: b.contactId, status: 'error', error: e.message });
+  }
+}
+
 // ─── POST /api/dialer/bridge-a-status (public) ───────────────────────────────
-// Status webhook for agent leg. When in-progress → dial the contact.
+// Status webhook for the agent's persistent leg. When it goes in-progress
+// (agent answers) → mark the session connected and dial the FIRST contact.
+// The agent leg stays alive for the whole session after this — it's only
+// ever torn down by /session-end or the agent physically hanging up.
 webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
   const { sessionId } = req.query as { sessionId: string };
   const { CallStatus, CallSid } = req.body;
@@ -567,96 +670,52 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
   if (CallStatus === 'in-progress' && b.status === 'waiting-agent') {
     b.status = 'calling-contact';
     b.agentCallSid = CallSid;
-
-    // Dial the contact (Leg B) with AMD.
-    // resolveContactCallerId guarantees From !== To — a matching caller ID makes
-    // carriers answer with voicemail RETRIEVAL ("press # and enter your password")
-    // instead of the greeting + beep, so no message can be left.
-    const settings = await prisma.dialerSettings.findUnique({ where: { userId: b.userId } });
-    const { client: bridgeAClient, creds: bridgeACreds } = await getTwilioClient(b.userId);
-    const contactFrom = await resolveContactCallerId({
-      destination:   b.contactPhone,
-      personalPhone: settings?.personalPhone,
-      phoneVerified: settings?.phoneVerified,
-      userId:        b.userId,
-      fallback:      bridgeACreds.callerId,
-    });
-
-    // Did the lead-facing leg actually go out as the agent's verified personal
-    // cell, or fall back to a local-presence/account number? phoneVerified can
-    // silently flip to false (number changed, verification never completed),
-    // which otherwise fails invisibly — the agent just sees calls going out
-    // under the wrong number with no explanation. Surface it in real time.
-    const usingPersonalPhone = !!(
-      settings?.phoneVerified && settings?.personalPhone && sameNumber(contactFrom, settings.personalPhone)
-    );
-    io.emit('bridge-status', {
-      sessionId,
-      status: 'calling-contact',
-      contactName: b.contactName,
-      callerId: contactFrom || null,
-      usingPersonalPhone,
-    });
-
-    if (!contactFrom) {
-      const msg = 'No usable caller ID — the only available numbers match the number being dialed. Dial a different contact (you cannot call your own number).';
-      console.error(`[Bridge] ${msg} (dest=${b.contactPhone})`);
-      b.status = 'ended';
-      try {
-        await bridgeAClient.calls(b.agentCallSid!).update({
-          twiml: '<Response><Say voice="Polly.Joanna">Cannot call this number from your own number. Please try a different contact.</Say><Hangup/></Response>',
-        });
-      } catch {}
-      io.emit('bridge-status', { sessionId, status: 'error', error: msg });
-      res.sendStatus(204);
-      return;
-    }
-
-    try {
-      // ASYNC AMD: the contact joins the conference IMMEDIATELY on answer
-      // (live-contact-join-twiml), so the agent hears the greeting/pickup in
-      // real time. AMD runs in the background and fires bridge-amd after the
-      // beep to inject the recorded voicemail. Mirrors the WebRTC conf path.
-      const contactCall = await bridgeAClient.calls.create({
-        to: b.contactPhone,
-        from: contactFrom,
-        machineDetection:             'DetectMessageEnd',
-        // 45s (default 30) — carrier voicemail greetings after a declined call
-        // often run long with instructions; a timeout yields AnsweredBy=unknown
-        // and no auto-drop, so give detection room to reach the beep.
-        machineDetectionTimeout:      45,
-        asyncAmd:                     'true',
-        asyncAmdStatusCallback:       `${BACKEND()}/api/dialer/bridge-amd?sessionId=${sessionId}`,
-        asyncAmdStatusCallbackMethod: 'POST',
-        url: `${BACKEND()}/api/dialer/live-contact-join-twiml?sessionId=${sessionId}&confName=${encodeURIComponent(b.confName || '')}`,
-        statusCallback: `${BACKEND()}/api/dialer/bridge-b-status?sessionId=${sessionId}`,
-        statusCallbackEvent: ['answered', 'completed', 'no-answer', 'busy', 'failed'],
-        statusCallbackMethod: 'POST',
-      } as any);
-      b.contactCallSid = contactCall.sid;
-    } catch (e: any) {
-      console.error('[Bridge] Failed to call contact:', e.message);
-      b.status = 'ended';
-      // Notify agent
-      try {
-        await bridgeAClient.calls(b.agentCallSid!).update({
-          twiml: '<Response><Say voice="Polly.Joanna">Could not reach the contact. Goodbye.</Say><Hangup/></Response>',
-        });
-      } catch {}
-      io.emit('bridge-status', { sessionId, status: 'error', error: e.message });
-    }
+    b.agentConnected = true;
+    await dialContactIntoSession(b, sessionId);
   }
 
   if ((CallStatus === 'completed' || CallStatus === 'failed') && b.agentCallSid === CallSid) {
-    // Agent hung up — end contact call if still going
+    // Agent's own leg ended (they hung up their phone, or the call failed) —
+    // this ends the WHOLE session, not just the current contact.
     if (b.contactCallSid && b.status === 'connected') {
       try { await (await getTwilioClient(b.userId)).client.calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
     }
     b.status = 'ended';
-    io.emit('bridge-status', { sessionId, status: 'ended' });
+    b.agentConnected = false;
+    bridges.delete(sessionId);
+    io.emit('bridge-status', { sessionId, status: 'session-ended' });
   }
 
   res.sendStatus(204);
+});
+
+// ─── POST /api/dialer/session-next ────────────────────────────────────────────
+// Dial the next contact into an ALREADY-CONNECTED session's conference — the
+// agent's leg from a prior dialContactIntoSession() call is reused as-is.
+router.post('/session-next', async (req: Request, res: Response) => {
+  const { sessionId, contactId } = req.body;
+  if (!sessionId || !contactId) { res.status(400).json({ error: 'sessionId and contactId required' }); return; }
+
+  const callerUserId = (req as any).user?.id as string;
+  const b = bridges.get(sessionId);
+  if (!b || b.userId !== callerUserId) { res.status(404).json({ error: 'Session not found' }); return; }
+  if (!b.agentConnected || !b.confName) { res.status(400).json({ error: 'Agent is not connected yet' }); return; }
+
+  const contact = await (prisma.contact as any).findFirst({ where: { id: contactId, userId: callerUserId } });
+  if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
+  if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
+
+  // Reset the session's per-contact fields for the new contact; the agent
+  // leg (confName/agentCallSid) is untouched.
+  b.contactId = contactId;
+  b.contactPhone = contact.phone;
+  b.contactName = `${contact.firstName} ${contact.lastName}`.trim();
+  b.contactCallSid = null;
+  b.status = 'calling-contact';
+  b.createdAt = Date.now(); // refresh TTL — a long session shouldn't get swept mid-use
+
+  await dialContactIntoSession(b, sessionId);
+  res.json({ sessionId, status: 'calling-contact' });
 });
 
 // ─── POST /api/dialer/bridge-b-twiml (public) ────────────────────────────────
@@ -673,7 +732,6 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
   // when a rolling deploy routes the callback to a fresh server instance.
   const urlUserId       = req.query.userId       as string | undefined;
   const urlConfName     = req.query.confName     as string | undefined;
-  const urlAgentCallSid = req.query.agentCallSid as string | undefined;
 
   const b = bridges.get(sessionId);
   const twiml = new twilio.twiml.VoiceResponse();
@@ -682,7 +740,6 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
   // Resolve: prefer live session, fall back to URL-embedded params
   const effectiveUserId       = b?.userId       || urlUserId       || null;
   const effectiveConfName     = b?.confName     || urlConfName     || null;
-  const effectiveAgentCallSid = b?.agentCallSid || urlAgentCallSid || null;
 
   console.log(`[bridge-b-twiml] ▶ session=${sessionId} | AnsweredBy=${answeredBy || 'none'} | sessionFound=${!!b} | userId=${effectiveUserId || 'unknown'}`);
 
@@ -698,7 +755,7 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
 
   if (isMachine) {
     if (b) { b.status = 'vm-dropped'; }
-    io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b?.contactName });
+    io.emit('bridge-status', { sessionId, contactId: b?.contactId, status: 'vm-dropped', contactName: b?.contactName });
 
     const fallbackText = process.env.VOICEMAIL_SCRIPT ||
       `Hi, this is ${process.env.AGENT_NAME || 'your agent'} calling about your property. ` +
@@ -734,15 +791,10 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
     }
     twiml.hangup();
 
-    // Notify the agent that voicemail was dropped so they can move on
-    if (effectiveAgentCallSid) {
-      try {
-        const btUserId = req.query.userId as string | undefined;
-        await (await getTwilioClient(btUserId ?? b?.userId)).client.calls(effectiveAgentCallSid).update({
-          twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
-        });
-      } catch {}
-    }
+    // Agent leg is intentionally left alone — it stays in the conference for
+    // the whole session (Twilio's waitUrl auto-plays ringback for them while
+    // they're alone waiting), the app UI (vm-dropped toast) is how they learn
+    // the outcome instead of a spoken announcement that used to hang up on them.
 
     res.type('text/xml').send(twiml.toString());
     return;
@@ -752,16 +804,20 @@ webhooks.post('/bridge-b-twiml', async (req: Request, res: Response) => {
   if (b) {
     if (b.status === 'calling-contact') {
       b.status = 'connected';
-      io.emit('bridge-status', { sessionId, status: 'connected', contactName: b.contactName });
+      io.emit('bridge-status', { sessionId, contactId: b.contactId, status: 'connected', contactName: b.contactName });
     }
   }
 
   const dial = twiml.dial({
     action: `${BACKEND()}/api/dialer/bridge-b-done?sessionId=${sessionId}`,
   });
+  // endConferenceOnExit: false — when the CONTACT hangs up, the agent's
+  // persistent conference must stay alive for the next contact. (true here
+  // would end the conference for everyone, including the agent, the instant
+  // this one call ends.)
   (dial as any).conference(effectiveConfName || '', {
     startConferenceOnEnter: 'true',
-    endConferenceOnExit: 'true',
+    endConferenceOnExit: 'false',
     beep: 'false',
   });
   res.type('text/xml').send(twiml.toString());
@@ -788,6 +844,7 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
       b.status = 'connected';
       io.emit('bridge-status', {
         sessionId,
+        contactId: b.contactId,
         status: 'connected',
         contactName: b.contactName,
         amdResult: AnsweredBy || 'unknown',
@@ -804,7 +861,7 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
   }
 
   b.status = 'vm-dropped';
-  io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
+  io.emit('bridge-status', { sessionId, contactId: b.contactId, status: 'vm-dropped', contactName: b.contactName });
 
   // Build voicemail TwiML INLINE (no URL fetch = no Render cold-start timeout).
   // Check voicemailData format from DB to decide Play vs TTS.
@@ -851,14 +908,10 @@ webhooks.post('/bridge-amd', async (req: Request, res: Response) => {
     console.error(`[Bridge AMD] ✗ calls.update() FAILED: ${e.message}`);
   }
 
-  // Disconnect agent leg
-  try {
-    if (b.agentCallSid) {
-      await (await getTwilioClient(b.userId)).client.calls(b.agentCallSid).update({
-        twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
-      });
-    }
-  } catch {}
+  // Agent leg intentionally left connected — it stays in the persistent
+  // conference for the rest of the session; the vm-dropped socket event
+  // above is how the app tells them what happened instead of a spoken
+  // announcement that used to hang up on them after every single call.
 
   res.sendStatus(204);
 });
@@ -873,7 +926,7 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
 
   // Contact's phone was answered (human or VM) — notify frontend so it knows AMD is running
   if (CallStatus === 'in-progress') {
-    io.emit('bridge-status', { sessionId, status: 'contact-answered' });
+    io.emit('bridge-status', { sessionId, contactId: b?.contactId, status: 'contact-answered' });
   }
 
   if (b && (CallStatus === 'no-answer' || CallStatus === 'busy' || CallStatus === 'failed')) {
@@ -882,33 +935,22 @@ webhooks.post('/bridge-b-status', async (req: Request, res: Response) => {
                          : CallStatus === 'failed' ? 'call-failed'
                          : 'no-answer';
     b.status = 'no-answer';
-    io.emit('bridge-status', { sessionId, status: frontendStatus, contactName: b.contactName });
-    // Release agent — just end the call cleanly. UI banner handles the notification.
-    // (TTS via calls.update({ twiml }) on a conference leg causes carrier voicemail prompts)
-    try {
-      if (b.agentCallSid) {
-        await (await getTwilioClient(b.userId)).client.calls(b.agentCallSid).update({ status: 'completed' });
-      }
-    } catch {}
+    io.emit('bridge-status', { sessionId, contactId: b.contactId, status: frontendStatus, contactName: b.contactName });
+    // Agent leg intentionally left alone — stays connected in the persistent
+    // conference for the rest of the session.
   }
 
   if (b && CallStatus === 'completed' && b.status === 'connected') {
     b.status = 'ended';
-    io.emit('bridge-status', { sessionId, status: 'call-ended' });
+    io.emit('bridge-status', { sessionId, contactId: b.contactId, status: 'call-ended' });
   }
 
   // If call completed while AMD was still running (bridge-b-twiml never fired or returned error),
   // unblock the frontend so it doesn't freeze in "calling-contact" state.
   if (b && CallStatus === 'completed' && b.status === 'calling-contact') {
     b.status = 'no-answer';
-    io.emit('bridge-status', { sessionId, status: 'no-answer' });
-    try {
-      if (b.agentCallSid) {
-        await (await getTwilioClient(b.userId)).client.calls(b.agentCallSid).update({
-          twiml: `<Response><Say voice="Polly.Joanna">Call ended. Moving to next contact.</Say><Hangup/></Response>`,
-        });
-      }
-    } catch {}
+    io.emit('bridge-status', { sessionId, contactId: b.contactId, status: 'no-answer' });
+    // Agent leg intentionally left alone — same reasoning as above.
   }
 
   res.sendStatus(204);
@@ -936,20 +978,40 @@ router.get('/bridge-session/:id', (req: Request, res: Response) => {
 });
 
 // ─── POST /api/dialer/bridge-hangup ──────────────────────────────────────────
-// Agent clicks "End Call" in app — hangup both legs.
+// Agent clicks "End Call" mid-call — ends the CURRENT CONTACT's leg only.
+// The agent's leg stays in the persistent conference, ready for the next
+// contact. Use /session-end to actually disconnect the agent.
 router.post('/bridge-hangup', async (req: Request, res: Response) => {
   const { sessionId } = req.body;
   const b = bridges.get(sessionId);
   if (!b) { res.json({ ok: true }); return; }
 
   const { client: hangupClient } = await getTwilioClient(b.userId);
-  if (b.agentCallSid) {
-    try { await hangupClient.calls(b.agentCallSid).update({ status: 'completed' }); } catch {}
-  }
   if (b.contactCallSid) {
     try { await hangupClient.calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
   }
   b.status = 'ended';
+  b.contactCallSid = null;
+  res.json({ ok: true });
+});
+
+// ─── POST /api/dialer/session-end ────────────────────────────────────────────
+// Agent is done dialing for this session — hang up their leg too (which also
+// tears down the conference) and forget the session.
+router.post('/session-end', async (req: Request, res: Response) => {
+  const { sessionId } = req.body;
+  const b = bridges.get(sessionId);
+  if (!b) { res.json({ ok: true }); return; }
+
+  const { client: endClient } = await getTwilioClient(b.userId);
+  if (b.contactCallSid) {
+    try { await endClient.calls(b.contactCallSid).update({ status: 'completed' }); } catch {}
+  }
+  if (b.agentCallSid) {
+    try { await endClient.calls(b.agentCallSid).update({ status: 'completed' }); } catch {}
+  }
+  b.status = 'ended';
+  b.agentConnected = false;
   bridges.delete(sessionId);
   res.json({ ok: true });
 });
@@ -1004,16 +1066,10 @@ router.post('/manual-vm-drop', async (req: Request, res: Response) => {
   }
 
   b.status = 'vm-dropped';
-  io.emit('bridge-status', { sessionId, status: 'vm-dropped', contactName: b.contactName });
+  io.emit('bridge-status', { sessionId, contactId: b.contactId, status: 'vm-dropped', contactName: b.contactName });
 
-  // Disconnect agent with notification
-  if (b.agentCallSid) {
-    try {
-      await vmDropClient.calls(b.agentCallSid).update({
-        twiml: '<Response><Say voice="Polly.Joanna">Voicemail dropped. Moving to next contact.</Say><Hangup/></Response>',
-      });
-    } catch {}
-  }
+  // Agent leg intentionally left connected — stays in the persistent
+  // conference for the rest of the session.
 
   res.json({ ok: true });
 });
