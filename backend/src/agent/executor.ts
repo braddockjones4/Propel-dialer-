@@ -141,15 +141,18 @@ export async function executeActionSpec(spec: ActionSpec, contactId: string): Pr
     case 'group': {
       const groupName = spec.payload.groupName?.trim();
       if (!groupName) throw new Error('groupName required');
+      const userId = contact.userId;
+      if (!userId) throw new Error('Contact has no owning user — cannot assign to a group');
 
       // Find or create the group — avoids race condition when assigning multiple contacts at once
-      let group = await (prisma as any).contactGroup.findFirst({ where: { name: groupName } });
+      let group = await (prisma as any).contactGroup.findFirst({ where: { userId, name: groupName } });
       if (!group) {
         try {
-          const existingLast = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
+          const existingLast = await (prisma as any).contactGroup.findFirst({ where: { userId }, orderBy: { position: 'desc' } });
           const nextPos = (existingLast?.position ?? -1) + 1;
           group = await (prisma as any).contactGroup.create({
             data: {
+              userId,
               name: groupName,
               color: spec.payload.groupColor || '#9ca3af',
               position: nextPos,
@@ -157,7 +160,7 @@ export async function executeActionSpec(spec: ActionSpec, contactId: string): Pr
           });
         } catch {
           // Another concurrent request created it — fetch it now
-          group = await (prisma as any).contactGroup.findFirst({ where: { name: groupName } });
+          group = await (prisma as any).contactGroup.findFirst({ where: { userId, name: groupName } });
         }
       }
 

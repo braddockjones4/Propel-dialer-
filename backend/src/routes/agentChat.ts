@@ -164,16 +164,16 @@ interface ToolResult {
   badge?: { icon: string; label: string; color: string };
 }
 
-async function runTool(name: string, args: any): Promise<ToolResult> {
+async function runTool(name: string, args: any, userId: string): Promise<ToolResult> {
   switch (name) {
 
     case 'get_stats': {
       const [total, byStatus, byGroup, recentCalls, upcomingAppts] = await Promise.all([
-        prisma.contact.count(),
-        prisma.contact.groupBy({ by: ['status'], _count: { id: true } }),
-        prisma.contact.groupBy({ by: ['contactGroup'], _count: { id: true }, where: { contactGroup: { not: null } } }),
-        prisma.call.count({ where: { calledAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } }),
-        prisma.appointment.count({ where: { scheduledAt: { gte: new Date() }, status: 'confirmed' } }),
+        prisma.contact.count({ where: { userId } as any }),
+        prisma.contact.groupBy({ by: ['status'], where: { userId } as any, _count: { id: true } }),
+        prisma.contact.groupBy({ by: ['contactGroup'], where: { userId, contactGroup: { not: null } } as any, _count: { id: true } }),
+        prisma.call.count({ where: { calledAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, contact: { userId } } as any }),
+        prisma.appointment.count({ where: { scheduledAt: { gte: new Date() }, status: 'confirmed', contact: { userId } } as any }),
       ]);
       const statusMap: Record<string, number> = {};
       for (const r of byStatus) statusMap[r.status] = (r as any)._count.id;
@@ -190,7 +190,7 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 
     case 'search_contacts': {
       const { query, status, group, source, limit = 20 } = args as { query?: string; status?: string; group?: string; source?: string; limit?: number };
-      const where: any = {};
+      const where: any = { userId };
       if (status) where.status = status;
       if (group)  where.contactGroup = group;
       if (source) where.source = source;
@@ -219,7 +219,7 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
       const { name: qname, phone, id } = args as { name?: string; phone?: string; id?: string };
       let contact: any = null;
       if (id) {
-        contact = await prisma.contact.findUnique({ where: { id }, include: { calls: { take: 5, orderBy: { calledAt: 'desc' } }, messages: { take: 5, orderBy: { sentAt: 'desc' } } } });
+        contact = await prisma.contact.findFirst({ where: { id, userId } as any, include: { calls: { take: 5, orderBy: { calledAt: 'desc' } }, messages: { take: 5, orderBy: { sentAt: 'desc' } } } });
       } else {
         const parts = (qname || '').trim().split(/\s+/);
         const where: any = phone
@@ -227,6 +227,7 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
           : parts.length > 1
             ? { firstName: { contains: parts[0], mode: 'insensitive' }, lastName: { contains: parts[parts.length - 1], mode: 'insensitive' } }
             : { OR: [{ firstName: { contains: qname, mode: 'insensitive' } }, { lastName: { contains: qname, mode: 'insensitive' } }] };
+        where.userId = userId;
         contact = await prisma.contact.findFirst({ where, include: { calls: { take: 5, orderBy: { calledAt: 'desc' } }, messages: { take: 5, orderBy: { sentAt: 'desc' } } } });
       }
       if (!contact) return { tool: name, success: false, summary: 'Contact not found', badge: { icon: '❌', label: 'Not found', color: '#ef4444' } };
@@ -239,8 +240,8 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
     }
 
     case 'list_groups': {
-      const groups = await (prisma as any).contactGroup.findMany({ orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] });
-      const counts = await prisma.contact.groupBy({ by: ['contactGroup'], _count: { id: true }, where: { contactGroup: { not: null } } });
+      const groups = await (prisma as any).contactGroup.findMany({ where: { userId }, orderBy: [{ position: 'asc' }, { createdAt: 'asc' }] });
+      const counts = await prisma.contact.groupBy({ by: ['contactGroup'], _count: { id: true }, where: { userId, contactGroup: { not: null } } as any });
       const countMap: Record<string, number> = {};
       for (const r of counts as any[]) if (r.contactGroup) countMap[r.contactGroup] = r._count.id;
       const data = (groups as any[]).map((g: any) => ({ ...g, contactCount: countMap[g.name] || 0 }));
@@ -254,10 +255,10 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 
     case 'create_group': {
       const { name: gname, color } = args as { name: string; color?: string };
-      const existing = await (prisma as any).contactGroup.findFirst({ where: { name: gname.trim() } });
+      const existing = await (prisma as any).contactGroup.findFirst({ where: { userId, name: gname.trim() } });
       if (existing) return { tool: name, success: false, summary: `Group "${gname}" already exists`, badge: { icon: '⚠️', label: 'Already exists', color: '#f97316' } };
-      const last = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
-      const group = await (prisma as any).contactGroup.create({ data: { name: gname.trim(), color: color || '#9ca3af', position: (last?.position ?? -1) + 1 } });
+      const last = await (prisma as any).contactGroup.findFirst({ where: { userId }, orderBy: { position: 'desc' } });
+      const group = await (prisma as any).contactGroup.create({ data: { userId, name: gname.trim(), color: color || '#9ca3af', position: (last?.position ?? -1) + 1 } });
       try { io.emit('groups-updated', { action: 'create', group }); } catch {}
       return {
         tool: name, success: true,
@@ -273,19 +274,24 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
         filter_query?: string; filter_phone_pattern?: string; filter_email_domain?: string; filter_has_email?: boolean;
       };
       // Ensure group exists (find-or-create to avoid race conditions)
-      let grp = await (prisma as any).contactGroup.findFirst({ where: { name: group_name.trim() } });
+      let grp = await (prisma as any).contactGroup.findFirst({ where: { userId, name: group_name.trim() } });
       if (!grp) {
         try {
-          const last = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
-          grp = await (prisma as any).contactGroup.create({ data: { name: group_name.trim(), color: '#9ca3af', position: (last?.position ?? -1) + 1 } });
+          const last = await (prisma as any).contactGroup.findFirst({ where: { userId }, orderBy: { position: 'desc' } });
+          grp = await (prisma as any).contactGroup.create({ data: { userId, name: group_name.trim(), color: '#9ca3af', position: (last?.position ?? -1) + 1 } });
         } catch {
-          grp = await (prisma as any).contactGroup.findFirst({ where: { name: group_name.trim() } });
+          grp = await (prisma as any).contactGroup.findFirst({ where: { userId, name: group_name.trim() } });
         }
       }
 
-      let ids: string[] = contact_ids && contact_ids.length > 0 ? contact_ids : [];
-      if (ids.length === 0) {
-        const where: any = {};
+      const idsGiven = !!(contact_ids && contact_ids.length > 0);
+      // contact_ids may come from the LLM based on a prior search — re-scope to this
+      // user's contacts regardless, so a stray/guessed id can never touch another account.
+      let ids: string[] = idsGiven
+        ? (await prisma.contact.findMany({ where: { id: { in: contact_ids }, userId } as any, select: { id: true } })).map(c => c.id)
+        : [];
+      if (!idsGiven) {
+        const where: any = { userId };
         if (filter_status) where.status = filter_status;
         if (filter_source) where.source = filter_source;
         if (filter_has_email) where.email = { not: null };
@@ -310,13 +316,13 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
         }
         const matches = await prisma.contact.findMany({ where, select: { id: true, firstName: true, lastName: true } });
         ids = matches.map((c) => c.id);
-        if (ids.length === 0) {
-          const filterDesc = filter_query || filter_phone_pattern || filter_email_domain || filter_status || filter_source || 'given criteria';
-          return { tool: name, success: false, summary: `No contacts matched "${filterDesc}"`, badge: { icon: '⚠️', label: 'No matches', color: '#f97316' } };
-        }
+      }
+      if (ids.length === 0) {
+        const filterDesc = filter_query || filter_phone_pattern || filter_email_domain || filter_status || filter_source || 'given criteria';
+        return { tool: name, success: false, summary: `No contacts matched "${filterDesc}"`, badge: { icon: '⚠️', label: 'No matches', color: '#f97316' } };
       }
 
-      const { count } = await prisma.contact.updateMany({ where: { id: { in: ids } }, data: { contactGroup: group_name.trim() } });
+      const { count } = await prisma.contact.updateMany({ where: { id: { in: ids }, userId } as any, data: { contactGroup: group_name.trim() } });
       try { io.emit('agent-group', { action: 'assign', groupName: group_name, count }); } catch {}
       return {
         tool: name, success: true,
@@ -328,7 +334,7 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 
     case 'update_status': {
       const { contact_ids, status } = args as { contact_ids: string[]; status: string };
-      const { count } = await prisma.contact.updateMany({ where: { id: { in: contact_ids } }, data: { status } });
+      const { count } = await prisma.contact.updateMany({ where: { id: { in: contact_ids }, userId } as any, data: { status } });
       return {
         tool: name, success: true,
         summary: `Updated ${count} contact${count !== 1 ? 's' : ''} → ${status}`,
@@ -339,7 +345,7 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 
     case 'add_note': {
       const { contact_id, note } = args as { contact_id: string; note: string };
-      const contact = await prisma.contact.findUnique({ where: { id: contact_id } });
+      const contact = await prisma.contact.findFirst({ where: { id: contact_id, userId } as any });
       if (!contact) return { tool: name, success: false, summary: 'Contact not found', badge: { icon: '❌', label: 'Not found', color: '#ef4444' } };
       const prev = contact.notes ? contact.notes + '\n' : '';
       const stamp = new Date().toLocaleString();
@@ -353,9 +359,9 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 
     case 'delete_group': {
       const { group_name } = args as { group_name: string };
-      const g = await (prisma as any).contactGroup.findFirst({ where: { name: group_name } });
+      const g = await (prisma as any).contactGroup.findFirst({ where: { userId, name: group_name } });
       if (!g) return { tool: name, success: false, summary: `Group "${group_name}" not found`, badge: { icon: '❌', label: 'Not found', color: '#ef4444' } };
-      await prisma.contact.updateMany({ where: { contactGroup: group_name }, data: { contactGroup: null } });
+      await prisma.contact.updateMany({ where: { userId, contactGroup: group_name } as any, data: { contactGroup: null } });
       await (prisma as any).contactGroup.delete({ where: { id: g.id } });
       try { io.emit('groups-updated', { action: 'delete', groupName: group_name }); } catch {}
       return {
@@ -367,9 +373,9 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 
     case 'rename_group': {
       const { old_name, new_name } = args as { old_name: string; new_name: string };
-      const g = await (prisma as any).contactGroup.findFirst({ where: { name: old_name } });
+      const g = await (prisma as any).contactGroup.findFirst({ where: { userId, name: old_name } });
       if (!g) return { tool: name, success: false, summary: `Group "${old_name}" not found`, badge: { icon: '❌', label: 'Not found', color: '#ef4444' } };
-      await prisma.contact.updateMany({ where: { contactGroup: old_name }, data: { contactGroup: new_name } });
+      await prisma.contact.updateMany({ where: { userId, contactGroup: old_name } as any, data: { contactGroup: new_name } });
       await (prisma as any).contactGroup.update({ where: { id: g.id }, data: { name: new_name } });
       try { io.emit('groups-updated', { action: 'rename', oldName: old_name, newName: new_name }); } catch {}
       return {
@@ -383,7 +389,7 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
       const { contact_id, iso_datetime, title, location, send_confirmation = true } = args as {
         contact_id: string; iso_datetime: string; title?: string; location?: string; send_confirmation?: boolean;
       };
-      const contact = await prisma.contact.findUnique({ where: { id: contact_id } });
+      const contact = await prisma.contact.findFirst({ where: { id: contact_id, userId } as any });
       if (!contact) return { tool: name, success: false, summary: 'Contact not found', badge: { icon: '❌', label: 'Not found', color: '#ef4444' } };
       const when = new Date(iso_datetime);
       if (isNaN(when.getTime())) return { tool: name, success: false, summary: 'Invalid datetime', badge: { icon: '❌', label: 'Bad date', color: '#ef4444' } };
@@ -403,13 +409,13 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 
     case 'get_recommendations': {
       const [total, hotCount, newCount, callbackCount, noGroup, noVM, recentCalls] = await Promise.all([
-        prisma.contact.count(),
-        prisma.contact.count({ where: { status: 'hot' } }),
-        prisma.contact.count({ where: { status: 'new' } }),
-        prisma.contact.count({ where: { status: 'callback' } }),
-        prisma.contact.count({ where: { contactGroup: null } }),
-        prisma.contact.count(),
-        prisma.call.count({ where: { calledAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } } }),
+        prisma.contact.count({ where: { userId } as any }),
+        prisma.contact.count({ where: { userId, status: 'hot' } as any }),
+        prisma.contact.count({ where: { userId, status: 'new' } as any }),
+        prisma.contact.count({ where: { userId, status: 'callback' } as any }),
+        prisma.contact.count({ where: { userId, contactGroup: null } as any }),
+        prisma.contact.count({ where: { userId } as any }),
+        prisma.call.count({ where: { calledAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, contact: { userId } } as any }),
       ]);
       const data = { total, hotCount, newCount, callbackCount, noGroup, recentCalls };
       return {
@@ -426,11 +432,11 @@ async function runTool(name: string, args: any): Promise<ToolResult> {
 }
 
 // ── System prompt ─────────────────────────────────────────────────────────────
-async function buildSystemPrompt(): Promise<string> {
+async function buildSystemPrompt(userId: string): Promise<string> {
   const now = new Date();
   let groupList = 'none yet';
   try {
-    const groups = await (prisma as any).contactGroup.findMany({ select: { name: true }, orderBy: { position: 'asc' } });
+    const groups = await (prisma as any).contactGroup.findMany({ where: { userId }, select: { name: true }, orderBy: { position: 'asc' } });
     if (groups.length > 0) groupList = (groups as any[]).map((g: any) => `"${g.name}"`).join(', ');
   } catch {}
 
@@ -438,11 +444,11 @@ async function buildSystemPrompt(): Promise<string> {
   let snapshot = '';
   try {
     const [total, hot, newC, callback, noGroup] = await Promise.all([
-      prisma.contact.count(),
-      prisma.contact.count({ where: { status: 'hot' } }),
-      prisma.contact.count({ where: { status: 'new' } }),
-      prisma.contact.count({ where: { status: 'callback' } }),
-      prisma.contact.count({ where: { contactGroup: null } }),
+      prisma.contact.count({ where: { userId } as any }),
+      prisma.contact.count({ where: { userId, status: 'hot' } as any }),
+      prisma.contact.count({ where: { userId, status: 'new' } as any }),
+      prisma.contact.count({ where: { userId, status: 'callback' } as any }),
+      prisma.contact.count({ where: { userId, contactGroup: null } as any }),
     ]);
     snapshot = `${total} total contacts | ${hot} hot | ${newC} new | ${callback} callbacks pending | ${noGroup} ungrouped`;
   } catch {}
@@ -452,7 +458,7 @@ async function buildSystemPrompt(): Promise<string> {
   try {
     const recent = await prisma.agentAction.findMany({
       take: 8, orderBy: { createdAt: 'desc' },
-      where: { status: { in: ['sent', 'executed'] } },
+      where: { status: { in: ['sent', 'executed'] }, contact: { userId } } as any,
       include: { contact: { select: { firstName: true, lastName: true } } },
     });
     if (recent.length > 0) {
@@ -574,6 +580,7 @@ When get_recommendations data is available, or when you notice patterns, proacti
 async function runAgentLoop(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
   systemPrompt: string,
+  userId: string,
 ): Promise<{ reply: string; actions: ToolResult[] }> {
   const allActions: ToolResult[] = [];
   let reply = '';
@@ -631,7 +638,7 @@ async function runAgentLoop(
       // Execute all tool calls in parallel
       const toolResultEntries = await Promise.all(
         toolUseBlocks.map(async (tb: any) => {
-          const result = await runTool(tb.name, tb.input || {});
+          const result = await runTool(tb.name, tb.input || {}, userId);
           allActions.push(result);
           return {
             type: 'tool_result' as const,
@@ -659,7 +666,7 @@ async function runAgentLoop(
 
     const toolResults: Array<{ id: string; result: ToolResult }> = [];
     for (const tc of pass1.toolCalls) {
-      const result = await runTool(tc.name, tc.arguments);
+      const result = await runTool(tc.name, tc.arguments, userId);
       toolResults.push({ id: tc.id, result });
       allActions.push(result);
     }
@@ -707,8 +714,9 @@ router.post('/chat', async (req: Request, res: Response) => {
       });
     }
 
-    const systemPrompt = await buildSystemPrompt();
-    const { reply, actions } = await runAgentLoop(messages, systemPrompt);
+    const userId = (req as any).user?.id as string;
+    const systemPrompt = await buildSystemPrompt(userId);
+    const { reply, actions } = await runAgentLoop(messages, systemPrompt, userId);
 
     res.json({ reply, actions, usedLlm: true });
   } catch (e: any) {

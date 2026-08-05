@@ -7,18 +7,20 @@ import prisma from '../db';
 
 const router = Router();
 
-// ── GET /api/contact-groups ── list all groups with member counts ─────────────
-router.get('/', async (_req: Request, res: Response) => {
+// ── GET /api/contact-groups ── list caller's groups with member counts ────────
+router.get('/', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
     const groups = await (prisma as any).contactGroup.findMany({
+      where: { userId },
       orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
     });
 
-    // Attach live contact counts in one query
+    // Attach live contact counts in one query, scoped to this user's contacts
     const counts = await prisma.contact.groupBy({
       by: ['contactGroup'],
       _count: { id: true },
-      where: { contactGroup: { not: null } },
+      where: { userId, contactGroup: { not: null } } as any,
     });
     const countMap: Record<string, number> = {};
     for (const row of counts as any[]) {
@@ -34,18 +36,19 @@ router.get('/', async (_req: Request, res: Response) => {
 // ── POST /api/contact-groups ── create a new group ───────────────────────────
 router.post('/', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
     const { name, color, position } = req.body as { name?: string; color?: string; position?: number };
     if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
 
     // Determine next position if not supplied
     let pos = position;
     if (pos === undefined) {
-      const last = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
+      const last = await (prisma as any).contactGroup.findFirst({ where: { userId }, orderBy: { position: 'desc' } });
       pos = (last?.position ?? -1) + 1;
     }
 
     const group = await (prisma as any).contactGroup.create({
-      data: { name: name.trim(), color: color || '#9ca3af', position: pos },
+      data: { userId, name: name.trim(), color: color || '#9ca3af', position: pos },
     });
     res.status(201).json({ ...group, contactCount: 0 });
   } catch (e: any) {
@@ -57,16 +60,17 @@ router.post('/', async (req: Request, res: Response) => {
 // ── PATCH /api/contact-groups/:id ── rename or recolor ───────────────────────
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
-    const existing = await (prisma as any).contactGroup.findUnique({ where: { id: req.params.id } });
+    const userId = (req as any).user?.id as string;
+    const existing = await (prisma as any).contactGroup.findFirst({ where: { id: req.params.id, userId } });
     if (!existing) return res.status(404).json({ error: 'Group not found' });
 
     const { name, color, position } = req.body as { name?: string; color?: string; position?: number };
     const newName = name?.trim();
 
-    // If renaming, cascade the new name to all contacts that have the old name
+    // If renaming, cascade the new name to this user's contacts that have the old name
     if (newName && newName !== existing.name) {
       await prisma.contact.updateMany({
-        where: { contactGroup: existing.name },
+        where: { userId, contactGroup: existing.name } as any,
         data: { contactGroup: newName },
       });
     }
@@ -81,7 +85,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     });
 
     // Return with fresh contact count
-    const count = await prisma.contact.count({ where: { contactGroup: updated.name } });
+    const count = await prisma.contact.count({ where: { userId, contactGroup: updated.name } as any });
     res.json({ ...updated, contactCount: count });
   } catch (e: any) {
     if (e.code === 'P2002') return res.status(409).json({ error: `A group with that name already exists` });
@@ -92,12 +96,13 @@ router.patch('/:id', async (req: Request, res: Response) => {
 // ── DELETE /api/contact-groups/:id ── delete group, ungroup members ───────────
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
-    const existing = await (prisma as any).contactGroup.findUnique({ where: { id: req.params.id } });
+    const userId = (req as any).user?.id as string;
+    const existing = await (prisma as any).contactGroup.findFirst({ where: { id: req.params.id, userId } });
     if (!existing) return res.status(404).json({ error: 'Group not found' });
 
-    // Ungroup all contacts belonging to this group
+    // Ungroup all of this user's contacts belonging to this group
     const { count } = await prisma.contact.updateMany({
-      where: { contactGroup: existing.name },
+      where: { userId, contactGroup: existing.name } as any,
       data: { contactGroup: null },
     });
 
@@ -112,7 +117,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
 // Body: { contactIds: string[] }
 router.post('/:id/assign', async (req: Request, res: Response) => {
   try {
-    const group = await (prisma as any).contactGroup.findUnique({ where: { id: req.params.id } });
+    const userId = (req as any).user?.id as string;
+    const group = await (prisma as any).contactGroup.findFirst({ where: { id: req.params.id, userId } });
     if (!group) return res.status(404).json({ error: 'Group not found' });
 
     const { contactIds } = req.body as { contactIds?: string[] };
@@ -121,7 +127,7 @@ router.post('/:id/assign', async (req: Request, res: Response) => {
     }
 
     const { count } = await prisma.contact.updateMany({
-      where: { id: { in: contactIds } },
+      where: { id: { in: contactIds }, userId } as any,
       data: { contactGroup: group.name },
     });
 
@@ -135,19 +141,20 @@ router.post('/:id/assign', async (req: Request, res: Response) => {
 // Body: { name: string, color?: string }  →  returns the group (created or found)
 router.post('/ensure', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
     const { name, color } = req.body as { name?: string; color?: string };
     if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
 
-    const last = await (prisma as any).contactGroup.findFirst({ orderBy: { position: 'desc' } });
+    const last = await (prisma as any).contactGroup.findFirst({ where: { userId }, orderBy: { position: 'desc' } });
     const nextPos = (last?.position ?? -1) + 1;
 
     const group = await (prisma as any).contactGroup.upsert({
-      where: { name: name.trim() },
-      create: { name: name.trim(), color: color || '#9ca3af', position: nextPos },
+      where: { userId_name: { userId, name: name.trim() } },
+      create: { userId, name: name.trim(), color: color || '#9ca3af', position: nextPos },
       update: {},   // already exists — no changes needed
     });
 
-    const count = await prisma.contact.count({ where: { contactGroup: group.name } });
+    const count = await prisma.contact.count({ where: { userId, contactGroup: group.name } as any });
     res.json({ ...group, contactCount: count });
   } catch (e: any) {
     res.status(500).json({ error: e.message });

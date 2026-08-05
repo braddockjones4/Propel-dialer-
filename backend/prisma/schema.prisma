@@ -191,11 +191,15 @@ model DialerSettings {
 // ─── Contact Groups ───────────────────────────────────────────────────────────
 model ContactGroup {
   id        String   @id @default(cuid())
-  name      String   @unique
+  userId    String            // owner — groups are per-account, not global
+  name      String
   color     String   @default("#9ca3af")
   position  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
 }
 
 // ─── Autonomous AI Agent ──────────────────────────────────────────────────────

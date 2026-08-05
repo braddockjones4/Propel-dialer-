@@ -87,9 +87,11 @@ function toolSchemas(): LlmToolSchema[] {
   ];
 }
 
-async function fetchGroupNames(): Promise<string[]> {
+async function fetchGroupNames(userId: string | null): Promise<string[]> {
+  if (!userId) return [];
   try {
     const groups = await (prisma as any).contactGroup.findMany({
+      where: { userId },
       select: { name: true },
       orderBy: { position: 'asc' },
     });
@@ -101,7 +103,7 @@ async function fetchGroupNames(): Promise<string[]> {
 
 async function systemPrompt(cfg: AgentConfig, ctx: Awaited<ReturnType<typeof buildContactContext>>, goal: string): Promise<string> {
   const now = new Date();
-  const groupNames = await fetchGroupNames();
+  const groupNames = await fetchGroupNames(ctx.contact.userId);
   const groupList = groupNames.length
     ? groupNames.map(n => `"${n}"`).join(', ')
     : '(none yet — you can create new ones with assign_to_group)';
