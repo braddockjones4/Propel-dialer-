@@ -184,6 +184,7 @@ export default function Dialer() {
 
   // Phone verification
   const [verifyStatus, setVerifyStatus] = useState<'idle' | 'calling' | 'polling' | 'verified' | 'error'>('idle');
+  const [validationCode, setValidationCode] = useState<string | null>(null); // Twilio's call prompts for this code but never speaks it — we have to display it
   const verifyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Browser voicemail recording
@@ -404,7 +405,10 @@ export default function Dialer() {
         setVerifyStatus('verified');
         return;
       }
-      // Twilio is calling — poll for completion
+      // Twilio is calling — poll for completion. The call will prompt for the
+      // validation code on the keypad but never says it out loud, so show it
+      // here — the agent reads it off-screen and keys it in during the call.
+      setValidationCode(d.validationCode || null);
       setVerifyStatus('polling');
       if (verifyPollRef.current) clearInterval(verifyPollRef.current);
       verifyPollRef.current = setInterval(async () => {
@@ -416,13 +420,17 @@ export default function Dialer() {
             verifyPollRef.current = null;
             setSettings(s => ({ ...s, phoneVerified: true }));
             setVerifyStatus('verified');
+            setValidationCode(null);
           }
         } catch {}
       }, 4000);
       // Stop polling after 3 minutes
       setTimeout(() => {
         if (verifyPollRef.current) { clearInterval(verifyPollRef.current); verifyPollRef.current = null; }
-        setVerifyStatus(v => v === 'polling' ? 'idle' : v);
+        setVerifyStatus(v => {
+          if (v === 'polling') setValidationCode(null);
+          return v === 'polling' ? 'idle' : v;
+        });
       }, 180_000);
     } catch (e: any) {
       setVerifyStatus('error');
@@ -433,6 +441,7 @@ export default function Dialer() {
   // Reset verify status when phone number changes
   useEffect(() => {
     setVerifyStatus(settings.phoneVerified ? 'verified' : 'idle');
+    setValidationCode(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.personalPhone]);
 
@@ -917,9 +926,20 @@ export default function Dialer() {
                   )}
                 </div>
                 {verifyStatus === 'polling' && (
-                  <p style={{ fontSize: 11, color: '#92400e', margin: '8px 0 0', lineHeight: 1.5 }}>
-                    Twilio is calling your phone now — answer and follow the prompts to confirm.
-                  </p>
+                  <div style={{ marginTop: 8 }}>
+                    <p style={{ fontSize: 11, color: '#92400e', margin: 0, lineHeight: 1.5 }}>
+                      Twilio is calling your phone now — when it asks for your code, enter:
+                    </p>
+                    {validationCode && (
+                      <div style={{
+                        marginTop: 6, fontSize: 22, fontWeight: 700, letterSpacing: '0.15em',
+                        color: '#92400e', background: '#fefce8', border: '1px solid #fde68a',
+                        borderRadius: 8, padding: '8px 14px', textAlign: 'center',
+                      }}>
+                        {validationCode}
+                      </div>
+                    )}
+                  </div>
                 )}
                 {verifyStatus === 'error' && (
                   <p style={{ fontSize: 11, color: '#dc2626', margin: '8px 0 0' }}>Verification failed — try again.</p>
