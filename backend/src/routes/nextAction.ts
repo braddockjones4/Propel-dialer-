@@ -20,9 +20,9 @@ export interface NextAction {
   urgency: 'high' | 'medium' | 'low';
 }
 
-async function computeNextAction(contactId: string): Promise<NextAction> {
-  const contact = await prisma.contact.findUnique({
-    where: { id: contactId },
+async function computeNextAction(contactId: string, userId?: string): Promise<NextAction> {
+  const contact = await prisma.contact.findFirst({
+    where: userId ? ({ id: contactId, userId } as any) : { id: contactId },
     include: {
       calls:    { orderBy: { calledAt: 'desc' }, take: 5 },
       messages: { orderBy: { sentAt: 'desc' },   take: 3 },
@@ -155,7 +155,8 @@ Return ONLY valid JSON (no markdown, no extra text):
 // ── GET /api/next-action/:contactId ──────────────────────────────────────────
 router.get('/:contactId', async (req: Request, res: Response) => {
   try {
-    const action = await computeNextAction(req.params.contactId);
+    const userId = (req as any).user?.id as string;
+    const action = await computeNextAction(req.params.contactId, userId);
     res.json(action);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -168,8 +169,9 @@ router.post('/:contactId/execute', async (req: Request, res: Response) => {
   try {
     const { action, message } = req.body as { action: NextAction['action']; message?: string };
     const { contactId } = req.params;
+    const userId = (req as any).user?.id as string;
 
-    const contact = await prisma.contact.findUnique({ where: { id: contactId } });
+    const contact = await prisma.contact.findFirst({ where: { id: contactId, userId } as any });
     if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
 
     const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;

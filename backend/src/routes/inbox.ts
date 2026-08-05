@@ -8,9 +8,11 @@ import { runInboxAgent } from '../agent/engine';
 const router = Router();
 
 // GET /api/inbox — list conversations (one per contact, latest message first)
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
     const messages = await prisma.message.findMany({
+      where: { contact: { userId } } as any,
       orderBy: { sentAt: 'desc' },
       include: { contact: true },
     });
@@ -42,6 +44,9 @@ router.get('/', async (_req: Request, res: Response) => {
 // GET /api/inbox/:contactId — full thread for a contact
 router.get('/:contactId', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
+    const owns = await prisma.contact.findFirst({ where: { id: req.params.contactId, userId } as any, select: { id: true } });
+    if (!owns) { res.status(404).json({ error: 'Contact not found' }); return; }
     const messages = await prisma.message.findMany({
       where: { contactId: req.params.contactId },
       orderBy: { sentAt: 'asc' },
@@ -58,10 +63,10 @@ router.post('/:contactId/reply', async (req: Request, res: Response) => {
   const { body } = req.body;
   if (!body?.trim()) { res.status(400).json({ error: 'Body required' }); return; }
 
-  const contact = await prisma.contact.findUnique({ where: { id: req.params.contactId } });
+  const userId = (req as any).user?.id as string | undefined;
+  const contact = await prisma.contact.findFirst({ where: { id: req.params.contactId, userId } as any });
   if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
 
-  const userId = (req as any).user?.id as string | undefined;
   const { client, creds: inboxCreds } = await getTwilioClient(userId);
   const TWILIO_CALLER_ID = inboxCreds.callerId;
 

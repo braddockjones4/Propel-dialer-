@@ -22,16 +22,17 @@ router.post('/send', async (req: Request, res: Response) => {
 
   if (!message?.trim()) { res.status(400).json({ error: 'Message is required' }); return; }
 
-  // Fetch contacts
+  const userId = (req as any).user?.id as string | undefined;
+
+  // Fetch contacts — always scoped to the caller's own account
   let contacts: any[] = [];
   if (contactIds?.length) {
-    contacts = await prisma.contact.findMany({ where: { id: { in: contactIds }, phone: { not: null }, status: { not: 'dnc' } } });
+    contacts = await prisma.contact.findMany({ where: { id: { in: contactIds }, userId, phone: { not: null }, status: { not: 'dnc' } } as any });
   } else if (filter) {
-    contacts = await prisma.contact.findMany({ where: { ...(filter.source && { source: filter.source }), ...(filter.status && { status: filter.status }), phone: { not: null }, status: { not: 'dnc' } } });
+    contacts = await prisma.contact.findMany({ where: { userId, ...(filter.source && { source: filter.source }), ...(filter.status && { status: filter.status }), phone: { not: null }, status: { not: 'dnc' } } as any });
   }
   if (!contacts.length) { res.json({ sent: 0, failed: 0, errors: [] }); return; }
 
-  const userId = (req as any).user?.id as string | undefined;
   const { client, creds: blastCreds } = await getTwilioClient(userId);
   const TWILIO_CALLER_ID = blastCreds.callerId;
   const AGENT_PHONE = blastCreds.agentPhone;
@@ -112,12 +113,14 @@ router.post('/ab-send', async (req: Request, res: Response) => {
 
   const agentDisplayName = await getAgentName();
 
+  const userId = (req as any).user?.id as string | undefined;
   const contacts = await prisma.contact.findMany({
     where: {
+      userId,
       NOT: { status: 'dnc' },
       ...(filter?.source ? { source: filter.source } : {}),
       ...(filter?.status ? { status: filter.status } : {}),
-    },
+    } as any,
   });
 
   if (contacts.length === 0) { res.status(400).json({ error: 'No eligible contacts' }); return; }
@@ -178,17 +181,19 @@ router.post('/preview', async (req: Request, res: Response) => {
     const { message, filter } = req.body;
     const { AGENT_PHONE, TWILIO_CALLER_ID } = process.env;
     const agentDisplayName = await getAgentName();
+    const userId = (req as any).user?.id as string | undefined;
 
     const count = await prisma.contact.count({
       where: {
+        userId,
         NOT: { status: 'dnc' },
         ...(filter?.source ? { source: filter.source } : {}),
         ...(filter?.status ? { status: filter.status } : {}),
-      },
+      } as any,
     });
 
     const sample = await prisma.contact.findFirst({
-      where: { NOT: { status: 'dnc' } },
+      where: { userId, NOT: { status: 'dnc' } } as any,
     });
 
     const preview = sample

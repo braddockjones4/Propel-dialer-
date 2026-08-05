@@ -16,8 +16,14 @@ import prisma from '../db';
 
 const router = Router();
 
-// In-memory DNC override list (supplement to DB status)
-let manualDncNumbers = new Set<string>();
+// In-memory DNC override list, per account — one account's uploaded list
+// must never scrub or clear another account's contacts.
+const manualDncNumbers = new Map<string, Set<string>>();
+function dncSetFor(userId: string): Set<string> {
+  let set = manualDncNumbers.get(userId);
+  if (!set) { set = new Set(); manualDncNumbers.set(userId, set); }
+  return set;
+}
 
 function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
@@ -28,10 +34,11 @@ router.get('/check', async (req: Request, res: Response) => {
   const { phone } = req.query as { phone: string };
   if (!phone) { res.status(400).json({ error: 'phone required' }); return; }
   try {
+    const userId = (req as any).user?.id as string;
     const normalized = normalizePhone(phone);
-    const contact = await prisma.contact.findFirst({ where: { phone } });
+    const contact = await prisma.contact.findFirst({ where: { phone, userId } as any });
     const internalDnc = contact?.status === 'dnc';
-    const manualDnc   = manualDncNumbers.has(normalized);
+    const manualDnc   = dncSetFor(userId).has(normalized);
     res.json({ phone, isDnc: internalDnc || manualDnc, internalDnc, manualDnc, contactId: contact?.id });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -43,12 +50,14 @@ router.post('/scrub', async (req: Request, res: Response) => {
   const { phones } = req.body as { phones: string[] };
   if (!phones?.length) { res.status(400).json({ error: 'phones array required' }); return; }
   try {
+    const userId = (req as any).user?.id as string;
+    const manualSet = dncSetFor(userId);
     const results: Array<{ phone: string; isDnc: boolean; reason?: string }> = [];
     for (const phone of phones) {
       const normalized  = normalizePhone(phone);
-      const contact     = await prisma.contact.findFirst({ where: { phone } });
+      const contact     = await prisma.contact.findFirst({ where: { phone, userId } as any });
       const internalDnc = contact?.status === 'dnc';
-      const manualDnc   = manualDncNumbers.has(normalized);
+      const manualDnc   = manualSet.has(normalized);
       results.push({ phone, isDnc: internalDnc || manualDnc, reason: internalDnc ? 'internal-dnc' : manualDnc ? 'manual-list' : undefined });
     }
     res.json({ results, dncCount: results.filter(r => r.isDnc).length });
@@ -62,48 +71,56 @@ router.post('/upload', async (req: Request, res: Response) => {
   const { numbers, markInDb = false } = req.body as { numbers: string[]; markInDb?: boolean };
   if (!numbers?.length) { res.status(400).json({ error: 'numbers array required' }); return; }
   try {
+    const userId = (req as any).user?.id as string;
+    const manualSet = dncSetFor(userId);
     const normalized = numbers.map(normalizePhone).filter(n => n.length >= 10);
-    normalized.forEach(n => manualDncNumbers.add(n));
+    normalized.forEach(n => manualSet.add(n));
     let markedCount = 0;
     if (markInDb) {
       const phones = normalized.map(n => `+1${n.slice(-10)}`);
-      const result = await prisma.contact.updateMany({ where: { phone: { in: phones } }, data: { status: 'dnc' } });
+      const result = await prisma.contact.updateMany({ where: { phone: { in: phones }, userId } as any, data: { status: 'dnc' } });
       markedCount = result.count;
     }
-    res.json({ added: normalized.length, total: manualDncNumbers.size, marked: markedCount });
+    res.json({ added: normalized.length, total: manualSet.size, marked: markedCount });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
 // ── DELETE /api/dnc/clear-manual — clear the manual DNC list ─────────────────
-router.delete('/clear-manual', (_req: Request, res: Response) => {
-  const count = manualDncNumbers.size;
-  manualDncNumbers = new Set();
+router.delete('/clear-manual', (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
+  const set = manualDncNumbers.get(userId);
+  const count = set?.size ?? 0;
+  manualDncNumbers.set(userId, new Set());
   res.json({ cleared: count });
 });
 
 // ── GET /api/dnc/stats ────────────────────────────────────────────────────────
-router.get('/stats', async (_req: Request, res: Response) => {
+router.get('/stats', async (req: Request, res: Response) => {
   try {
-    const internalCount = await prisma.contact.count({ where: { status: 'dnc' } });
-    res.json({ internalDnc: internalCount, manualDnc: manualDncNumbers.size, total: internalCount + manualDncNumbers.size });
+    const userId = (req as any).user?.id as string;
+    const internalCount = await prisma.contact.count({ where: { status: 'dnc', userId } as any });
+    const manualCount = dncSetFor(userId).size;
+    res.json({ internalDnc: internalCount, manualDnc: manualCount, total: internalCount + manualCount });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
 });
 
 // ── POST /api/dnc/scrub-all — scrub all contacts against manual DNC list ──────
-router.post('/scrub-all', async (_req: Request, res: Response) => {
-  if (manualDncNumbers.size === 0) {
+router.post('/scrub-all', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string;
+  const manualSet = dncSetFor(userId);
+  if (manualSet.size === 0) {
     res.json({ marked: 0, message: 'No manual DNC numbers loaded' });
     return;
   }
   try {
-    const contacts = await prisma.contact.findMany({ where: { status: { not: 'dnc' } }, select: { id: true, phone: true } });
+    const contacts = await prisma.contact.findMany({ where: { status: { not: 'dnc' }, userId } as any, select: { id: true, phone: true } });
     let marked = 0;
     for (const c of contacts) {
-      if (manualDncNumbers.has(normalizePhone(c.phone ?? ''))) {
+      if (manualSet.has(normalizePhone(c.phone ?? ''))) {
         await prisma.contact.update({ where: { id: c.id }, data: { status: 'dnc' } });
         marked++;
       }

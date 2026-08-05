@@ -19,9 +19,11 @@ function toCSV(rows: Record<string, any>[]): string {
 }
 
 // ── GET /api/reports/contacts.csv ─────────────────────────────────────────────
-router.get('/contacts.csv', async (_req: Request, res: Response) => {
+router.get('/contacts.csv', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
     const contacts = await prisma.contact.findMany({
+      where: { userId } as any,
       orderBy: { createdAt: 'desc' },
       include: { calls: { orderBy: { calledAt: 'desc' }, take: 1 } },
     });
@@ -56,8 +58,9 @@ router.get('/calls.csv', async (req: Request, res: Response) => {
   try {
     const { days = '30' } = req.query as { days?: string };
     const since = new Date(Date.now() - Number(days) * 86400000);
+    const userId = (req as any).user?.id as string;
     const calls = await prisma.call.findMany({
-      where: { calledAt: { gte: since } },
+      where: { calledAt: { gte: since }, contact: { userId } } as any,
       include: { contact: { select: { firstName: true, lastName: true, phone: true, address: true, source: true } } },
       orderBy: { calledAt: 'desc' },
     });
@@ -90,18 +93,19 @@ router.get('/daily', async (req: Request, res: Response) => {
     const day   = date ? new Date(date) : new Date();
     const start = new Date(day.getFullYear(), day.getMonth(), day.getDate());
     const end   = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+    const userId = (req as any).user?.id as string;
 
     const [calls, messages, newContacts, appointments] = await Promise.all([
       prisma.call.findMany({
-        where: { calledAt: { gte: start, lt: end } },
+        where: { calledAt: { gte: start, lt: end }, contact: { userId } } as any,
         include: { contact: { select: { firstName: true, lastName: true, phone: true, source: true } } },
         orderBy: { calledAt: 'asc' },
       }),
-      prisma.message.findMany({ where: { direction: 'outbound', sentAt: { gte: start, lt: end } } }),
-      prisma.contact.count({ where: { createdAt: { gte: start, lt: end } } }),
+      prisma.message.findMany({ where: { direction: 'outbound', sentAt: { gte: start, lt: end }, contact: { userId } } as any }),
+      prisma.contact.count({ where: { createdAt: { gte: start, lt: end }, userId } as any }),
       // Safe: appointments may not exist yet in the DB schema
       db.appointment.findMany({
-        where: { scheduledAt: { gte: start, lt: end } },
+        where: { scheduledAt: { gte: start, lt: end }, contact: { userId } },
         include: { contact: { select: { firstName: true, lastName: true, phone: true } } },
       }).catch(() => []),
     ]);
