@@ -202,6 +202,8 @@ export default function Dialer() {
   const [vmDropToast, setVmDropToast] = useState<string | null>(null); // contact name for the "VM dropped" toast
   const [lastOutcomeContactName, setLastOutcomeContactName] = useState<string | null>(null);
   const vmToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [callerIdToast, setCallerIdToast] = useState<string | null>(null); // fallback caller-ID number, when not the agent's personal phone
+  const callerIdToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [vmModalOpen, setVmModalOpen] = useState(false); // voicemail re-record modal during session
 
   // Post-call
@@ -224,7 +226,17 @@ export default function Dialer() {
     const socket = io(SOCKET_URL, { transports: ['websocket'] });
     socketRef.current = socket;
 
-    socket.on('bridge-status', (data: { sessionId: string; status: string; contactName?: string }) => {
+    socket.on('bridge-status', (data: { sessionId: string; status: string; contactName?: string; callerId?: string | null; usingPersonalPhone?: boolean }) => {
+      // Fired once per call, alongside the normal 'calling-contact' status — warn
+      // when the call to the lead is going out under a fallback number instead of
+      // the agent's own verified cell (phoneVerified can silently flip to false).
+      if (data.status === 'calling-contact' && data.callerId && data.usingPersonalPhone === false) {
+        setCallerIdToast(data.callerId);
+        if (callerIdToastTimerRef.current) clearTimeout(callerIdToastTimerRef.current);
+        callerIdToastTimerRef.current = setTimeout(() => setCallerIdToast(null), 6000);
+      }
+
+
       // vm-dropped: always show the toast (we may have already auto-advanced to the next contact),
       // but only update bridgeStatus/disposition if this session is still the active one.
       if (data.status === 'vm-dropped') {
@@ -1390,6 +1402,22 @@ export default function Dialer() {
         }}>
           <span>✓</span>
           <span>Voicemail dropped for {vmDropToast}</span>
+        </div>
+      )}
+
+      {/* Caller-ID fallback toast — the call to the lead went out under a number
+          other than the agent's personal cell (usually: verification lapsed). */}
+      {callerIdToast && (
+        <div style={{
+          position: 'fixed', bottom: vmDropToast ? 72 : 24, left: '50%', transform: 'translateX(-50%)',
+          background: '#b45309', color: '#fff', padding: '10px 20px', borderRadius: 24,
+          fontSize: 13, fontWeight: 600, zIndex: 9999,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+          display: 'flex', alignItems: 'center', gap: 8,
+          whiteSpace: 'nowrap', pointerEvents: 'none',
+        }}>
+          <span>⚠️</span>
+          <span>Calling from {callerIdToast}, not your personal phone — verify your caller ID in Settings</span>
         </div>
       )}
     </div>

@@ -175,6 +175,9 @@ router.post('/add', async (req: Request, res: Response) => {
 // ─── PATCH /api/local-presence/:id ───────────────────────────────────────────
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
+    const owns = await (prisma.localNumber as any).findFirst({ where: { id: req.params.id, userId } });
+    if (!owns) { res.status(404).json({ error: 'Not found' }); return; }
     const { active, label } = req.body;
     const updated = await (prisma.localNumber as any).update({
       where: { id: req.params.id },
@@ -190,7 +193,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
 // ─── DELETE /api/local-presence/:id ──────────────────────────────────────────
 // Soft-delete (deactivate) — actual Twilio release requires manual action
 router.delete('/:id', async (req: Request, res: Response) => {
-  const number = await (prisma.localNumber as any).findUnique({ where: { id: req.params.id } });
+  const userId = (req as any).user?.id as string;
+  const number = await (prisma.localNumber as any).findFirst({ where: { id: req.params.id, userId } });
   if (!number) { res.status(404).json({ error: 'Not found' }); return; }
 
   // Optionally release from Twilio

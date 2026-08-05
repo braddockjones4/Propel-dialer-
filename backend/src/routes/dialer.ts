@@ -22,7 +22,7 @@ import express, { Router, Request, Response } from 'express';
 import twilio from 'twilio';
 import crypto from 'crypto';
 import prisma from '../db';
-import { resolveContactCallerId } from './localPresence';
+import { resolveContactCallerId, sameNumber } from './localPresence';
 import { io } from '../socket';
 import { getAgentName } from '../agent/settings';
 import { RINGBACK_MP3_BUF } from '../ringback';
@@ -564,7 +564,6 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
   if (CallStatus === 'in-progress' && b.status === 'waiting-agent') {
     b.status = 'calling-contact';
     b.agentCallSid = CallSid;
-    io.emit('bridge-status', { sessionId, status: 'calling-contact', contactName: b.contactName });
 
     // Dial the contact (Leg B) with AMD.
     // resolveContactCallerId guarantees From !== To — a matching caller ID makes
@@ -578,6 +577,22 @@ webhooks.post('/bridge-a-status', async (req: Request, res: Response) => {
       phoneVerified: settings?.phoneVerified,
       userId:        b.userId,
       fallback:      bridgeACreds.callerId,
+    });
+
+    // Did the lead-facing leg actually go out as the agent's verified personal
+    // cell, or fall back to a local-presence/account number? phoneVerified can
+    // silently flip to false (number changed, verification never completed),
+    // which otherwise fails invisibly — the agent just sees calls going out
+    // under the wrong number with no explanation. Surface it in real time.
+    const usingPersonalPhone = !!(
+      settings?.phoneVerified && settings?.personalPhone && sameNumber(contactFrom, settings.personalPhone)
+    );
+    io.emit('bridge-status', {
+      sessionId,
+      status: 'calling-contact',
+      contactName: b.contactName,
+      callerId: contactFrom || null,
+      usingPersonalPhone,
     });
 
     if (!contactFrom) {
