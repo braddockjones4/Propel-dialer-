@@ -190,8 +190,11 @@ router.post('/verify-phone', async (req: Request, res: Response) => {
 
   // Start Twilio verification call
   try {
-    // Twilio will call the number and speak a code; user presses keys to confirm
-    const vr = await (client as any).outgoingCallerIds.create({
+    // Twilio will call the number and speak a code; user presses keys to confirm.
+    // NOTE: this is validationRequests, not outgoingCallerIds — outgoingCallerIds
+    // is read-only (list/fetch of already-verified numbers); creating a NEW
+    // verification call is a distinct Twilio resource.
+    const vr = await client.validationRequests.create({
       phoneNumber: e164,
       friendlyName: 'Propel Dialer',
     });
