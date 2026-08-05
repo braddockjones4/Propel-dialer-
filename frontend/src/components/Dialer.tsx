@@ -211,6 +211,15 @@ export default function Dialer() {
   const [notes, setNotes]               = useState('');
   const [sessionLog, setSessionLog]     = useState<Array<{ name: string; disp: string; duration: number }>>([]);
 
+  // Auto-advance: the disposition panel for the call that JUST ended stays open
+  // (pendingDisposition) while the NEXT contact is already being dialed in the
+  // main view, instead of making the agent save first and click Call again.
+  const [pendingDisposition, setPendingDisposition] = useState<{ contactId: string; name: string; duration: number; twilioSid?: string; outcomeStatus: string } | null>(null);
+  const [pendingNotes, setPendingNotes] = useState('');
+  const [autoDialNext, setAutoDialNext] = useState(false);
+  const autoAdvancedForRef = useRef<string | null>(null); // contact id already snapshotted, guards double-fire
+  const initiateCallRef = useRef<() => void>(() => {});
+
   // AI script
   const [aiScript, setAiScript]         = useState<any>(null);
   const [scriptOpen, setScriptOpen]     = useState(false);
@@ -553,6 +562,20 @@ export default function Dialer() {
     }
   }, [contacts, index, settings.callMode, startCall]);
 
+  // Always-fresh ref to initiateCall, so the auto-dial effect below can invoke
+  // the version bound to the just-advanced index without listing initiateCall
+  // itself as a dependency (which would refire the effect on every render).
+  useEffect(() => { initiateCallRef.current = initiateCall; }, [initiateCall]);
+
+  // Fires once, right after index auto-advances — dials the new current
+  // contact immediately so it's already ringing while the agent fills out
+  // the disposition panel for the call that just ended.
+  useEffect(() => {
+    if (!autoDialNext) return;
+    setAutoDialNext(false);
+    initiateCallRef.current();
+  }, [autoDialNext]);
+
   // ─── Save + advance ─────────────────────────────────────────────────────────
   const saveAndAdvance = useCallback(async (disp: string) => {
     const contact = contacts[index];
@@ -587,6 +610,7 @@ export default function Dialer() {
       setView('done');
     } else {
       setIndex(i => i + 1);
+      setAutoDialNext(true); // dial the next contact immediately, no manual Call click needed
     }
   }, [contacts, index, notes, callDuration, activeCall, settings.callMode, resetCallStatus]);
 
@@ -603,11 +627,13 @@ export default function Dialer() {
     if (bridgeSessionId) {
       if (vmInProgress) {
         // Clear the ref NOW (synchronously) so the vm-dropped socket event that fires later
-        // doesn't update the next contact's bridgeStatus — just the toast.
+        // doesn't update the next contact's bridgeStatus — just the toast. Skip setting
+        // bridgeStatus('ended') entirely here: that would race with the saveAndAdvance
+        // call below (both trying to auto-advance/auto-dial the same contact) — the
+        // outcome is already known, so go straight to logging it, no disposition UI needed.
         bridgeIdRef.current = null;
-      }
-      setBridgeStatus('ended');
-      if (!vmInProgress) {
+      } else {
+        setBridgeStatus('ended');
         // Normal hang-up: kill both call legs via bridge-hangup
         try {
           await authFetch(`${API_BASE}/dialer/bridge-hangup`, {
@@ -616,7 +642,6 @@ export default function Dialer() {
           });
         } catch {}
       }
-      // If vmInProgress: leave contact call alive — AMD will play voicemail then hang up
     }
 
     if (vmInProgress) {
@@ -670,6 +695,59 @@ export default function Dialer() {
   const isBridgeDone     = settings.callMode === 'bridge' && ['vm-dropped','no-answer','declined','call-failed','call-ended','ended'].includes(bridgeStatus);
   const showCallBtn      = !isWebrtcInCall && !isBridgeActive && !isWebrtcDone && !isBridgeDone;
   const showDisposition  = isWebrtcDone || isBridgeDone;
+
+  // The instant a call reaches a state that needs a disposition, snapshot it
+  // into pendingDisposition and move straight on to the next contact — dialing
+  // starts immediately instead of waiting for the agent to save first.
+  useEffect(() => {
+    if (!showDisposition || !contact) return;
+    if (autoAdvancedForRef.current === contact.id) return; // already snapshotted this call
+    autoAdvancedForRef.current = contact.id;
+
+    setPendingDisposition({
+      contactId:  contact.id,
+      name:       `${contact.firstName} ${contact.lastName}`,
+      duration:   settings.callMode === 'bridge' ? 0 : callDuration,
+      twilioSid:  (activeCall as any)?.parameters?.CallSid,
+      outcomeStatus: settings.callMode === 'bridge' ? bridgeStatus : 'call-ended',
+    });
+    setPendingNotes('');
+    // Note: don't reset `disposition` here — the socket handler may have just
+    // pre-selected 'no-answer' for this same call; clearing it happens only
+    // once the agent actually logs it (logPendingDisposition).
+
+    setBridgeStatus('idle');
+    setBridgeSessionId(null);
+    resetCallStatus(); // clear 'completed' so the next contact shows the Call button / auto-dials
+
+    if (index + 1 >= contacts.length) {
+      setView('done');
+    } else {
+      setIndex(i => i + 1);
+      setAutoDialNext(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDisposition, contact?.id]);
+
+  // ─── Log the pending call's disposition (decoupled from the live index —
+  // the next contact may already be dialing by the time the agent saves) ────────
+  const logPendingDisposition = useCallback(async (disp: string) => {
+    if (!pendingDisposition) return;
+    const { contactId, name, duration, twilioSid } = pendingDisposition;
+
+    setSessionLog(log => [{ name, disp, duration }, ...log]);
+
+    try {
+      await authFetch(`${API_BASE}/dialer/log-call`, {
+        method: 'POST',
+        body: JSON.stringify({ contactId, disposition: disp, notes: pendingNotes, duration, twilioSid }),
+      });
+    } catch {}
+
+    setPendingDisposition(null);
+    setPendingNotes('');
+    setDisposition(null);
+  }, [pendingDisposition, pendingNotes]);
 
   const bridgeLabel: Record<string, string> = {
     'ringing-agent':    'Calling your phone…',
@@ -1193,13 +1271,15 @@ export default function Dialer() {
           )}
         </div>
 
-        {/* Disposition */}
-        {showDisposition && (
+        {/* Disposition — for the call that just ended. Decoupled from the live
+            index: the next contact may already be dialing above by the time
+            this is filled out and saved. */}
+        {pendingDisposition && (
           <div style={{ background: '#fff', borderRadius: 16, padding: '18px', marginBottom: 12, border: '1px solid rgba(0,0,0,0.07)' }}>
 
             {/* Call outcome banner — tells the agent exactly what happened */}
             {(() => {
-              const n = lastOutcomeContactName || 'Contact';
+              const n = pendingDisposition.name || 'Contact';
               const outcome: Record<string, { icon: string; text: string; bg: string; color: string }> = {
                 'no-answer':   { icon: '📵', text: `${n} — rang out, no voicemail`, bg: '#f3f4f6', color: '#374151' },
                 'declined':    { icon: '🚫', text: `${n} declined the call`, bg: '#fef2f2', color: '#dc2626' },
@@ -1209,8 +1289,7 @@ export default function Dialer() {
                 ended:         { icon: '', text: 'Call ended', bg: '#f3f4f6', color: '#374151' },
                 error:         { icon: '', text: 'Call failed to connect', bg: '#fef2f2', color: '#dc2626' },
               };
-              const o = outcome[bridgeStatus] || (callStatus === 'completed' ? { icon: '', text: 'Call ended', bg: '#f3f4f6', color: '#374151' } : null);
-              if (!o) return null;
+              const o = outcome[pendingDisposition.outcomeStatus] || { icon: '', text: 'Call ended', bg: '#f3f4f6', color: '#374151' };
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, background: o.bg, marginBottom: 14 }}>
                   {o.icon ? <span style={{ fontSize: 16 }}>{o.icon}</span> : null}
@@ -1220,7 +1299,7 @@ export default function Dialer() {
             })()}
 
             <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#9ca3af', marginBottom: 14 }}>
-              How did it go?
+              How did it go with {pendingDisposition.name}?
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
               {DISPOSITIONS.map(d => (
@@ -1237,17 +1316,17 @@ export default function Dialer() {
               ))}
             </div>
             <textarea
-              value={notes} onChange={e => setNotes(e.target.value)}
+              value={pendingNotes} onChange={e => setPendingNotes(e.target.value)}
               placeholder="Notes (optional)…" rows={2}
               style={{ width: '100%', padding: '10px 12px', borderRadius: 10, fontSize: 13, border: '1px solid rgba(0,0,0,0.09)', outline: 'none', resize: 'none', boxSizing: 'border-box', marginBottom: 12, fontFamily: 'inherit' }}
             />
-            <button onClick={() => disposition && saveAndAdvance(disposition)} disabled={!disposition}
+            <button onClick={() => disposition && logPendingDisposition(disposition)} disabled={!disposition}
               style={{
                 width: '100%', padding: '13px', borderRadius: 12, fontSize: 15, fontWeight: 600,
                 background: DARK, color: '#fff', border: 'none',
                 cursor: disposition ? 'pointer' : 'not-allowed', opacity: disposition ? 1 : 0.4,
               }}>
-              {index + 1 >= contacts.length ? 'Finish Session' : 'Next Contact →'}
+              Log Call
             </button>
           </div>
         )}
