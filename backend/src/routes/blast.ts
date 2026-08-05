@@ -57,7 +57,7 @@ router.post('/send', async (req: Request, res: Response) => {
         body,
         from: TWILIO_CALLER_ID,
         to:   contact.phone!,
-        statusCallback: `${process.env.NGROK_URL}/api/twilio/sms-status`,
+        statusCallback: `${process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com'}/api/twilio/sms-status`,
       };
       if (mediaUrl) msgParams.mediaUrl = [mediaUrl];
 

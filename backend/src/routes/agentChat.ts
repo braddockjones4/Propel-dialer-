@@ -580,7 +580,7 @@ async function runAgentLoop(
   const MAX_PASSES = 5;
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  const agentModel   = process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
+  const agentModel   = process.env.AGENT_MODEL || process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001';
 
   if (anthropicKey) {
     // ── Anthropic: native multi-turn loop ──────────────────────────────────
