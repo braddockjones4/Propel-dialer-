@@ -41,7 +41,8 @@ router.post('/start', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Contacts required' }); return;
   }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, NGROK_URL } = process.env;
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
+  const NGROK_URL = process.env.BACKEND_URL || process.env.NGROK_URL;
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID || !NGROK_URL) {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
