@@ -33,10 +33,11 @@ router.put('/settings', async (req: Request, res: Response) => {
 // ── Activity log ────────────────────────────────────────────────────────────
 router.get('/actions', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
     const status = (req.query.status as string) || undefined;
     const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 200);
     const actions = await prisma.agentAction.findMany({
-      where: status ? { status } : undefined,
+      where: { contact: { userId }, ...(status ? { status } : {}) },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true, status: true } } },
@@ -46,10 +47,11 @@ router.get('/actions', async (req: Request, res: Response) => {
 });
 
 // ── Approval queue ──────────────────────────────────────────────────────────
-router.get('/pending', async (_req: Request, res: Response) => {
+router.get('/pending', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
     const actions = await prisma.agentAction.findMany({
-      where: { status: 'pending' },
+      where: { status: 'pending', contact: { userId } },
       orderBy: { createdAt: 'asc' },
       include: { contact: { select: { id: true, firstName: true, lastName: true, phone: true, status: true, leadScore: true } } },
     });
@@ -60,6 +62,9 @@ router.get('/pending', async (_req: Request, res: Response) => {
 // Approve (optionally with an edited message) → executes now.
 router.post('/actions/:id/approve', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
+    const owned = await prisma.agentAction.findFirst({ where: { id: req.params.id, contact: { userId } }, select: { id: true } });
+    if (!owned) { res.status(404).json({ error: 'Action not found' }); return; }
     const { message } = req.body || {};
     const result = await executeQueuedAction(req.params.id, message ? { overrideMessage: message } : {});
     res.json({ ...result, payload: safeParse((result as any).payload) });
@@ -69,16 +74,26 @@ router.post('/actions/:id/approve', async (req: Request, res: Response) => {
 });
 
 router.post('/actions/:id/reject', async (req: Request, res: Response) => {
-  const updated = await prisma.agentAction.update({
-    where: { id: req.params.id },
-    data: { status: 'rejected' },
-  });
-  res.json(updated);
+  try {
+    const userId = (req as any).user?.id as string;
+    const owned = await prisma.agentAction.findFirst({ where: { id: req.params.id, contact: { userId } }, select: { id: true } });
+    if (!owned) { res.status(404).json({ error: 'Action not found' }); return; }
+    const updated = await prisma.agentAction.update({
+      where: { id: req.params.id },
+      data: { status: 'rejected' },
+    });
+    res.json(updated);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // ── Manual trigger: run the agent on a specific contact now ────────────────────
 router.post('/run/:contactId', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
+    const owned = await prisma.contact.findFirst({ where: { id: req.params.contactId, userId }, select: { id: true } });
+    if (!owned) { res.status(404).json({ error: 'Contact not found' }); return; }
     const result = await runInboxAgent(req.params.contactId, { source: 'manual' });
     res.json(result);
   } catch (e: any) {
@@ -89,6 +104,9 @@ router.post('/run/:contactId', async (req: Request, res: Response) => {
 // Draft-only: returns a suggested reply for the human to edit/send (no send).
 router.post('/draft/:contactId', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string;
+    const owned = await prisma.contact.findFirst({ where: { id: req.params.contactId, userId }, select: { id: true } });
+    if (!owned) { res.status(404).json({ error: 'Contact not found' }); return; }
     const result = await draftReply(req.params.contactId);
     res.json(result);
   } catch (e: any) {
@@ -104,15 +122,16 @@ router.post('/sweep', async (_req: Request, res: Response) => {
 });
 
 // ── Dashboard stats ────────────────────────────────────────────────────────────
-router.get('/stats', async (_req: Request, res: Response) => {
+router.get('/stats', async (req: Request, res: Response) => {
  try {
+  const userId = (req as any).user?.id as string;
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
   const [pending, sentToday, appts, escalations, scheduled] = await Promise.all([
-    prisma.agentAction.count({ where: { status: 'pending' } }),
-    prisma.agentAction.count({ where: { type: { in: ['sms', 'followup'] }, status: { in: ['sent', 'executed'] }, executedAt: { gte: startOfDay } } }),
-    prisma.agentAction.count({ where: { type: 'appointment', status: 'executed' } }),
-    prisma.agentAction.count({ where: { type: 'escalate' } }),
-    prisma.agentAction.count({ where: { status: 'scheduled' } }),
+    prisma.agentAction.count({ where: { status: 'pending', contact: { userId } } }),
+    prisma.agentAction.count({ where: { type: { in: ['sms', 'followup'] }, status: { in: ['sent', 'executed'] }, executedAt: { gte: startOfDay }, contact: { userId } } }),
+    prisma.agentAction.count({ where: { type: 'appointment', status: 'executed', contact: { userId } } }),
+    prisma.agentAction.count({ where: { type: 'escalate', contact: { userId } } }),
+    prisma.agentAction.count({ where: { status: 'scheduled', contact: { userId } } }),
   ]);
   const settings = await getAgentSettings();
   res.json({ pending, sentToday, appointmentsBooked: appts, escalations, scheduled, enabled: settings.enabled, autonomyMode: settings.autonomyMode });
