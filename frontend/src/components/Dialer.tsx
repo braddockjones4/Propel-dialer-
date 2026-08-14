@@ -382,13 +382,7 @@ export default function Dialer() {
         data = data.filter(c => c.contactGroup === groupVal);
       }
 
-      // Pin Braddock Jones first for demo
-      const pinned = data.find(c =>
-        c.firstName?.toLowerCase().includes('braddock') ||
-        `${c.firstName} ${c.lastName}`.toLowerCase().includes('braddock jones')
-      );
-      const rest = data.filter(c => c !== pinned);
-      setContacts(pinned ? [pinned, ...rest] : data);
+      setContacts(data);
     } catch {}
     setLoadingContacts(false);
   }, []);
