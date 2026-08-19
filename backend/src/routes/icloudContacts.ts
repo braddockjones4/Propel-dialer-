@@ -6,6 +6,9 @@ import prisma from '../db';
 
 const router = Router();
 
+if (process.env.NODE_ENV === 'production' && !process.env.ENCRYPTION_KEY) {
+  throw new Error('ENCRYPTION_KEY must be set in production — refusing to encrypt stored credentials with a public fallback key');
+}
 const ENC_KEY = (process.env.ENCRYPTION_KEY || 'propel-dialer-icloud-key-32chars!').slice(0, 32);
 const IV_LEN  = 16;
 

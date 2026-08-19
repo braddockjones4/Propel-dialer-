@@ -45,12 +45,11 @@ Add all of these in the Render dashboard under **Environment**:
 | `FRONTEND_URL` | `https://propel-dialer.vercel.app` (set after Vercel deploy) |
 | `AGENT_NAME` | `Braddock Jones` |
 | `AGENT_PHONE` | `+14439091704` |
-| `OPENAI_API_KEY` | From platform.openai.com |
-| `STRIPE_SECRET_KEY` | From Stripe dashboard |
-| `STRIPE_WEBHOOK_SECRET` | From Stripe → Webhooks |
-| `STRIPE_PRICE_STARTER` | `price_xxx` from Stripe |
-| `STRIPE_PRICE_PRO` | `price_xxx` from Stripe |
-| `STRIPE_PRICE_ELITE` | `price_xxx` from Stripe |
+| `OPENAI_API_KEY` | From platform.openai.com — used for call transcription, scoring, and next-action suggestions |
+| `ANTHROPIC_API_KEY` | From console.anthropic.com — used for the autonomous AI Agent follow-ups |
+| `ANTHROPIC_MODEL` | Optional — overrides the default agent model (`claude-haiku-4-5-20251001`) |
+| `VOICEMAIL_SCRIPT` | Optional — overrides the default voicemail-drop script text |
+| `STRIPE_SECRET_KEY` | From Stripe dashboard — required for promo-code validation (`/api/promo/validate`) only; SaaS billing (`routes/billing.ts`) is not mounted |
 | `SENDGRID_API_KEY` | From SendGrid |
 | `SENDGRID_FROM_EMAIL` | `braddockjones4@icloud.com` |
 | `NODE_ENV` | `production` |
@@ -94,15 +93,12 @@ In Twilio → TwiML Apps → your app:
 
 ---
 
-## Step 5 — Stripe Setup
+## Step 5 — Stripe Setup (promo codes only)
 
-1. Go to https://dashboard.stripe.com/products
-2. Create 3 products: Starter ($99/mo), Pro ($199/mo), Elite ($399/mo)
-3. Copy each `price_xxx` ID → add to Render env vars
-4. Go to Stripe → Webhooks → Add endpoint:
-   - URL: `https://propel-dialer-backend.onrender.com/api/billing/webhook`
-   - Events: `checkout.session.completed`, `customer.subscription.deleted`
-5. Copy webhook signing secret → `STRIPE_WEBHOOK_SECRET` in Render
+SaaS billing (`routes/billing.ts`) is not wired up — this is a per-client custom deployment with no subscription billing. Stripe is only used for promo-code validation:
+
+1. Go to https://dashboard.stripe.com/apikeys → copy the secret key
+2. Add it as `STRIPE_SECRET_KEY` in Render env vars
 
 ---
 

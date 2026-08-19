@@ -13,7 +13,7 @@ services:
       - key: DATABASE_URL
         sync: false          # set in Render dashboard → paste Supabase pooler URL
       - key: DIRECT_URL
-        sync: false          # set in Render dashboard → paste Supabase direct URL
+        sync: false          # set in Render dashboard → paste Supabase direct URL (not currently read by prisma/schema.prisma — kept for future direct-connection use)
       - key: JWT_SECRET
         generateValue: true
       - key: TWILIO_ACCOUNT_SID
@@ -38,9 +38,14 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: AGENT_MODEL
+      - key: ANTHROPIC_MODEL
+        sync: false          # optional — overrides the default agent model (claude-haiku-4-5-20251001)
+      - key: VOICEMAIL_SCRIPT
+        sync: false          # optional — overrides the default voicemail-drop script text
+      # Stripe billing (routes/billing.ts) removed — per-client custom deployment, no SaaS billing.
+      # STRIPE_SECRET_KEY is still required for promo-code validation (routes/promo.ts, /api/promo/validate).
+      - key: STRIPE_SECRET_KEY
         sync: false
-      # Stripe removed — per-client custom deployment, no SaaS billing
       - key: SENDGRID_API_KEY
         sync: false
       - key: SENDGRID_FROM_EMAIL

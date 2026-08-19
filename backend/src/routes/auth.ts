@@ -38,6 +38,9 @@ const forgotLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in production — refusing to sign tokens with a public fallback secret');
+}
 const JWT_SECRET  = process.env.JWT_SECRET || 'propel-dialer-dev-secret-change-in-prod';
 const JWT_EXPIRES = '30d';
 
@@ -285,8 +288,10 @@ router.post('/forgot-password', forgotLimiter, async (req: Request, res: Respons
         req2.on('error', resolve);
         req2.write(body); req2.end();
       });
-    } else {
+    } else if (process.env.NODE_ENV !== 'production') {
       console.log(`[Auth] Password reset link for ${email}: ${resetUrl}`);
+    } else {
+      console.error('[Auth] SENDGRID_API_KEY/SENDGRID_FROM_EMAIL not configured — cannot send password reset email');
     }
 
     res.json({ message: 'If that email exists, a reset link has been sent.' });

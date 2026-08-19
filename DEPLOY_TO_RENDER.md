@@ -42,11 +42,12 @@ Key variables needed:
 - `JWT_SECRET`
 - `AGENT_NAME`
 - `AGENT_PHONE`
-- `ANTHROPIC_API_KEY`
+- `OPENAI_API_KEY` — required for call transcription, scoring, and next-action suggestions
+- `ANTHROPIC_API_KEY` — required for the autonomous AI Agent follow-ups
 - `SENDGRID_API_KEY`
 - `SENDGRID_FROM_EMAIL`
 - `NODE_ENV` = `production`
-- `NGROK_URL` = `https://propel-dialer-backend.onrender.com`
+- `BACKEND_URL` = `https://propel-dialer-backend.onrender.com` (code also accepts the older `NGROK_URL` name as a fallback)
 
 ---
 
