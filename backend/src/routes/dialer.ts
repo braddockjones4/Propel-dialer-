@@ -234,7 +234,13 @@ router.post('/verify-phone', async (req: Request, res: Response) => {
 // Poll to check if personalPhone has been verified in Twilio.
 router.get('/verify-status', async (req: Request, res: Response) => {
   const userId = (req as any).user?.id as string;
-  const settings = await prisma.dialerSettings.findUnique({ where: { userId } });
+
+  let settings;
+  try {
+    settings = await prisma.dialerSettings.findUnique({ where: { userId } });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message }); return;
+  }
   if (!settings?.personalPhone) { res.json({ verified: false }); return; }
   if (settings.phoneVerified) { res.json({ verified: true, phone: settings.personalPhone }); return; }
 

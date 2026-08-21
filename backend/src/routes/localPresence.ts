@@ -194,7 +194,13 @@ router.patch('/:id', async (req: Request, res: Response) => {
 // Soft-delete (deactivate) — actual Twilio release requires manual action
 router.delete('/:id', async (req: Request, res: Response) => {
   const userId = (req as any).user?.id as string;
-  const number = await (prisma.localNumber as any).findFirst({ where: { id: req.params.id, userId } });
+
+  let number;
+  try {
+    number = await (prisma.localNumber as any).findFirst({ where: { id: req.params.id, userId } });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message }); return;
+  }
   if (!number) { res.status(404).json({ error: 'Not found' }); return; }
 
   // Optionally release from Twilio
