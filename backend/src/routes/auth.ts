@@ -286,7 +286,7 @@ router.post('/forgot-password', forgotLimiter, async (req: Request, res: Respons
         req2.write(body); req2.end();
       });
     } else {
-      console.log(`[Auth] Password reset link for ${email}: ${resetUrl}`);
+      console.warn(`[Auth] SENDGRID_API_KEY/SENDGRID_FROM_EMAIL not configured — password reset email not sent for ${email}`);
     }
 
     res.json({ message: 'If that email exists, a reset link has been sent.' });
