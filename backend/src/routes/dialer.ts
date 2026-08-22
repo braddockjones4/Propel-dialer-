@@ -193,7 +193,13 @@ router.post('/verify-phone', async (req: Request, res: Response) => {
   const digits = phone.replace(/\D/g, '');
   const e164 = digits.startsWith('1') ? `+${digits}` : `+1${digits}`;
 
-  const { client } = await getTwilioClient(userId);
+  let client;
+  try {
+    ({ client } = await getTwilioClient(userId));
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+    return;
+  }
 
   // Check if already verified in Twilio
   try {
@@ -318,6 +324,7 @@ webhooks.get('/vm-audio/:userId', async (req: Request, res: Response) => {
   if (!settings?.voicemailData) { res.status(404).send('Not found'); return; }
 
   const [header, base64] = settings.voicemailData.split(',');
+  if (!header || !base64) { res.status(404).send('Not found'); return; }
   const mimeType = header.match(/data:([^;]+)/)?.[1] || 'audio/webm';
   const buffer = Buffer.from(base64, 'base64');
 
@@ -383,7 +390,13 @@ router.post('/record-vm', async (req: Request, res: Response) => {
   const userId = (req as any).user?.id as string;
   const { personalPhone } = req.body;
   if (!personalPhone) { res.status(400).json({ error: 'personalPhone required' }); return; }
-  const { client: vmRecClient, creds: vmRecCreds } = await getTwilioClient(userId);
+  let vmRecClient, vmRecCreds;
+  try {
+    ({ client: vmRecClient, creds: vmRecCreds } = await getTwilioClient(userId));
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+    return;
+  }
   const from = vmRecCreds.callerId || vmRecCreds.agentPhone || '';
   if (!from) { res.status(500).json({ error: 'Twilio callerId not configured' }); return; }
   try {

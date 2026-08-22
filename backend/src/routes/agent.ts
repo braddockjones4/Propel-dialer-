@@ -69,11 +69,16 @@ router.post('/actions/:id/approve', async (req: Request, res: Response) => {
 });
 
 router.post('/actions/:id/reject', async (req: Request, res: Response) => {
-  const updated = await prisma.agentAction.update({
-    where: { id: req.params.id },
-    data: { status: 'rejected' },
-  });
-  res.json(updated);
+  try {
+    const updated = await prisma.agentAction.update({
+      where: { id: req.params.id },
+      data: { status: 'rejected' },
+    });
+    res.json(updated);
+  } catch (e: any) {
+    if (e.code === 'P2025') { res.status(404).json({ error: 'Not found' }); return; }
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Manual trigger: run the agent on a specific contact now ────────────────────
