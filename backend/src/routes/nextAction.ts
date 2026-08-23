@@ -179,6 +179,7 @@ router.post('/:contactId/execute', async (req: Request, res: Response) => {
     switch (action) {
       case 'send-sms': {
         if (!message) { res.status(400).json({ error: 'message required for send-sms' }); return; }
+        if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
         if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
           res.status(500).json({ error: 'Twilio not configured' }); return;
         }
