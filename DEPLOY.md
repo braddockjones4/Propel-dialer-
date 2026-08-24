@@ -54,6 +54,7 @@ Add all of these in the Render dashboard under **Environment**:
 | `SENDGRID_API_KEY` | From SendGrid |
 | `SENDGRID_FROM_EMAIL` | `braddockjones4@icloud.com` |
 | `NODE_ENV` | `production` |
+| `VOICEMAIL_SCRIPT` | *(optional)* Custom voicemail fallback text; falls back to a built-in default if unset |
 
 ### Deploy
 Click **Deploy**. Render runs:
