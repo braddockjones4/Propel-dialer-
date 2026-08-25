@@ -125,7 +125,7 @@ cd frontend && npm run dev
 # App at http://localhost:5173
 ```
 
-Keep `backend/.env` with `DATABASE_URL="file:./dev.db"` for local SQLite dev, or swap in the Supabase URL to develop against the live database.
+The schema is PostgreSQL-only — point `backend/.env`'s `DATABASE_URL` (and `DIRECT_URL`) at a local Postgres instance, or at the Supabase URLs to develop against the live database.
 
 ---
 
