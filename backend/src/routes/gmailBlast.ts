@@ -401,6 +401,7 @@ router.get('/contacts', requireAuth, async (req: any, res: Response) => {
 //  2. Email already in DB → SKIP (true duplicate)
 //  3. No match at all → CREATE new contact
 router.post('/import-contacts', requireAuth, async (req: any, res: Response) => {
+  const userId = req.user.id as string;
   const { contacts, groupName } = req.body as {
     contacts: { firstName: string; lastName: string; email: string | null; phone: string | null }[];
     groupName?: string;
@@ -429,10 +430,10 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
   // Look up existing contacts by email (to detect true duplicates)
   const [existByEmail, existByPhone] = await Promise.all([
     emailList.length
-      ? db.contact.findMany({ where: { email: { in: emailList } }, select: { id: true, email: true, phone: true } })
+      ? db.contact.findMany({ where: { userId, email: { in: emailList } }, select: { id: true, email: true, phone: true } })
       : Promise.resolve([] as { id: string; email: string | null }[]),
     phoneList.length
-      ? db.contact.findMany({ where: { phone: { in: phoneList } }, select: { id: true, phone: true, email: true } })
+      ? db.contact.findMany({ where: { userId, phone: { in: phoneList } }, select: { id: true, phone: true, email: true } })
       : Promise.resolve([] as { id: string; phone: string | null; email: string | null }[]),
   ]);
 
@@ -484,6 +485,7 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
 
     // 3. Genuinely new contact → create
     toCreate.push({
+      userId,
       firstName:    c.firstName?.trim() || '',
       lastName:     c.lastName?.trim()  || '',
       phone,
@@ -495,6 +497,7 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
   }
 
   // Run enrichments — patch missing email or phone onto existing contacts
+  // (safe: toEnrich only ever holds ids sourced from the userId-scoped lookups above)
   let enriched = 0;
   if (toEnrich.length > 0) {
     await Promise.all(
@@ -502,7 +505,7 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
         const data: any = {};
         if (email) data.email = email;
         if (phone) data.phone = phone;
-        return db.contact.update({ where: { id }, data }).then(() => { enriched++; }).catch(() => {});
+        return db.contact.update({ where: { id, userId }, data }).then(() => { enriched++; }).catch(() => {});
       })
     );
   }
