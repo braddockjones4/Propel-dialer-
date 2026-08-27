@@ -193,7 +193,13 @@ router.post('/verify-phone', async (req: Request, res: Response) => {
   const digits = phone.replace(/\D/g, '');
   const e164 = digits.startsWith('1') ? `+${digits}` : `+1${digits}`;
 
-  const { client } = await getTwilioClient(userId);
+  let client;
+  try {
+    ({ client } = await getTwilioClient(userId));
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+    return;
+  }
 
   // Check if already verified in Twilio
   try {

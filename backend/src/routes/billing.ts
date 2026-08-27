@@ -131,10 +131,12 @@ router.post('/webhook', async (req: Request, res: Response) => {
     const stripe = new Stripe(stripeKey, { apiVersion: '2026-05-27.dahlia' as any });
 
     let event: any;
-    if (webhookSecret && req.headers['stripe-signature']) {
+    if (webhookSecret) {
+      const signature = req.headers['stripe-signature'];
+      if (!signature) { res.status(400).json({ error: 'Missing Stripe signature' }); return; }
       event = stripe.webhooks.constructEvent(
         (req as any).rawBody || req.body,
-        req.headers['stripe-signature'] as string,
+        signature as string,
         webhookSecret
       );
     } else {

@@ -328,13 +328,13 @@ router.post('/voicemail-drop', validateTwilioSig, async (req: Request, res: Resp
   const { callSid } = req.body;
   if (!callSid) { res.status(400).json({ error: 'callSid required' }); return; }
 
-  const userId = (req as any).user?.id as string | undefined;
-  const { client, creds } = await getTwilioClient(userId);
-  const vmScript = process.env.VOICEMAIL_SCRIPT ||
-    `Hi, this is ${creds.agentName} calling about your property. ` +
-    `I'd love to connect — please call me back at ${creds.agentPhone || 'my office'}. Thank you and have a great day!`;
-
   try {
+    const userId = (req as any).user?.id as string | undefined;
+    const { client, creds } = await getTwilioClient(userId);
+    const vmScript = process.env.VOICEMAIL_SCRIPT ||
+      `Hi, this is ${creds.agentName} calling about your property. ` +
+      `I'd love to connect — please call me back at ${creds.agentPhone || 'my office'}. Thank you and have a great day!`;
+
     const dropTwiml = `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`;
     await client.calls(callSid).update({ twiml: dropTwiml });
     res.json({ dropped: true });
