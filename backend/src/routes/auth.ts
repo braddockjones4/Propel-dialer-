@@ -285,6 +285,10 @@ router.post('/forgot-password', forgotLimiter, async (req: Request, res: Respons
         req2.on('error', resolve);
         req2.write(body); req2.end();
       });
+    } else if (process.env.NODE_ENV === 'production') {
+      // Don't log the live reset token in production — SendGrid must be configured
+      // for password reset to actually reach the user.
+      console.warn(`[Auth] Password reset requested for ${email} but SendGrid isn't configured — email not sent`);
     } else {
       console.log(`[Auth] Password reset link for ${email}: ${resetUrl}`);
     }

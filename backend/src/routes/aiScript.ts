@@ -23,9 +23,9 @@ interface AiScript {
   tip: string;
 }
 
-async function generateScript(contactId: string): Promise<AiScript> {
-  const contact = await prisma.contact.findUnique({
-    where:   { id: contactId },
+async function generateScript(contactId: string, userId: string): Promise<AiScript> {
+  const contact = await prisma.contact.findFirst({
+    where:   { id: contactId, userId } as any,
     include: {
       calls: { orderBy: { calledAt: 'desc' }, take: 5 },
       messages: { where: { direction: 'inbound' }, orderBy: { sentAt: 'desc' }, take: 3 },
@@ -150,7 +150,8 @@ function getStaticScript(source: string, firstName: string, agentName: string, a
 // ── GET /api/ai-script/:contactId ─────────────────────────────────────────────
 router.get('/:contactId', async (req: Request, res: Response) => {
   const { contactId } = req.params;
-  const forceRefresh  = req.query.refresh === 'true';
+  const userId        = (req as any).user?.id as string;
+  const forceRefresh   = req.query.refresh === 'true';
 
   // Check cache
   const cached = scriptCache.get(contactId);
@@ -160,7 +161,7 @@ router.get('/:contactId', async (req: Request, res: Response) => {
   }
 
   try {
-    const script = await generateScript(contactId);
+    const script = await generateScript(contactId, userId);
     scriptCache.set(contactId, { script, generatedAt: Date.now() });
     res.json({ ...script, cached: false });
   } catch (err: any) {
