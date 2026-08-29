@@ -419,14 +419,18 @@ webhooks.post('/vm-twiml', (req: Request, res: Response) => {
 webhooks.post('/vm-done', async (req: Request, res: Response) => {
   const { userId } = req.query as { userId?: string };
   const { RecordingUrl, RecordingSid } = req.body;
-  if (RecordingUrl && userId) {
-    const url = RecordingUrl.endsWith('.mp3') ? RecordingUrl : `${RecordingUrl}.mp3`;
-    await prisma.dialerSettings.upsert({
-      where: { userId },
-      create: { userId, voicemailUrl: url, voicemailSid: RecordingSid },
-      update: { voicemailUrl: url, voicemailSid: RecordingSid },
-    });
-    io.emit('vm-recorded', { url, userId });
+  try {
+    if (RecordingUrl && userId) {
+      const url = RecordingUrl.endsWith('.mp3') ? RecordingUrl : `${RecordingUrl}.mp3`;
+      await prisma.dialerSettings.upsert({
+        where: { userId },
+        create: { userId, voicemailUrl: url, voicemailSid: RecordingSid },
+        update: { voicemailUrl: url, voicemailSid: RecordingSid },
+      });
+      io.emit('vm-recorded', { url, userId });
+    }
+  } catch (e: any) {
+    console.error('[vm-done] failed to save recording:', e.message);
   }
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.say({ voice: 'Polly.Joanna' }, 'Voicemail saved. You can hang up now.');
