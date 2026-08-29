@@ -440,14 +440,19 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
   const saveNotes = async () => {
     if (!selected) return;
     setSaving(true);
-    await authFetch(`${API_BASE}/contacts/${selected.id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ notes: editNotes }),
-    });
-    setSaving(false);
-    setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, notes: editNotes } : c));
-    setSelected(prev => prev ? { ...prev, notes: editNotes } : null);
-    toast.success('Notes saved');
+    try {
+      await authFetch(`${API_BASE}/contacts/${selected.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ notes: editNotes }),
+      });
+      setContacts(prev => prev.map(c => c.id === selected.id ? { ...c, notes: editNotes } : c));
+      setSelected(prev => prev ? { ...prev, notes: editNotes } : null);
+      toast.success('Notes saved');
+    } catch {
+      toast.error('Network error — could not save notes');
+    } finally {
+      setSaving(false);
+    }
   };
 
   // ── Reassign group from detail panel ─────────────────────────────────────

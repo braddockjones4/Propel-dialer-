@@ -73,26 +73,35 @@ export default function Email() {
   const handleSend = async () => {
     if (!subject || !body) { setSendMsg('Subject and body required'); return; }
     setSending(true); setSendMsg('');
-    const r = await authFetch(`${API_BASE}/email/send`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ toEmail, contactId: contactId || undefined, subject, body }),
-    });
-    const data = await r.json();
-    setSending(false);
-    if (r.ok) { setSendMsg('Email sent ✓'); setSubject(''); setBody(''); loadLogs(); }
-    else      { setSendMsg(data.error || 'Failed'); }
+    try {
+      const r = await authFetch(`${API_BASE}/email/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toEmail, contactId: contactId || undefined, subject, body }),
+      });
+      const data = await r.json();
+      if (r.ok) { setSendMsg('Email sent ✓'); setSubject(''); setBody(''); loadLogs(); }
+      else      { setSendMsg(data.error || 'Failed'); }
+    } catch {
+      setSendMsg('Failed to send — check your connection');
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleSaveTpl = async () => {
     if (!editTpl?.name || !editTpl?.subject || !editTpl?.body) return;
     setSaving(true);
-    if (editTpl.id) {
-      await authFetch(`${API_BASE}/email/templates/${editTpl.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
-    } else {
-      await authFetch(`${API_BASE}/email/templates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
+    try {
+      if (editTpl.id) {
+        await authFetch(`${API_BASE}/email/templates/${editTpl.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
+      } else {
+        await authFetch(`${API_BASE}/email/templates`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editTpl) });
+      }
+      setEditTpl(null); loadTemplates();
+    } finally {
+      setSaving(false);
     }
-    setSaving(false); setEditTpl(null); loadTemplates();
   };
 
   const deleteTpl = async (id: string) => {
