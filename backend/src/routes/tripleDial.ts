@@ -41,8 +41,9 @@ router.post('/start', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Contacts required' }); return;
   }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, NGROK_URL } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID || !NGROK_URL) {
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
+  const baseUrl = process.env.BACKEND_URL || process.env.NGROK_URL;
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID || !baseUrl) {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
 
@@ -57,12 +58,12 @@ router.post('/start', async (req: Request, res: Response) => {
       const call = await client.calls.create({
         to:   contact.phone,
         from: localCallerId,
-        url:  `${NGROK_URL}/api/triple-dial/twiml?sessionId=${sessionId}&contactId=${encodeURIComponent(contact.contactId)}`,
-        statusCallback:       `${NGROK_URL}/api/triple-dial/status-update`,
+        url:  `${baseUrl}/api/triple-dial/twiml?sessionId=${sessionId}&contactId=${encodeURIComponent(contact.contactId)}`,
+        statusCallback:       `${baseUrl}/api/triple-dial/status-update`,
         statusCallbackMethod: 'POST',
         statusCallbackEvent:  ['initiated', 'ringing', 'answered', 'completed'],
         machineDetection:           'Enable',
-        asyncAmdStatusCallback:       `${NGROK_URL}/api/triple-dial/amd`,
+        asyncAmdStatusCallback:       `${baseUrl}/api/triple-dial/amd`,
         asyncAmdStatusCallbackMethod: 'POST',
       } as any);
 
