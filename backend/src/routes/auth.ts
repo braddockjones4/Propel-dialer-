@@ -285,6 +285,8 @@ router.post('/forgot-password', forgotLimiter, async (req: Request, res: Respons
         req2.on('error', resolve);
         req2.write(body); req2.end();
       });
+    } else if (process.env.NODE_ENV === 'production') {
+      console.warn(`[Auth] SENDGRID not configured — password reset email not sent for ${email}`);
     } else {
       console.log(`[Auth] Password reset link for ${email}: ${resetUrl}`);
     }
