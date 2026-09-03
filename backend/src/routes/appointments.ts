@@ -52,6 +52,10 @@ router.post('/', async (req: Request, res: Response) => {
     const { contactId, title, scheduledAt, duration, location, notes, sendSms } = req.body;
     if (!contactId || !scheduledAt) { res.status(400).json({ error: 'contactId and scheduledAt required' }); return; }
 
+    const userId = (req as any).user?.id;
+    const ownedContact = await prisma.contact.findFirst({ where: { id: contactId, userId } as any, select: { id: true } });
+    if (!ownedContact) { res.status(404).json({ error: 'Contact not found' }); return; }
+
     const appt = await db.appointment.create({
       data: { contactId, title: title || 'Listing Appointment', scheduledAt: new Date(scheduledAt), duration: duration || 60, location, notes },
       include: { contact: true },
@@ -60,8 +64,7 @@ router.post('/', async (req: Request, res: Response) => {
     await prisma.contact.update({ where: { id: contactId }, data: { status: 'appointment' } });
 
     if (sendSms !== false) {
-      const apptUserId = (req as any).user?.id as string | undefined;
-      const { client: apptClient, creds: apptCreds } = await getTwilioClient(apptUserId);
+      const { client: apptClient, creds: apptCreds } = await getTwilioClient(userId);
       if (apptCreds.callerId) {
         try {
           const date = new Date(scheduledAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -85,6 +88,10 @@ router.post('/', async (req: Request, res: Response) => {
 // ── PATCH /api/appointments/:id ───────────────────────────────────────────────
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id;
+    const owned = await db.appointment.findFirst({ where: { id: req.params.id, contact: { userId } }, select: { id: true } });
+    if (!owned) { res.status(404).json({ error: 'Appointment not found' }); return; }
+
     const { title, scheduledAt, duration, location, notes, status } = req.body;
     const appt = await db.appointment.update({
       where: { id: req.params.id },
@@ -108,6 +115,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
 // ── DELETE /api/appointments/:id ──────────────────────────────────────────────
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id;
+    const owned = await db.appointment.findFirst({ where: { id: req.params.id, contact: { userId } }, select: { id: true } });
+    if (!owned) { res.status(404).json({ error: 'Appointment not found' }); return; }
+
     await db.appointment.delete({ where: { id: req.params.id } });
     res.json({ deleted: true });
   } catch (e: any) {
