@@ -411,6 +411,7 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
   }
 
   const group = (groupName?.trim() || 'Gmail Contacts');
+  const userId = req.user.id as string;
 
   function normalizePhone(raw: string | null | undefined): string | null {
     if (!raw) return null;
@@ -427,12 +428,14 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
 
   // Look up existing contacts by phone (need id + email so we know if they're missing an email)
   // Look up existing contacts by email (to detect true duplicates)
+  // Scoped to the caller's own contacts — an unscoped lookup would match another
+  // account's contacts and enrich/dedupe against them.
   const [existByEmail, existByPhone] = await Promise.all([
     emailList.length
-      ? db.contact.findMany({ where: { email: { in: emailList } }, select: { id: true, email: true, phone: true } })
+      ? db.contact.findMany({ where: { userId, email: { in: emailList } }, select: { id: true, email: true, phone: true } })
       : Promise.resolve([] as { id: string; email: string | null }[]),
     phoneList.length
-      ? db.contact.findMany({ where: { phone: { in: phoneList } }, select: { id: true, phone: true, email: true } })
+      ? db.contact.findMany({ where: { userId, phone: { in: phoneList } }, select: { id: true, phone: true, email: true } })
       : Promise.resolve([] as { id: string; phone: string | null; email: string | null }[]),
   ]);
 
@@ -484,6 +487,7 @@ router.post('/import-contacts', requireAuth, async (req: any, res: Response) => 
 
     // 3. Genuinely new contact → create
     toCreate.push({
+      userId,
       firstName:    c.firstName?.trim() || '',
       lastName:     c.lastName?.trim()  || '',
       phone,
