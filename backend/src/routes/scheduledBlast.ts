@@ -86,18 +86,22 @@ export async function fireScheduledBlast(blastId: string): Promise<void> {
 
 // ─── Cron: check every minute for blasts that are due ────────────────────────
 cron.schedule('* * * * *', async () => {
-  const due = await prisma.scheduledBlast.findMany({
-    where: {
-      status:      'pending',
-      scheduledAt: { lte: new Date() },
-    },
-  });
+  try {
+    const due = await prisma.scheduledBlast.findMany({
+      where: {
+        status:      'pending',
+        scheduledAt: { lte: new Date() },
+      },
+    });
 
-  for (const blast of due) {
-    console.log(`[ScheduledBlast] Firing scheduled blast ${blast.id}`);
-    fireScheduledBlast(blast.id).catch(err =>
-      console.error(`[ScheduledBlast] Error firing ${blast.id}:`, err)
-    );
+    for (const blast of due) {
+      console.log(`[ScheduledBlast] Firing scheduled blast ${blast.id}`);
+      fireScheduledBlast(blast.id).catch(err =>
+        console.error(`[ScheduledBlast] Error firing ${blast.id}:`, err)
+      );
+    }
+  } catch (e: any) {
+    console.error('[ScheduledBlast] tick error:', e.message);
   }
 });
 
