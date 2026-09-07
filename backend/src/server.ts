@@ -60,7 +60,16 @@ const PORT = process.env.PORT || 3001;
   if (!process.env.BACKEND_URL && !process.env.NGROK_URL) {
     console.warn('[startup] BACKEND_URL not set — Twilio webhooks may not work correctly');
   }
-  if (!process.env.ENCRYPTION_KEY) {
+  // JWT_SECRET and ENCRYPTION_KEY fall back to hardcoded, source-visible values elsewhere in
+  // the codebase (auth.ts, dialer.ts, icloudContacts.ts) when unset. That fallback is meant for
+  // local dev only — in production it would let anyone forge login tokens or read "encrypted"
+  // iCloud credentials straight from the source, so refuse to boot instead of just warning.
+  if (process.env.NODE_ENV === 'production') {
+    const insecureIfMissing = ['JWT_SECRET', 'ENCRYPTION_KEY'].filter(k => !process.env[k]);
+    if (insecureIfMissing.length) {
+      throw new Error(`[startup] Refusing to start in production without: ${insecureIfMissing.join(', ')} (these fall back to hardcoded, insecure defaults)`);
+    }
+  } else if (!process.env.ENCRYPTION_KEY) {
     console.warn('[startup] ENCRYPTION_KEY not set — iCloud credentials using fallback key (insecure)');
   }
 })();

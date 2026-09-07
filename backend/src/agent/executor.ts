@@ -171,14 +171,16 @@ export async function executeActionSpec(spec: ActionSpec, contactId: string): Pr
       });
 
       // Notify front-end so the kanban board updates in real time
-      try {
-        io.emit('agent-group', {
-          contactId,
-          groupId: group.id,
-          groupName,
-          action: 'assign',
-        });
-      } catch { /* socket optional */ }
+      if (group) {
+        try {
+          io.emit('agent-group', {
+            contactId,
+            groupId: group.id,
+            groupName,
+            action: 'assign',
+          });
+        } catch { /* socket optional */ }
+      }
 
       return `Assigned to group "${groupName}"`;
     }

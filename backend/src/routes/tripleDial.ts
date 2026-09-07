@@ -161,7 +161,7 @@ router.post('/amd', async (req: Request, res: Response) => {
         try {
           const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, AGENT_NAME, AGENT_PHONE } = process.env;
           const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-          const vmScript = `Hi ${callRecord.firstName}, this is ${AGENT_NAME || 'Braddock'} calling about your property. Please call me back at ${AGENT_PHONE || 'my office'}. Thank you!`;
+          const vmScript = `Hi ${callRecord.firstName}, this is ${AGENT_NAME || 'Agent'} calling about your property. Please call me back at ${AGENT_PHONE || 'my office'}. Thank you!`;
           const dropTwiml = `<Response><Say voice="Polly.Joanna">${vmScript}</Say><Hangup/></Response>`;
           await client.calls(CallSid).update({ twiml: dropTwiml });
         } catch (err: any) {
