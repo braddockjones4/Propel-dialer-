@@ -46,7 +46,7 @@ export async function fireScheduledBlast(blastId: string): Promise<void> {
         lastName:   contact.lastName,
         address:    contact.address || 'your property',
         city:       contact.city || '',
-        agentName:  AGENT_NAME || 'Braddock',
+        agentName:  AGENT_NAME || 'Agent',
         agentPhone: AGENT_PHONE || TWILIO_CALLER_ID,
       });
 
