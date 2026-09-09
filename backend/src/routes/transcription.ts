@@ -165,19 +165,30 @@ router.post('/:callId', async (req: Request, res: Response) => {
 
 // ── POST /api/transcription/score-all — backfill existing recordings ──────────
 router.post('/score-all', async (_req: Request, res: Response) => {
+  let calls;
   try {
-    const calls = await prisma.call.findMany({
+    calls = await prisma.call.findMany({
       where: { recordingUrl: { not: null }, transcript: null },
       take:  20,
     });
-    res.json({ queued: calls.length });
-    for (const call of calls) {
-      await transcribeAndScoreCall(call.id);
-      await new Promise(r => setTimeout(r, 2000));
-    }
   } catch (e: any) {
     res.status(500).json({ error: e.message });
+    return;
   }
+
+  res.json({ queued: calls.length });
+
+  // Run the backfill after responding — a failure here must not attempt a second response.
+  (async () => {
+    for (const call of calls) {
+      try {
+        await transcribeAndScoreCall(call.id);
+      } catch (e) {
+        console.error('[transcription] score-all failed for call', call.id, e);
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+  })();
 });
 
 export default router;
