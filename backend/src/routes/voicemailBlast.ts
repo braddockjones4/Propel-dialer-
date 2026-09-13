@@ -52,6 +52,7 @@ router.post('/start', async (req: Request, res: Response) => {
     contacts = await prisma.contact.findMany({
       where: {
         NOT: { status: 'dnc' },
+        phone: { not: null },
         ...(filter?.source ? { source: filter.source } : {}),
         ...(filter?.status ? { status: filter.status } : {}),
       },

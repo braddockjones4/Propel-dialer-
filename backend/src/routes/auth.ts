@@ -254,7 +254,7 @@ router.post('/forgot-password', forgotLimiter, async (req: Request, res: Respons
 
     // Generate a signed reset token (expires in 1 hour)
     const resetToken = jwt.sign({ userId: user.id, type: 'reset' }, JWT_SECRET, { expiresIn: '1h' });
-    const frontendUrl = process.env.FRONTEND_URL || 'https://compasssolutions.com';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://propel-dialer.vercel.app';
     const resetUrl = `${frontendUrl}?reset=${resetToken}`;
 
     const { SENDGRID_API_KEY, SENDGRID_FROM_EMAIL, AGENT_NAME } = process.env;
@@ -285,8 +285,10 @@ router.post('/forgot-password', forgotLimiter, async (req: Request, res: Respons
         req2.on('error', resolve);
         req2.write(body); req2.end();
       });
-    } else {
+    } else if (process.env.NODE_ENV !== 'production') {
       console.log(`[Auth] Password reset link for ${email}: ${resetUrl}`);
+    } else {
+      console.error('[Auth] SENDGRID_API_KEY/SENDGRID_FROM_EMAIL not set — cannot deliver password reset email');
     }
 
     res.json({ message: 'If that email exists, a reset link has been sent.' });
