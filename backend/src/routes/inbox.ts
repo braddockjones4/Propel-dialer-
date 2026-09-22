@@ -96,12 +96,14 @@ export async function handleInboundSms(req: Request, res: Response) {
   const { From, To, Body, MessageSid } = req.body;
   console.log(`[SMS] Inbound from ${From}: ${Body}`);
 
+  try {
   const contact = await prisma.contact.findFirst({ where: { phone: From } });
 
   // ── STOP / Opt-out compliance (TCPA) ─────────────────────────────────────
   const STOP_KEYWORDS = ['STOP','STOPALL','UNSUBSCRIBE','CANCEL','END','QUIT'];
   const START_KEYWORDS = ['START','YES','UNSTOP'];
-  const normalized = Body.trim().toUpperCase();
+  // Body is absent on some inbound webhooks (e.g. MMS-only messages) — Twilio still POSTs those here.
+  const normalized = (Body || '').trim().toUpperCase();
 
   if (STOP_KEYWORDS.includes(normalized)) {
     console.log(`[OPT-OUT] ${From} opted out — marking DNC`);
@@ -172,6 +174,10 @@ export async function handleInboundSms(req: Request, res: Response) {
   } catch { /* socket may not be init yet */ }
 
   res.type('text/xml').send('<Response/>');
+  } catch (e: any) {
+    console.error('[inbox] handleInboundSms:', e.message);
+    res.type('text/xml').send('<Response/>');
+  }
 }
 
 export default router;
