@@ -36,7 +36,7 @@ import icloudContactsRoutes from './routes/icloudContacts';
 import promoRoutes from './routes/promo';
 import billingRoutes from './routes/billing';
 import teamRoutes from './routes/team';
-import dialerRoutes, { webhooks as dialerWebhooks } from './routes/dialer';
+import dialerRoutes, { webhooks as dialerWebhooks, requireTwilioSignature } from './routes/dialer';
 import settingsRoutes from './routes/settings';
 import agentRoutes from './routes/agent';
 import agentChatRoutes from './routes/agentChat';
@@ -103,7 +103,7 @@ app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 app.post('/api/twilio/token',  requireAuth, twilioRoutes);
 // Public Twilio webhooks (no auth — called by Twilio servers — Twilio calls these, not the browser)
 app.use('/api/twilio',         twilioRoutes);
-app.post('/api/twilio/sms-inbound', handleInboundSms);
+app.post('/api/twilio/sms-inbound', requireTwilioSignature, handleInboundSms); // SECURITY: only Twilio can deliver inbound texts
 
 // iCloud routes MUST be before contactRoutes — contactRoutes has /:id wildcard that would swallow /icloud-*
 app.use('/api/contacts',       requireAuth,  icloudContactsRoutes);
