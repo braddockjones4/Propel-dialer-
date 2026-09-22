@@ -39,14 +39,20 @@ Key variables needed:
 - `TWILIO_TWIML_APP_SID`
 - `TWILIO_CALLER_ID`
 - `DATABASE_URL`
+- `DIRECT_URL`
 - `JWT_SECRET`
+- `FRONTEND_URL`
 - `AGENT_NAME`
 - `AGENT_PHONE`
+- `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `ENCRYPTION_KEY`
 - `SENDGRID_API_KEY`
 - `SENDGRID_FROM_EMAIL`
 - `NODE_ENV` = `production`
-- `NGROK_URL` = `https://propel-dialer-backend.onrender.com`
+- `BACKEND_URL` = `https://propel-dialer-backend.onrender.com` (code also accepts the legacy name `NGROK_URL`)
 
 ---
 
