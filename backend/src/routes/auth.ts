@@ -107,6 +107,7 @@ export function requirePlan(...allowed: string[]) {
 
 // ── POST /api/auth/register ───────────────────────────────────────────────────
 router.post('/register', registerLimiter, async (req: Request, res: Response) => {
+  if (process.env.ALLOW_SIGNUP !== 'true') { res.status(403).json({ error: 'Propel is invite-only. Please send an inquiry from the home page and we will set up your account.' }); return; } // SECURITY: set ALLOW_SIGNUP=true on Render only while onboarding a client
   try {
     const { email, password, name } = req.body;
     if (!email || !password) { res.status(400).json({ error: 'email and password required' }); return; }
@@ -208,6 +209,7 @@ const demoLimiter = rateLimit({
   standardHeaders: true, legacyHeaders: false,
 });
 router.get('/demo', demoLimiter, async (_req: Request, res: Response) => {
+  if (process.env.ALLOW_DEMO !== 'true') { res.status(403).json({ error: 'The demo is not available right now.' }); return; } // SECURITY: set ALLOW_DEMO=true on Render to enable ?demo logins
   try {
     const DEMO_EMAIL = 'demo@compasssolutions.com';
     const DEMO_NAME  = 'Demo User';
@@ -333,3 +335,8 @@ async function sendResetEmail(user: any): Promise<void> { const resetToken = jwt
 router.post('/direct-reset', directResetLimiter, async (req: Request, res: Response) => { try { const email = String(req.body?.email || '').toLowerCase().trim(); const user = email ? await db.user.findUnique({ where: { email } }) : null; if (user) await sendResetEmail(user); } catch (e: any) { console.error('[Auth] direct-reset:', e.message); } res.json({ error: 'If an account exists for that email, we just sent it a password reset link. Check your inbox.' }); });
 
 export default router;
+// ── POST /api/auth/inquiry ── public "Inquire" form on the landing page. Saves the lead to the Inquiry table and emails it to INQUIRY_TO_EMAIL.
+const inquiryLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: { error: 'Too many inquiries. Please try again later.' }, standardHeaders: true, legacyHeaders: false });
+const cleanField = (v: any, n: number) => String(v ?? '').replace(/[<>&]/g, '').trim().slice(0, n);
+router.post('/inquiry', inquiryLimiter, async (req: Request, res: Response) => { try { if (req.body?.website) { res.json({ ok: true }); return; } const name = cleanField(req.body?.name, 120); const email = cleanField(req.body?.email, 200); const phone = cleanField(req.body?.phone, 40); const company = cleanField(req.body?.company, 200); const message = cleanField(req.body?.message, 3000); if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { res.status(400).json({ error: 'Please enter your name and a valid email.' }); return; } await db.$executeRawUnsafe('INSERT INTO "Inquiry" ("id", "name", "email", "phone", "company", "message") VALUES ($1, $2, $3, $4, $5, $6)', crypto.randomUUID(), name, email, phone, company, message).catch((e: any) => console.error('[Inquiry] save failed:', e.message)); console.log(`[Inquiry] ${name} <${email}> ${phone} ${company}: ${message}`); const to = process.env.INQUIRY_TO_EMAIL || 'braddockjones4@icloud.com'; const { SENDGRID_API_KEY, SENDGRID_FROM_EMAIL } = process.env; if (SENDGRID_API_KEY && SENDGRID_FROM_EMAIL) { const body = JSON.stringify({ personalizations: [{ to: [{ email: to }] }], from: { email: SENDGRID_FROM_EMAIL, name: 'Propel Dialer' }, reply_to: { email, name }, subject: `New Propel inquiry: ${name}`, content: [{ type: 'text/plain', value: `Name: ${name}\nEmail: ${email}\nPhone: ${phone}\nBrokerage: ${company}\n\n${message}` }] }); const https = await import('https'); await new Promise<void>((resolve) => { const req2 = (https as any).request({ hostname: 'api.sendgrid.com', path: '/v3/mail/send', method: 'POST', headers: { 'Authorization': 'Bearer ' + SENDGRID_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, (r: any) => { if (r.statusCode >= 300) console.error('[Inquiry] SendGrid status', r.statusCode); r.resume(); r.on('end', resolve); }); req2.on('error', (e: any) => { console.error('[Inquiry] email failed:', e.message); resolve(); }); req2.write(body); req2.end(); }); } else { console.warn('[Inquiry] SendGrid not configured, inquiry saved to database only'); } res.json({ ok: true }); } catch (e: any) { console.error('[Inquiry] error:', e.message); res.status(500).json({ error: 'Something went wrong. Please try again.' }); } });
+
