@@ -38,7 +38,9 @@ const forgotLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const JWT_SECRET  = process.env.JWT_SECRET || 'propel-dialer-dev-secret-change-in-prod';
+// SECURITY: never fall back to a public default secret in production (anyone could forge logins).
+const JWT_SECRET: string = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'propel-dialer-dev-secret-change-in-prod');
+if (!JWT_SECRET) throw new Error('JWT_SECRET env var must be set in production');
 const JWT_EXPIRES = '30d';
 
 // ── User cache (M11) — avoids a DB hit on every authenticated request ─────────
@@ -321,34 +323,13 @@ router.post('/reset-password', async (req: Request, res: Response) => {
   }
 });
 
+// ── POST /api/auth/direct-reset (SECURITY FIX 2026-09) ──
+// This used to change ANY account password with only an email address (account takeover).
+// It now emails a secure, 1-hour reset link instead. Older frontends still call this route.
+const directResetLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: { error: 'Too many reset attempts. Try again in an hour.' }, standardHeaders: true, legacyHeaders: false });
+
+async function sendResetEmail(user: any): Promise<void> { const resetToken = jwt.sign({ userId: user.id, type: 'reset' }, JWT_SECRET, { expiresIn: '1h' }); const base = (process.env.FRONTEND_URL || 'https://propeldialer.com').split(',')[0].trim(); const resetUrl = `${base}?reset=${resetToken}`; const { SENDGRID_API_KEY, SENDGRID_FROM_EMAIL } = process.env; if (!SENDGRID_API_KEY || !SENDGRID_FROM_EMAIL) { console.log(`[Auth] SendGrid not configured. Password reset link for ${user.email}: ${resetUrl}`); return; } const body = JSON.stringify({ personalizations: [{ to: [{ email: user.email }] }], from: { email: SENDGRID_FROM_EMAIL, name: 'Propel Dialer' }, subject: 'Reset your Propel password', content: [{ type: 'text/html', value: `<p>Hi ${user.name || 'there'},</p><p>Click the link below to reset your Propel password. It expires in 1 hour.</p><p><a href="${resetUrl}">Reset Password</a></p><p>If you did not request this, you can ignore this email.</p>` }] }); const https = await import('https'); await new Promise<void>((resolve) => { const req2 = (https as any).request({ hostname: 'api.sendgrid.com', path: '/v3/mail/send', method: 'POST', headers: { 'Authorization': 'Bearer ' + SENDGRID_API_KEY, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } }, (r: any) => { r.resume(); r.on('end', resolve); }); req2.on('error', resolve); req2.write(body); req2.end(); }); }
+
+router.post('/direct-reset', directResetLimiter, async (req: Request, res: Response) => { try { const email = String(req.body?.email || '').toLowerCase().trim(); const user = email ? await db.user.findUnique({ where: { email } }) : null; if (user) await sendResetEmail(user); } catch (e: any) { console.error('[Auth] direct-reset:', e.message); } res.json({ error: 'If an account exists for that email, we just sent it a password reset link. Check your inbox.' }); });
+
 export default router;
-
-// ── POST /api/auth/direct-reset ───────────────────────────────────────────────
-// Password reset without email — rate-limited, safe for private single-tenant tool
-const directResetLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 5,
-  message: { error: 'Too many reset attempts. Try again in an hour.' },
-  standardHeaders: true, legacyHeaders: false,
-});
-
-router.post('/direct-reset', directResetLimiter, async (req: Request, res: Response) => {
-  try {
-    const { email, newPassword } = req.body;
-    if (!email || !newPassword) { res.status(400).json({ error: 'Email and new password required' }); return; }
-    if (newPassword.length < 6) { res.status(400).json({ error: 'Password must be at least 6 characters' }); return; }
-
-    const user = await db.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (!user) { res.status(404).json({ error: 'No account found with that email' }); return; }
-
-    const passwordHash = await bcrypt.hash(newPassword, 12);
-    const updated = await db.user.update({ where: { id: user.id }, data: { passwordHash } });
-    invalidateUserCache(user.id);
-
-    const token = jwt.sign({ userId: updated.id }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-    res.json({ token, user: safeUser(updated) });
-  } catch (e: any) {
-    console.error('[Auth] direct-reset:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
