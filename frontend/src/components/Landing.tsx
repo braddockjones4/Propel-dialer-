@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import InquiryForm from './InquiryForm';
 
 interface Props { onSignIn: () => void }
 
@@ -67,6 +68,11 @@ export default function Landing({ onSignIn }: Props) {
         >
           Sign In
         </button>
+
+        {/* Inquiry form — new clients reach out here; accounts are invite-only */}
+                <div style={{ width: '100%', display: 'flex', justifyContent: 'center', marginTop: 56 }}>
+                            <InquiryForm />
+                </div>
       </div>
 
       {/* Footer */}
