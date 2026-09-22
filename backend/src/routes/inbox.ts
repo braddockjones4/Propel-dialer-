@@ -60,35 +60,41 @@ router.get('/:contactId', async (req: Request, res: Response) => {
 
 // POST /api/inbox/:contactId/reply — send SMS to a contact
 router.post('/:contactId/reply', async (req: Request, res: Response) => {
-  const { body } = req.body;
-  if (!body?.trim()) { res.status(400).json({ error: 'Body required' }); return; }
+  try {
+    const { body } = req.body;
+    if (!body?.trim()) { res.status(400).json({ error: 'Body required' }); return; }
 
-  const userId = (req as any).user?.id as string | undefined;
-  const contact = await prisma.contact.findFirst({ where: { id: req.params.contactId, userId } as any });
-  if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
+    const userId = (req as any).user?.id as string | undefined;
+    const contact = await prisma.contact.findFirst({ where: { id: req.params.contactId, userId } as any });
+    if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
+    if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
 
-  const { client, creds: inboxCreds } = await getTwilioClient(userId);
-  const TWILIO_CALLER_ID = inboxCreds.callerId;
+    const { client, creds: inboxCreds } = await getTwilioClient(userId);
+    const TWILIO_CALLER_ID = inboxCreds.callerId;
 
-  const msg = await client.messages.create({
-    body,
-    from: TWILIO_CALLER_ID!,
-    to:   contact.phone!,
-  });
-
-  const saved = await prisma.message.create({
-    data: {
-      contactId:  contact.id,
-      direction:  'outbound',
+    const msg = await client.messages.create({
       body,
-      fromNumber: TWILIO_CALLER_ID!,
-      toNumber:   contact.phone!,
-      twilioSid:  msg.sid,
-      status:     'sent',
-    },
-  });
+      from: TWILIO_CALLER_ID!,
+      to:   contact.phone,
+    });
 
-  res.status(201).json(saved);
+    const saved = await prisma.message.create({
+      data: {
+        contactId:  contact.id,
+        direction:  'outbound',
+        body,
+        fromNumber: TWILIO_CALLER_ID!,
+        toNumber:   contact.phone,
+        twilioSid:  msg.sid,
+        status:     'sent',
+      },
+    });
+
+    res.status(201).json(saved);
+  } catch (e: any) {
+    console.error('[inbox] POST /:contactId/reply:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // POST /api/twilio/sms-inbound — Twilio webhook for incoming SMS
