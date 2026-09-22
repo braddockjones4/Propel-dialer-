@@ -120,8 +120,13 @@ export default function Inbox() {
     setMobileView('thread');
     setReply('');
     if (thread.contactId) {
-      const msgs = await authFetch(`${API_BASE}/inbox/${thread.contactId}`).then(r => r.json());
-      setMessages(msgs);
+      try {
+        const res = await authFetch(`${API_BASE}/inbox/${thread.contactId}`);
+        const msgs = await res.json();
+        setMessages(res.ok && Array.isArray(msgs) ? msgs : []);
+      } catch {
+        setMessages([]);
+      }
     } else {
       setMessages([thread.lastMessage]);
     }
@@ -131,16 +136,21 @@ export default function Inbox() {
   const sendReply = async () => {
     if (!reply.trim() || !selected?.contactId) return;
     setSending(true);
-    const msg = await authFetch(`${API_BASE}/inbox/${selected.contactId}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: reply }),
-    }).then(r => r.json());
-    setMessages(prev => [...prev, msg]);
-    setReply('');
-    setSending(false);
-    await loadThreads(true);
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    try {
+      const res = await authFetch(`${API_BASE}/inbox/${selected.contactId}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: reply }),
+      });
+      const msg = await res.json();
+      if (!res.ok) return;
+      setMessages(prev => [...prev, msg]);
+      setReply('');
+      await loadThreads(true);
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    } finally {
+      setSending(false);
+    }
   };
 
   const draftWithAi = async () => {
@@ -173,20 +183,24 @@ export default function Inbox() {
   const sendNewMessage = async () => {
     if (!composeContact || !composeBody.trim()) return;
     setSending(true);
-    await authFetch(`${API_BASE}/inbox/${composeContact.id}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: composeBody }),
-    }).then(r => r.json());
-    setComposing(false);
-    setComposeBody('');
-    setComposeContact(null);
-    setSending(false);
-    await loadThreads(false);
-    // Open the thread we just created
-    const updated: Thread[] = await authFetch(`${API_BASE}/inbox`).then(r => r.json()).catch(() => []);
-    const newThread = updated.find(t => t.contactId === composeContact.id);
-    if (newThread) openThread(newThread);
+    try {
+      const res = await authFetch(`${API_BASE}/inbox/${composeContact.id}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: composeBody }),
+      });
+      if (!res.ok) return;
+      setComposing(false);
+      setComposeBody('');
+      setComposeContact(null);
+      await loadThreads(false);
+      // Open the thread we just created
+      const updated: Thread[] = await authFetch(`${API_BASE}/inbox`).then(r => r.json()).catch(() => []);
+      const newThread = updated.find(t => t.contactId === composeContact.id);
+      if (newThread) openThread(newThread);
+    } finally {
+      setSending(false);
+    }
   };
 
   const filteredContacts = contacts.filter(c =>
