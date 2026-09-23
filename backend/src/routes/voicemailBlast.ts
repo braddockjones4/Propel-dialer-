@@ -34,6 +34,7 @@ const activeBlasts = new Map<string, VmBlast>();
 
 // ── POST /api/voicemail-blast/start ──────────────────────────────────────────
 router.post('/start', async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id as string | undefined;
   const { script, filter, concurrency = 5 } = req.body as {
     script: string;
     filter?: { source?: string; status?: string };
@@ -51,10 +52,11 @@ router.post('/start', async (req: Request, res: Response) => {
   try {
     contacts = await prisma.contact.findMany({
       where: {
+        userId,
         NOT: { status: 'dnc' },
         ...(filter?.source ? { source: filter.source } : {}),
         ...(filter?.status ? { status: filter.status } : {}),
-      },
+      } as any,
       take: 500,
     });
   } catch (e: any) {

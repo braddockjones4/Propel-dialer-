@@ -345,11 +345,11 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   return { contacts: withPhone, noPhone, totalFetched: allVCards.length };
 }
 
-async function importContacts(contacts: Record<string, string>[], noPhone = 0) {
+async function importContacts(contacts: Record<string, string>[], noPhone = 0, userId?: string) {
   if (!contacts.length) return { imported: 0, skipped: 0, total: 0, noPhone };
   const phones = contacts.map(c => c.phone);
-  const existingCount = await prisma.contact.count({ where: { phone: { in: phones } } });
-  const result = await (prisma as any).contact.createMany({ data: contacts, skipDuplicates: true });
+  const existingCount = await prisma.contact.count({ where: { userId, phone: { in: phones } } as any });
+  const result = await (prisma as any).contact.createMany({ data: contacts.map(c => ({ ...c, userId })), skipDuplicates: true });
   return { imported: result.count, skipped: existingCount, total: contacts.length, noPhone };
 }
 
@@ -371,10 +371,10 @@ router.post('/icloud-import', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'Apple ID and App-Specific Password are required.' }); return;
   }
   try {
+    const userId = (req as any).user?.id;
     const { contacts, noPhone, totalFetched } = await fetchIcloudContacts(appleId.trim(), appPassword.trim());
-    const result   = await importContacts(contacts, noPhone);
+    const result   = await importContacts(contacts, noPhone, userId);
     if (saveCredentials) {
-      const userId = (req as any).user?.id;
       if (userId) {
         try {
           const encrypted = encrypt(appPassword.trim());
@@ -407,7 +407,7 @@ router.post('/icloud-sync', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'No iCloud account connected. Set up iCloud sync first.' }); return;
     }
     const { contacts, noPhone, totalFetched } = await fetchIcloudContacts(s.icloudEmail, decrypt(s.icloudAppPwd));
-    const syncResult = await importContacts(contacts, noPhone);
+    const syncResult = await importContacts(contacts, noPhone, userId);
     res.json({ ...syncResult, totalFetched });
   } catch (err: any) {
     if (err?.message === 'AUTH_FAILED') {

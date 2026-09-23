@@ -70,6 +70,7 @@ function interpolate(template: string, vars: Record<string, string>): string {
 // ── POST /api/email/send ──────────────────────────────────────────────────────
 router.post('/send', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string | undefined;
     const { contactId, subject, body, templateId } = req.body;
     let finalSubject = subject;
     let finalBody    = body;
@@ -83,7 +84,7 @@ router.post('/send', async (req: Request, res: Response) => {
     let toEmail = req.body.toEmail;
     let contact: any = null;
     if (contactId) {
-      contact = await prisma.contact.findUnique({ where: { id: contactId } });
+      contact = await prisma.contact.findUnique({ where: { id: contactId, userId } as any });
       if (!contact) { res.status(404).json({ error: 'Contact not found' }); return; }
       if (!toEmail) toEmail = contact.email;
       if (!toEmail) { res.status(400).json({ error: 'Contact has no email address' }); return; }
@@ -105,15 +106,17 @@ router.post('/send', async (req: Request, res: Response) => {
 // ── POST /api/email/blast ─────────────────────────────────────────────────────
 router.post('/blast', async (req: Request, res: Response) => {
   try {
+    const userId = (req as any).user?.id as string | undefined;
     const { templateId, filter } = req.body as { templateId: string; filter?: { source?: string; status?: string } };
     const tpl = await db.emailTemplate.findUnique({ where: { id: templateId } });
     if (!tpl) { res.status(404).json({ error: 'Template not found' }); return; }
     const contacts = await prisma.contact.findMany({
       where: {
+        userId,
         NOT: [{ status: 'dnc' }, { email: null }],
         ...(filter?.source ? { source: filter.source } : {}),
         ...(filter?.status ? { status: filter.status } : {}),
-      },
+      } as any,
       take: 500,
     });
     const withEmail = contacts.filter(c => c.email);
