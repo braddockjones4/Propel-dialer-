@@ -46,6 +46,7 @@ Add all of these in the Render dashboard under **Environment**:
 | `AGENT_NAME` | `Braddock Jones` |
 | `AGENT_PHONE` | `+14439091704` |
 | `OPENAI_API_KEY` | From platform.openai.com |
+| `ANTHROPIC_API_KEY` | From console.anthropic.com |
 | `STRIPE_SECRET_KEY` | From Stripe dashboard |
 | `STRIPE_WEBHOOK_SECRET` | From Stripe → Webhooks |
 | `STRIPE_PRICE_STARTER` | `price_xxx` from Stripe |
@@ -108,9 +109,7 @@ In Twilio → TwiML Apps → your app:
 
 ## First Login
 
-1. Open your Vercel URL
-2. Click **Create Account** — first account is auto-admin
-3. Start dialing
+Propel is invite-only — there is no self-serve **Create Account** flow. Create the first (admin) account directly in the database, or set `ALLOW_SIGNUP=true` temporarily to sign up through the UI, then unset it.
 
 ---
 
