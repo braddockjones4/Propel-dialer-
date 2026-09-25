@@ -45,15 +45,18 @@ Add all of these in the Render dashboard under **Environment**:
 | `FRONTEND_URL` | `https://propel-dialer.vercel.app` (set after Vercel deploy) |
 | `AGENT_NAME` | `Braddock Jones` |
 | `AGENT_PHONE` | `+14439091704` |
+| `BACKEND_URL` | `https://propel-dialer-backend.onrender.com` (used for Twilio webhooks) |
 | `OPENAI_API_KEY` | From platform.openai.com |
-| `STRIPE_SECRET_KEY` | From Stripe dashboard |
-| `STRIPE_WEBHOOK_SECRET` | From Stripe → Webhooks |
-| `STRIPE_PRICE_STARTER` | `price_xxx` from Stripe |
-| `STRIPE_PRICE_PRO` | `price_xxx` from Stripe |
-| `STRIPE_PRICE_ELITE` | `price_xxx` from Stripe |
+| `ANTHROPIC_API_KEY` | From console.anthropic.com — used by the AI Agent |
+| `AGENT_MODEL` | Optional — override the default agent model |
+| `ENCRYPTION_KEY` | `openssl rand -hex 32` — encrypts stored OAuth tokens (iCloud/Google) |
+| `GOOGLE_CLIENT_ID` | From Google Cloud Console — Gmail blast & Google Contacts import |
+| `GOOGLE_CLIENT_SECRET` | From Google Cloud Console — Gmail blast & Google Contacts import |
 | `SENDGRID_API_KEY` | From SendGrid |
 | `SENDGRID_FROM_EMAIL` | `braddockjones4@icloud.com` |
 | `NODE_ENV` | `production` |
+
+Stripe billing (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_*`) is currently unused — billing routes are kept in the code but not mounted, since this is a per-client deployment rather than self-serve SaaS. `/api/promo` is still mounted and depends on `STRIPE_SECRET_KEY`; without it, promo code validation returns "Stripe not configured".
 
 ### Deploy
 Click **Deploy**. Render runs:

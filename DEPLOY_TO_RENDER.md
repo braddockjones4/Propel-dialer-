@@ -42,11 +42,15 @@ Key variables needed:
 - `JWT_SECRET`
 - `AGENT_NAME`
 - `AGENT_PHONE`
+- `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `SENDGRID_API_KEY`
 - `SENDGRID_FROM_EMAIL`
+- `FRONTEND_URL` = `https://propel-dialer.vercel.app`
+- `ENCRYPTION_KEY` (generate with `openssl rand -hex 32`)
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (only needed for Gmail blast / Google Contacts import)
 - `NODE_ENV` = `production`
-- `NGROK_URL` = `https://propel-dialer-backend.onrender.com`
+- `BACKEND_URL` = `https://propel-dialer-backend.onrender.com` (or `NGROK_URL` for local dev tunneling)
 
 ---
 
