@@ -42,7 +42,8 @@ router.post('/start', async (req: Request, res: Response) => {
 
   if (!script?.trim()) { res.status(400).json({ error: 'script required' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, NGROK_URL } = process.env;
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
+  const NGROK_URL = process.env.NGROK_URL || process.env.BACKEND_URL;
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID || !NGROK_URL) {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
