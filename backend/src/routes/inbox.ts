@@ -101,7 +101,7 @@ export async function handleInboundSms(req: Request, res: Response) {
   // ── STOP / Opt-out compliance (TCPA) ─────────────────────────────────────
   const STOP_KEYWORDS = ['STOP','STOPALL','UNSUBSCRIBE','CANCEL','END','QUIT'];
   const START_KEYWORDS = ['START','YES','UNSTOP'];
-  const normalized = Body.trim().toUpperCase();
+  const normalized = (Body || '').trim().toUpperCase();
 
   if (STOP_KEYWORDS.includes(normalized)) {
     console.log(`[OPT-OUT] ${From} opted out — marking DNC`);
