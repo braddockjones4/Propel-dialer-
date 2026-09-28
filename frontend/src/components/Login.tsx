@@ -97,7 +97,7 @@ export default function Login({ onBack }: Props) {
           {/* Mode toggle — hide on forgot/reset */}
           {(mode === 'login' || mode === 'register') && (
             <div style={{ display: 'flex', borderRadius: 8, border: '1px solid #e5e7eb', overflow: 'hidden', marginBottom: 24 }}>
-              {(['login', 'register'] as const).map(m => (
+              {(['login'] as const).map(m => (
                 <button
                   key={m}
                   onClick={() => { setMode(m); setError(''); setSuccess(''); }}
@@ -224,15 +224,9 @@ export default function Login({ onBack }: Props) {
             <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
           </div>
 
-          {(mode === 'login' || mode === 'register') && (
-            <p style={{ textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
-              {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-              <button
-                onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); setSuccess(''); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#C9A84C', fontWeight: 600, fontSize: 11 }}
-              >
-                {mode === 'login' ? 'Create one →' : 'Sign in →'}
-              </button>
+          {mode === 'login' && (
+      <p style={{ textAlign: 'center', fontSize: 11, color: '#9ca3af' }}>
+              Need an account? Send an inquiry from the home page and we will set you up.
             </p>
           )}
           {(mode === 'forgot' || mode === 'reset') && (

@@ -43,6 +43,12 @@ import { getTwilioClient, getTwilioCreds } from '../twilioClient';
 
 const router = Router();       // auth-protected endpoints
 export const webhooks = Router(); // public Twilio webhook endpoints (no auth)
+// SECURITY (2026-09): every POST webhook on `webhooks` must carry a valid Twilio signature, so nobody can fake calls or texts.
+// Emergency off-switch if calls ever break: set TWILIO_SKIP_SIGNATURE=true on Render. Skipped outside production.
+export function requireTwilioSignature(req: Request, res: Response, next: () => void): void { const token = (process.env.TWILIO_AUTH_TOKEN || '').trim(); if (process.env.NODE_ENV !== 'production' || process.env.TWILIO_SKIP_SIGNATURE === 'true' || !token) { next(); return; } const sig = req.headers['x-twilio-signature'] as string | undefined; const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`; if (!sig || !twilio.validateRequest(token, sig, url, req.body || {})) { console.warn(`[twilio-sig] Rejected unsigned or invalid webhook: ${req.method} ${req.originalUrl}`); res.status(403).send('Forbidden'); return; } next(); }
+const _webhooksPost = webhooks.post.bind(webhooks);
+(webhooks as any).post = (path: any, ...handlers: any[]) => _webhooksPost(path, requireTwilioSignature, ...handlers);
+
 
 function BACKEND() {
   return process.env.BACKEND_URL || process.env.NGROK_URL || 'https://propel-dialer-backend.onrender.com';
