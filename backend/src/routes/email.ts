@@ -21,7 +21,7 @@ async function sendEmail(to: string, subject: string, htmlBody: string, contactI
   });
 
   // Inject open-tracking pixel
-  const trackPixel = `<img src="${process.env.NGROK_URL || 'http://localhost:3001'}/api/email/track/${log.id}" width="1" height="1" style="display:none" alt="" />`;
+  const trackPixel = `<img src="${process.env.BACKEND_URL || process.env.NGROK_URL || 'http://localhost:3001'}/api/email/track/${log.id}" width="1" height="1" style="display:none" alt="" />`;
   const trackedBody = htmlBody + trackPixel;
 
   if (!SENDGRID_API_KEY || !SENDGRID_FROM_EMAIL) {
