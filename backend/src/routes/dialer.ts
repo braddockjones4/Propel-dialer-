@@ -306,8 +306,11 @@ router.post('/upload-vm', async (req: Request, res: Response) => {
 
 // ─── GET /api/dialer/vm-audio/:userId (public — called by Twilio to play VM) ──
 // C3: Protected with HMAC token to prevent unauthenticated enumeration
+// SECURITY: never fall back to a public default secret in production (anyone could forge a vm-audio token).
+const VM_TOKEN_SECRET: string = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'propel-dialer-dev-secret');
+if (!VM_TOKEN_SECRET) throw new Error('JWT_SECRET env var must be set in production');
 function makeVmToken(userId: string): string {
-  return crypto.createHmac('sha256', process.env.JWT_SECRET || 'propel-dialer-dev-secret')
+  return crypto.createHmac('sha256', VM_TOKEN_SECRET)
     .update(userId).digest('hex').slice(0, 32);
 }
 function verifyVmToken(userId: string, token: string): boolean {
