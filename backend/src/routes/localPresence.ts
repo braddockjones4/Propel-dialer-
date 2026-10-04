@@ -225,7 +225,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.get('/match/:phone', async (req: Request, res: Response) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
-    const callerId = await pickCallerId(phone);
+    const userId = (req as any).user?.id as string;
+    const callerId = await pickCallerId(phone, userId);
     const areaCode = extractAreaCode(phone);
     res.json({ phone, areaCode, callerId });
   } catch (e: any) {
