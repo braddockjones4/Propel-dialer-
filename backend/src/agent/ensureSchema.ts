@@ -61,6 +61,11 @@ const STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS "AgentAction_status_idx" ON "AgentAction"("status")`,
   `CREATE INDEX IF NOT EXISTS "AgentAction_contactId_idx" ON "AgentAction"("contactId")`,
   `CREATE INDEX IF NOT EXISTS "AgentAction_scheduledFor_idx" ON "AgentAction"("scheduledFor")`,
+  // Landing-page inquiries (added 2026-09) — locked by the RLS step below like every other table
+  `CREATE TABLE IF NOT EXISTS "Inquiry" ("id" TEXT PRIMARY KEY, "name" TEXT NOT NULL, "email" TEXT NOT NULL, "phone" TEXT, "company" TEXT, "message" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
+  // ── Security: lock every public table to Supabase's public API (added 2026-09).
+  // Backend connects directly to Postgres, so it is unaffected. Covers future tables too.
+  `DO $$ DECLARE r record; BEGIN FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND NOT rowsecurity LOOP EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', r.tablename); END LOOP; END $$`,
 ];
 
 let ensured = false;
