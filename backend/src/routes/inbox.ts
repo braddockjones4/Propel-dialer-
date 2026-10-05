@@ -93,7 +93,9 @@ router.post('/:contactId/reply', async (req: Request, res: Response) => {
 
 // POST /api/twilio/sms-inbound — Twilio webhook for incoming SMS
 export async function handleInboundSms(req: Request, res: Response) {
-  const { From, To, Body, MessageSid } = req.body;
+  const { From, To, MessageSid } = req.body;
+  // Twilio omits Body on media-only MMS, so don't assume it's a string.
+  const Body: string = req.body.Body || '';
   console.log(`[SMS] Inbound from ${From}: ${Body}`);
 
   const contact = await prisma.contact.findFirst({ where: { phone: From } });
