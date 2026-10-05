@@ -38,8 +38,8 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: AGENT_MODEL
-        sync: false
+      - key: ANTHROPIC_MODEL
+        sync: false          # optional override; defaults to claude-haiku-4-5-20251001 in code
       # Stripe removed — per-client custom deployment, no SaaS billing
       - key: SENDGRID_API_KEY
         sync: false
