@@ -54,6 +54,20 @@ Add all of these in the Render dashboard under **Environment**:
 | `SENDGRID_API_KEY` | From SendGrid |
 | `SENDGRID_FROM_EMAIL` | `braddockjones4@icloud.com` |
 | `NODE_ENV` | `production` |
+| `ANTHROPIC_API_KEY` | From console.anthropic.com (used alongside/instead of `OPENAI_API_KEY` for the AI agent) |
+| `ANTHROPIC_MODEL` | Optional — overrides the default Claude model id for the AI agent |
+| `ENCRYPTION_KEY` | 32-char key used to encrypt saved iCloud app-specific passwords. Render auto-generates this; falls back to an insecure default if unset elsewhere — always set it explicitly off-Render |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth app credentials, for Gmail contacts/blast |
+| `BACKEND_URL` | Public backend URL, used when building Twilio webhook URLs |
+
+### Optional toggles (leave unset unless you need them)
+| Variable | Effect |
+|---|---|
+| `ALLOW_SIGNUP` | Set to `true` to temporarily re-enable public account creation (invite-only otherwise) |
+| `ALLOW_DEMO` | Set to `true` to enable `?demo` logins |
+| `TWILIO_SKIP_SIGNATURE` | Emergency off-switch that skips Twilio webhook signature validation — only if calls break in production |
+| `INQUIRY_TO_EMAIL` | Where landing-page inquiry form submissions are emailed (defaults to the owner's email) |
+| `VOICEMAIL_SCRIPT` | Overrides the default voicemail TTS script |
 
 ### Deploy
 Click **Deploy**. Render runs:
