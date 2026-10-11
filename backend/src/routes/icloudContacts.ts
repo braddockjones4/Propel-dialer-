@@ -9,6 +9,10 @@ const router = Router();
 const ENC_KEY = (process.env.ENCRYPTION_KEY || 'propel-dialer-icloud-key-32chars!').slice(0, 32);
 const IV_LEN  = 16;
 
+// Verbose CardDAV discovery/sync tracing — off by default, set ICLOUD_DEBUG=true to enable
+const ICLOUD_DEBUG = process.env.ICLOUD_DEBUG === 'true';
+function log(...args: unknown[]): void { if (ICLOUD_DEBUG) console.log(...args); }
+
 function encrypt(text: string): string {
   const iv = crypto.randomBytes(IV_LEN);
   const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENC_KEY), iv);
@@ -147,20 +151,20 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
 
   // ── STEP 1: well-known → follow redirect(s) → get principal path ──────────
   // Apple's well-known endpoint only redirects — no auth needed here.
-  console.log(`[iCloud] STEP 1: discover well-known (no auth)`);
+  log(`[iCloud] STEP 1: discover well-known (no auth)`);
   const wk0 = await fetch(`${serverBase}/.well-known/carddav`, {
     method: 'PROPFIND', headers: discHdrs('0'), body: PROPFIND_PRINCIPAL, redirect: 'manual',
   });
-  console.log(`[iCloud] well-known: status=${wk0.status} location=${wk0.headers.get('location')||'none'} www-auth=${wk0.headers.get('www-authenticate')||'none'}`);
+  log(`[iCloud] well-known: status=${wk0.status} location=${wk0.headers.get('location')||'none'} www-auth=${wk0.headers.get('www-authenticate')||'none'}`);
 
   // If Apple asks for auth on the well-known itself, retry with credentials
   let wk0final = wk0;
   if (wk0.status === 401) {
-    console.log('[iCloud] well-known 401 without redirect — retrying with auth');
+    log('[iCloud] well-known 401 without redirect — retrying with auth');
     wk0final = await fetch(`${serverBase}/.well-known/carddav`, {
       method: 'PROPFIND', headers: hdrs('0'), body: PROPFIND_PRINCIPAL, redirect: 'manual',
     });
-    console.log(`[iCloud] well-known (auth retry): status=${wk0final.status}`);
+    log(`[iCloud] well-known (auth retry): status=${wk0final.status}`);
     if (wk0final.status === 401) throw new Error('AUTH_FAILED');
   }
 
@@ -168,10 +172,10 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
     if ([301, 302, 307, 308].includes(resp.status) && maxHops > 0) {
       const loc = resp.headers.get('location') || '';
       if (!loc) throw new Error('DISCOVERY_FAILED');
-      console.log(`[iCloud] redirect → ${loc}`);
+      log(`[iCloud] redirect → ${loc}`);
       try { const u = new URL(loc); serverBase = `${u.protocol}//${u.host}`; } catch { /* keep current */ }
       const r2 = await fetch(loc, { method: 'PROPFIND', headers: hdrs(depth), body, redirect: 'manual' });
-      console.log(`[iCloud] redirected PROPFIND: status=${r2.status}`);
+      log(`[iCloud] redirected PROPFIND: status=${r2.status}`);
       if (r2.status === 401) throw new Error('AUTH_FAILED');
       return followRedirects(r2, body, depth, maxHops - 1);
     }
@@ -179,18 +183,18 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   }
 
   const wk = await followRedirects(wk0final, PROPFIND_PRINCIPAL);
-  console.log(`[iCloud] principal discovery: status=${wk.status} body=${wk.text.slice(0, 300)}`);
+  log(`[iCloud] principal discovery: status=${wk.status} body=${wk.text.slice(0, 300)}`);
   if (wk.status !== 207) throw new Error('DISCOVERY_FAILED');
 
   const principalPath = firstHref(wk.text);
   if (!principalPath) throw new Error('DISCOVERY_FAILED');
   const principalUrl = principalPath.startsWith('http') ? principalPath : `${serverBase}${principalPath}`;
-  console.log(`[iCloud] principalUrl: ${principalUrl}`);
+  log(`[iCloud] principalUrl: ${principalUrl}`);
 
   // ── STEP 2: PROPFIND principal → addressbook-home-set ─────────────────────
-  console.log(`[iCloud] STEP 2: home-set`);
+  log(`[iCloud] STEP 2: home-set`);
   const hs0 = await fetch(principalUrl, { method: 'PROPFIND', headers: hdrs('0'), body: PROPFIND_HOMESET });
-  console.log(`[iCloud] home-set: status=${hs0.status}`);
+  log(`[iCloud] home-set: status=${hs0.status}`);
   if (hs0.status === 401) throw new Error('AUTH_FAILED');
   const hsXml = await hs0.text();
 
@@ -202,10 +206,10 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   while ((hsm = hsHrefRe.exec(hsBlock)) !== null) homeSetPaths.push(hsm[1].trim());
   if (!homeSetPaths.length) throw new Error('NO_ADDRESSBOOK');
   const homeSetUrls = homeSetPaths.map(p => p.startsWith('http') ? p : `${serverBase}${p}`);
-  console.log(`[iCloud] home-set URLs: ${homeSetUrls.length}`, homeSetUrls);
+  log(`[iCloud] home-set URLs: ${homeSetUrls.length}`, homeSetUrls);
 
   // ── STEP 3: PROPFIND each home-set Depth:1 → discover addressbook collections ──
-  console.log(`[iCloud] STEP 3: discover addressbooks`);
+  log(`[iCloud] STEP 3: discover addressbooks`);
   let addressbookUrls: string[] = [];
   for (const homeSetUrl of homeSetUrls) {
     const disc = await fetch(homeSetUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_RESOURCETYPE });
@@ -221,7 +225,7 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
     }
   }
   if (!addressbookUrls.length) addressbookUrls = homeSetUrls;
-  console.log(`[iCloud] addressbooks discovered: ${addressbookUrls.length}`, addressbookUrls);
+  log(`[iCloud] addressbooks discovered: ${addressbookUrls.length}`, addressbookUrls);
 
   // ── STEP 4a: Enumerate ALL contact hrefs — try sync-collection, then PROPFIND ──
   // sync-collection (RFC 6578) is designed to return ALL items without server limits
@@ -258,7 +262,7 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
           ? `<?xml version="1.0" encoding="utf-8"?><D:sync-collection xmlns:D="DAV:"><D:sync-token>${syncToken}</D:sync-token><D:sync-level>1</D:sync-level><D:prop><D:getetag/></D:prop></D:sync-collection>`
           : SYNC_COLLECTION_ETAGS;
         const r1 = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: syncBody });
-        console.log(`[iCloud] sync-collection iter ${iterations} → ${r1.status}`);
+        log(`[iCloud] sync-collection iter ${iterations} → ${r1.status}`);
         if (r1.status !== 207) break;
         const xml1 = await r1.text();
         const batch = extractHrefsFromXml(xml1, abPath);
@@ -267,39 +271,39 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
         const newToken = tokenMatch ? tokenMatch[1].trim() : '';
         let newItems = 0;
         for (const h of batch) { if (!seenHrefs.has(h)) { seenHrefs.add(h); hrefs.push(h); newItems++; } }
-        console.log(`[iCloud] sync-collection iter ${iterations}: ${batch.length} in batch, ${newItems} new, total ${hrefs.length}`);
+        log(`[iCloud] sync-collection iter ${iterations}: ${batch.length} in batch, ${newItems} new, total ${hrefs.length}`);
         // Stop if: no new token, same token as before, or no new items
         if (!newToken || newToken === syncToken || newItems === 0) break;
         syncToken = newToken;
       }
-    } catch (e) { console.log('[iCloud] sync-collection error:', e); }
-    console.log(`[iCloud] sync-collection total hrefs: ${hrefs.length}`);
+    } catch (e) { console.error('[iCloud] sync-collection error:', e); }
+    log(`[iCloud] sync-collection total hrefs: ${hrefs.length}`);
 
     // Method 2: addressbook-query REPORT requesting only etags (no address-data body)
     if (!hrefs.length) {
       try {
         const r2 = await fetch(abUrl, { method: 'REPORT', headers: hdrs('1'), body: REPORT_ALL_ETAGS });
-        console.log(`[iCloud] addressbook-query (etags) → ${r2.status}`);
+        log(`[iCloud] addressbook-query (etags) → ${r2.status}`);
         if (r2.status === 207) { hrefs = extractHrefsFromXml(await r2.text(), abPath); }
       } catch {}
-      console.log(`[iCloud] addressbook-query hrefs: ${hrefs.length}`);
+      log(`[iCloud] addressbook-query hrefs: ${hrefs.length}`);
     }
 
     // Method 3: PROPFIND Depth:1
     if (!hrefs.length) {
       try {
         const r3 = await fetch(abUrl, { method: 'PROPFIND', headers: hdrs('1'), body: PROPFIND_HREFS_ONLY });
-        console.log(`[iCloud] PROPFIND Depth:1 → ${r3.status}`);
+        log(`[iCloud] PROPFIND Depth:1 → ${r3.status}`);
         if (r3.status === 207 || r3.ok) { hrefs = extractHrefsFromXml(await r3.text(), abPath); }
       } catch {}
-      console.log(`[iCloud] PROPFIND hrefs: ${hrefs.length}`);
+      log(`[iCloud] PROPFIND hrefs: ${hrefs.length}`);
     }
 
     if (hrefs.length) abHrefMap.push({ abUrl, hrefs });
   }
 
   const totalHrefs = abHrefMap.reduce((n, e) => n + e.hrefs.length, 0);
-  console.log(`[iCloud] TOTAL hrefs across ${addressbookUrls.length} addressbook(s): ${totalHrefs}`);
+  log(`[iCloud] TOTAL hrefs across ${addressbookUrls.length} addressbook(s): ${totalHrefs}`);
 
   if (!totalHrefs) return { contacts: [], noPhone: 0, totalFetched: 0 };
 
@@ -314,7 +318,7 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
     });
   }
   const dedupedTotal = abHrefMap.reduce((n, e) => n + e.hrefs.length, 0);
-  console.log(`[iCloud] After dedup: ${dedupedTotal} unique contact hrefs`);
+  log(`[iCloud] After dedup: ${dedupedTotal} unique contact hrefs`);
 
   const BATCH = 100;
   const allVCards: string[] = [];
@@ -340,7 +344,7 @@ async function fetchIcloudContacts(appleId: string, appPassword: string): Promis
   const parsed = allVCards.map(parseVCard);
   const withPhone = parsed.filter((c): c is NonNullable<typeof c> => c !== null);
   const noPhone   = allVCards.length - withPhone.length;
-  console.log(`[iCloud] vCards: ${allVCards.length} total hrefs fetched, ${withPhone.length} with phone number, ${noPhone} without phone number`);
+  log(`[iCloud] vCards: ${allVCards.length} total hrefs fetched, ${withPhone.length} with phone number, ${noPhone} without phone number`);
 
   return { contacts: withPhone, noPhone, totalFetched: allVCards.length };
 }
