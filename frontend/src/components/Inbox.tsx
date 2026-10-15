@@ -120,8 +120,9 @@ export default function Inbox() {
     setMobileView('thread');
     setReply('');
     if (thread.contactId) {
-      const msgs = await authFetch(`${API_BASE}/inbox/${thread.contactId}`).then(r => r.json());
-      setMessages(msgs);
+      const msgs = await authFetch(`${API_BASE}/inbox/${thread.contactId}`)
+        .then(r => r.json()).catch(() => []);
+      setMessages(Array.isArray(msgs) ? msgs : []);
     } else {
       setMessages([thread.lastMessage]);
     }
@@ -131,16 +132,19 @@ export default function Inbox() {
   const sendReply = async () => {
     if (!reply.trim() || !selected?.contactId) return;
     setSending(true);
-    const msg = await authFetch(`${API_BASE}/inbox/${selected.contactId}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: reply }),
-    }).then(r => r.json());
-    setMessages(prev => [...prev, msg]);
-    setReply('');
-    setSending(false);
-    await loadThreads(true);
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    try {
+      const msg = await authFetch(`${API_BASE}/inbox/${selected.contactId}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: reply }),
+      }).then(r => r.json());
+      setMessages(prev => [...prev, msg]);
+      setReply('');
+      await loadThreads(true);
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    } finally {
+      setSending(false);
+    }
   };
 
   const draftWithAi = async () => {
