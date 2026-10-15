@@ -46,6 +46,8 @@ Add all of these in the Render dashboard under **Environment**:
 | `AGENT_NAME` | `Braddock Jones` |
 | `AGENT_PHONE` | `+14439091704` |
 | `OPENAI_API_KEY` | From platform.openai.com |
+| `ANTHROPIC_API_KEY` | From console.anthropic.com — required for AI Agent autonomous follow-ups |
+| `ANTHROPIC_MODEL` | Optional — overrides default `claude-haiku-4-5-20251001` |
 | `STRIPE_SECRET_KEY` | From Stripe dashboard |
 | `STRIPE_WEBHOOK_SECRET` | From Stripe → Webhooks |
 | `STRIPE_PRICE_STARTER` | `price_xxx` from Stripe |
