@@ -125,7 +125,7 @@ cd frontend && npm run dev
 # App at http://localhost:5173
 ```
 
-Keep `backend/.env` with `DATABASE_URL="file:./dev.db"` for local SQLite dev, or swap in the Supabase URL to develop against the live database.
+The Prisma schema is Postgres-only (`provider = "postgresql"`), so `backend/.env` needs a real Postgres `DATABASE_URL` even for local dev — either a local Postgres instance or the Supabase URL to develop against the live database. A `file:./dev.db` SQLite URL will fail schema validation.
 
 ---
 
