@@ -34,38 +34,42 @@ export default function Settings() {
   const saveAccount = async () => {
     if (!token) return;
     setSavingAcct(true);
-    const body: any = {};
-    if (name !== user?.name) body.name = name;
-    if (password) body.password = password;
-    const hasProfileChanges = Object.keys(body).length > 0;
+    try {
+      const body: any = {};
+      if (name !== user?.name) body.name = name;
+      if (password) body.password = password;
+      const hasProfileChanges = Object.keys(body).length > 0;
 
-    if (hasProfileChanges) {
-      const r = await authFetch(`${API_BASE}/auth/me`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        setSavingAcct(false);
-        toast.error(d.error || 'Update failed');
-        return;
+      if (hasProfileChanges) {
+        const r = await authFetch(`${API_BASE}/auth/me`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          toast.error(d.error || 'Update failed');
+          return;
+        }
+        setPassword('');
+        refresh();
       }
-      setPassword('');
-      refresh();
-    }
 
-    if (agentName) {
-      await authFetch(`${API_BASE}/agent/settings`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ agentName }),
-      });
-    }
+      if (agentName) {
+        await authFetch(`${API_BASE}/agent/settings`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ agentName }),
+        });
+      }
 
-    setSavingAcct(false);
-    if (hasProfileChanges || agentName) toast.success('Account updated');
-    else toast.info('Nothing changed');
+      if (hasProfileChanges || agentName) toast.success('Account updated');
+      else toast.info('Nothing changed');
+    } catch {
+      toast.error('Network error — could not save account');
+    } finally {
+      setSavingAcct(false);
+    }
   };
 
   return (
