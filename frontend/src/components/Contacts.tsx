@@ -264,6 +264,22 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
     });
   }, [contacts, search]);
 
+  // All phone contacts visible across the kanban board (every group, current search) —
+  // what "Select All" should select, since `contacts` also holds email-only contacts
+  // and anything hidden by the active search term.
+  const visiblePhoneContacts = useMemo(() => {
+    const q = search.toLowerCase();
+    return contacts.filter(c => {
+      if (!c.phone) return false;
+      if (!q) return true;
+      return (
+        `${c.firstName} ${c.lastName}`.toLowerCase().includes(q) ||
+        (c.phone || '').includes(q) ||
+        (c.address || '').toLowerCase().includes(q)
+      );
+    });
+  }, [contacts, search]);
+
   // Email contacts — shown in dedicated section; includes any contact with an email address
   const gmailContactsList = useMemo(() => {
     const q = search.toLowerCase();
@@ -548,16 +564,16 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
         {selectMode && (
           <button
             onClick={() => {
-              if (selectedIds.size === contacts.length) {
+              if (selectedIds.size === visiblePhoneContacts.length) {
                 setSelectedIds(new Set());
               } else {
-                setSelectedIds(new Set(contacts.map(c => c.id)));
+                setSelectedIds(new Set(visiblePhoneContacts.map(c => c.id)));
               }
             }}
             className="hidden md:block"
             style={{ padding: '6px 12px', borderRadius: 7, fontSize: 11, fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', cursor: 'pointer', whiteSpace: 'nowrap', border: `1.5px solid ${GOLD}`, background: GOLD, color: '#fff' }}
           >
-            {selectedIds.size === contacts.length ? 'Deselect All' : 'Select All'}
+            {selectedIds.size === visiblePhoneContacts.length ? 'Deselect All' : 'Select All'}
           </button>
         )}
       </div>
@@ -1218,15 +1234,15 @@ export default function Contacts({ onNavigate, sharedVcfText }: ContactsProps) {
             </span>
             <button
               onClick={() => {
-                if (selectedIds.size === contacts.length) {
+                if (selectedIds.size === mobileCards.length) {
                   setSelectedIds(new Set());
                 } else {
-                  setSelectedIds(new Set(contacts.map(c => c.id)));
+                  setSelectedIds(new Set(mobileCards.map(c => c.id)));
                 }
               }}
               style={{ fontSize: 11, color: '#e5e7eb', background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap', padding: '4px 10px', fontWeight: 600 }}
             >
-              {selectedIds.size === contacts.length ? 'Deselect all' : 'Select all'}
+              {selectedIds.size === mobileCards.length ? 'Deselect all' : 'Select all'}
             </button>
           </div>
 

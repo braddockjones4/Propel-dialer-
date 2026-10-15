@@ -108,9 +108,14 @@ In Twilio → TwiML Apps → your app:
 
 ## First Login
 
-1. Open your Vercel URL
-2. Click **Create Account** — first account is auto-admin
-3. Start dialing
+Propel is invite-only — the Sign In page no longer has a self-serve "Create Account" option, and new accounts don't get admin automatically.
+
+1. On Render, temporarily set `ALLOW_SIGNUP=true` and redeploy
+2. Call `POST /api/auth/register` (e.g. via curl or a REST client) to create your account
+3. Set `ALLOW_SIGNUP` back to `false` (or remove it) and redeploy
+4. Sign in on your Vercel URL and start dialing
+
+New users after that sign up via the inquiry form on the landing page; you set up their account manually.
 
 ---
 

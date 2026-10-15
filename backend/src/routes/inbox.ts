@@ -93,6 +93,15 @@ router.post('/:contactId/reply', async (req: Request, res: Response) => {
 
 // POST /api/twilio/sms-inbound — Twilio webhook for incoming SMS
 export async function handleInboundSms(req: Request, res: Response) {
+  try {
+    await handleInboundSmsInner(req, res);
+  } catch (e: any) {
+    console.error('[inbox] handleInboundSms:', e.message);
+    res.type('text/xml').send('<Response/>');
+  }
+}
+
+async function handleInboundSmsInner(req: Request, res: Response) {
   const { From, To, Body, MessageSid } = req.body;
   console.log(`[SMS] Inbound from ${From}: ${Body}`);
 
