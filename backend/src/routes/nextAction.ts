@@ -179,13 +179,14 @@ router.post('/:contactId/execute', async (req: Request, res: Response) => {
     switch (action) {
       case 'send-sms': {
         if (!message) { res.status(400).json({ error: 'message required for send-sms' }); return; }
+        if (!contact.phone) { res.status(400).json({ error: 'Contact has no phone number' }); return; }
         if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID) {
           res.status(500).json({ error: 'Twilio not configured' }); return;
         }
         const client = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-        await client.messages.create({ to: contact.phone!, from: TWILIO_CALLER_ID, body: message });
+        await client.messages.create({ to: contact.phone, from: TWILIO_CALLER_ID, body: message });
         await prisma.message.create({
-          data: { contactId, direction: 'outbound', body: message, fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone! },
+          data: { contactId, direction: 'outbound', body: message, fromNumber: TWILIO_CALLER_ID, toNumber: contact.phone },
         });
         res.json({ executed: true, action });
         break;
