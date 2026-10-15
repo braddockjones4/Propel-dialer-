@@ -42,8 +42,9 @@ router.post('/start', async (req: Request, res: Response) => {
 
   if (!script?.trim()) { res.status(400).json({ error: 'script required' }); return; }
 
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID, NGROK_URL } = process.env;
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID || !NGROK_URL) {
+  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_ID } = process.env;
+  const baseUrl = process.env.BACKEND_URL || process.env.NGROK_URL;
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_CALLER_ID || !baseUrl) {
     res.status(500).json({ error: 'Twilio not configured' }); return;
   }
 
@@ -99,11 +100,11 @@ router.post('/start', async (req: Request, res: Response) => {
         to:   contact.phone!,
         from: callerId,
         // On answer: immediately hang up if human, drop VM if machine
-        url:    `${NGROK_URL}/api/voicemail-blast/twiml?human=${humanTwiml}`,
+        url:    `${baseUrl}/api/voicemail-blast/twiml?human=${humanTwiml}`,
         machineDetection:           'DetectMessageEnd',
-        asyncAmdStatusCallback:       `${NGROK_URL}/api/voicemail-blast/amd?blastId=${blastId}&script=${encodeURIComponent(script)}`,
+        asyncAmdStatusCallback:       `${baseUrl}/api/voicemail-blast/amd?blastId=${blastId}&script=${encodeURIComponent(script)}`,
         asyncAmdStatusCallbackMethod: 'POST',
-        statusCallback:       `${NGROK_URL}/api/voicemail-blast/status?blastId=${blastId}`,
+        statusCallback:       `${baseUrl}/api/voicemail-blast/status?blastId=${blastId}`,
         statusCallbackMethod: 'POST',
         statusCallbackEvent:  ['completed'],
         timeout: 25,
