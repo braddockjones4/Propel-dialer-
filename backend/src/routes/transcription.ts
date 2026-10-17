@@ -138,8 +138,8 @@ export async function transcribeAndScoreCall(callId: string): Promise<void> {
 // ── GET /api/transcription/:callId ────────────────────────────────────────────
 router.get('/:callId', async (req: Request, res: Response) => {
   try {
-    const call = await prisma.call.findUnique({
-      where:   { id: req.params.callId },
+    const call = await prisma.call.findFirst({
+      where:   { id: req.params.callId, contact: { userId: (req as any).user?.id } },
       select:  { id: true, transcript: true, aiScore: true, aiNotes: true, recordingUrl: true, calledAt: true },
     });
     if (!call) { res.status(404).json({ error: 'Not found' }); return; }
@@ -151,8 +151,8 @@ router.get('/:callId', async (req: Request, res: Response) => {
 
 // ── POST /api/transcription/:callId — trigger manually ───────────────────────
 router.post('/:callId', async (req: Request, res: Response) => {
-  const call = await prisma.call.findUnique({
-    where: { id: req.params.callId },
+  const call = await prisma.call.findFirst({
+    where: { id: req.params.callId, contact: { userId: (req as any).user?.id } },
     include: { contact: true },
   });
   if (!call) { res.status(404).json({ error: 'Not found' }); return; }
@@ -164,10 +164,10 @@ router.post('/:callId', async (req: Request, res: Response) => {
 });
 
 // ── POST /api/transcription/score-all — backfill existing recordings ──────────
-router.post('/score-all', async (_req: Request, res: Response) => {
+router.post('/score-all', async (req: Request, res: Response) => {
   try {
     const calls = await prisma.call.findMany({
-      where: { recordingUrl: { not: null }, transcript: null },
+      where: { recordingUrl: { not: null }, transcript: null, contact: { userId: (req as any).user?.id } },
       take:  20,
     });
     res.json({ queued: calls.length });
