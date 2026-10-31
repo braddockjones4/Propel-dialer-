@@ -54,6 +54,13 @@ Add all of these in the Render dashboard under **Environment**:
 | `SENDGRID_API_KEY` | From SendGrid |
 | `SENDGRID_FROM_EMAIL` | `braddockjones4@icloud.com` |
 | `NODE_ENV` | `production` |
+| `BACKEND_URL` | Your Render backend URL (used to build Twilio webhook URLs) |
+| `ENCRYPTION_KEY` | Any 32-char random string — encrypts stored iCloud credentials. Falls back to an insecure built-in key if unset. |
+| `GOOGLE_CLIENT_ID` | From Google Cloud Console (Gmail blast / contacts import) |
+| `GOOGLE_CLIENT_SECRET` | From Google Cloud Console (Gmail blast / contacts import) |
+| `INQUIRY_TO_EMAIL` | Where landing-page inquiry form submissions are emailed (defaults to `braddockjones4@icloud.com`) |
+| `ALLOW_SIGNUP` / `ALLOW_DEMO` | Optional flags gating self-serve signup / demo mode |
+| `TWILIO_SKIP_SIGNATURE` | Emergency off-switch for Twilio webhook signature checks (skipped outside production regardless) — leave unset |
 
 ### Deploy
 Click **Deploy**. Render runs:
@@ -109,7 +116,7 @@ In Twilio → TwiML Apps → your app:
 ## First Login
 
 1. Open your Vercel URL
-2. Click **Create Account** — first account is auto-admin
+2. Sign-up is invite-only — submit the landing page inquiry form and create the account directly in the database (or via the API), then sign in
 3. Start dialing
 
 ---
