@@ -86,12 +86,18 @@ export async function fireScheduledBlast(blastId: string): Promise<void> {
 
 // ─── Cron: check every minute for blasts that are due ────────────────────────
 cron.schedule('* * * * *', async () => {
-  const due = await prisma.scheduledBlast.findMany({
-    where: {
-      status:      'pending',
-      scheduledAt: { lte: new Date() },
-    },
-  });
+  let due: Awaited<ReturnType<typeof prisma.scheduledBlast.findMany>>;
+  try {
+    due = await prisma.scheduledBlast.findMany({
+      where: {
+        status:      'pending',
+        scheduledAt: { lte: new Date() },
+      },
+    });
+  } catch (e: any) {
+    console.error('[ScheduledBlast] Error checking for due blasts:', e.message);
+    return;
+  }
 
   for (const blast of due) {
     console.log(`[ScheduledBlast] Firing scheduled blast ${blast.id}`);
