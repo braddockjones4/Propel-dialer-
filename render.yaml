@@ -38,7 +38,7 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: AGENT_MODEL
+      - key: ANTHROPIC_MODEL
         sync: false
       # Stripe removed — per-client custom deployment, no SaaS billing
       - key: SENDGRID_API_KEY
