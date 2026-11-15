@@ -38,8 +38,8 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      - key: AGENT_MODEL
-        sync: false
+      - key: ANTHROPIC_MODEL
+        sync: false          # backend/src/routes/agentChat.ts reads ANTHROPIC_MODEL, not AGENT_MODEL
       # Stripe removed — per-client custom deployment, no SaaS billing
       - key: SENDGRID_API_KEY
         sync: false
@@ -47,6 +47,8 @@ services:
         sync: false
       - key: BACKEND_URL
         sync: false          # e.g. https://propel-dialer-backend.onrender.com — used for Twilio webhooks
+      - key: NGROK_URL
+        sync: false          # fallback for BACKEND_URL; required (no fallback) by blast.ts's SMS status callback
       - key: ENCRYPTION_KEY
         generateValue: true  # C4: AES-256 key for iCloud credential encryption — auto-generated
       - key: GOOGLE_CLIENT_ID

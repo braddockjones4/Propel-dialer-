@@ -35,9 +35,7 @@ export default function Login({ onBack }: Props) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, newPassword: password }),
         }).then(x => x.json());
-        if (r.error) { setError(r.error); setLoading(false); return; }
-        localStorage.setItem('propel_token', r.token);
-        window.location.reload();
+        setSuccess(r.message || 'If an account exists for that email, we just sent it a password reset link.');
       } catch { setError('Something went wrong. Try again.'); }
       setLoading(false); return;
     }
