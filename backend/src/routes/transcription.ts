@@ -151,16 +151,20 @@ router.get('/:callId', async (req: Request, res: Response) => {
 
 // ── POST /api/transcription/:callId — trigger manually ───────────────────────
 router.post('/:callId', async (req: Request, res: Response) => {
-  const call = await prisma.call.findUnique({
-    where: { id: req.params.callId },
-    include: { contact: true },
-  });
-  if (!call) { res.status(404).json({ error: 'Not found' }); return; }
-  if (!call.recordingUrl) { res.status(400).json({ error: 'No recording on this call' }); return; }
+  try {
+    const call = await prisma.call.findUnique({
+      where: { id: req.params.callId },
+      include: { contact: true },
+    });
+    if (!call) { res.status(404).json({ error: 'Not found' }); return; }
+    if (!call.recordingUrl) { res.status(400).json({ error: 'No recording on this call' }); return; }
 
-  // Run async — don't block response
-  transcribeAndScoreCall(call.id).catch(console.error);
-  res.json({ started: true, callId: call.id });
+    // Run async — don't block response
+    transcribeAndScoreCall(call.id).catch(console.error);
+    res.json({ started: true, callId: call.id });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── POST /api/transcription/score-all — backfill existing recordings ──────────
